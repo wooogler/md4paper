@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# uv — uv.lock은 커밋한다(애플리케이션이므로 재현 가능한 설치를 위해 버전 관리 대상)
+
+# md4paper 작업 디렉토리 (PDF 옆에 생성)
+*.md4/
+
+# 업로드 파일·변환 결과 (기본 작업 폴더)
+output/
+
+# 로컬 설정/키 (절대 커밋 금지)
+config.toml
+
+# OS
+.DS_Store

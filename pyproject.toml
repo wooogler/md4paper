@@ -1,0 +1,52 @@
+[project]
+name = "md4paper"
+version = "0.1.0"
+description = "논문 PDF를 헤더 정렬 마크다운 + 한국어 번역 마크다운으로 변환하는 CLI"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "click>=8.4",
+    "pydantic>=2.6",
+    "ruamel.yaml>=0.18",
+    "markdown-it-py>=3.0",
+    "httpx>=0.27",
+    # pymupdf(AGPL): PDF 뷰어 렌더 + 깨진 글자 복구(text_clean)에만 사용
+    "pymupdf>=1.24",
+    # PDF 추출 백엔드 — docling(MIT). torch 등 무거운 스택을 동반하지만 단일 백엔드로 유지.
+    "docling>=2.114",
+    # opencv 상한 고정: docling의 rapidocr가 opencv-python(상한 없음)을 요구해 깨진 5.0.0.93이
+    # 뽑히면 'cv2 has no attribute setNumThreads'로 변환이 실패한다. 정상 바이너리가 있는 4.x로 제한.
+    "opencv-python>=4.6,<5",
+    # LLM SDKs — 순수 HTTP 클라이언트라 가벼움 (translate/cite에서 사용)
+    "openai>=2.0",
+    "anthropic>=0.40",
+    "google-genai>=1.0",
+]
+
+[project.optional-dependencies]
+# 로컬 웹 UI (latex2mathml: ui.markdown의 latex 수식 렌더)
+ui = ["nicegui>=3.14", "watchfiles>=0.21", "latex2mathml>=3.77"]
+# 참고문헌 enrichment
+enrich = ["httpx>=0.27"]
+
+[project.scripts]
+md4paper = "md4paper.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/md4paper"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
