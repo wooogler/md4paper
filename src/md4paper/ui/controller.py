@@ -411,12 +411,12 @@ class UIController:
         if not pdf:
             return 0
         try:
-            import fitz
+            import pypdfium2 as pdfium
         except ImportError:
             return 0
-        doc = fitz.open(pdf)
+        doc = pdfium.PdfDocument(pdf)
         try:
-            return doc.page_count
+            return len(doc)
         finally:
             doc.close()
 
@@ -426,15 +426,19 @@ class UIController:
         if not pdf:
             return None
         try:
-            import fitz
+            import io
+
+            import pypdfium2 as pdfium
         except ImportError:
             return None
-        doc = fitz.open(pdf)
+        doc = pdfium.PdfDocument(pdf)
         try:
-            if not (0 <= page < doc.page_count):
+            if not (0 <= page < len(doc)):
                 return None
-            pix = doc[page].get_pixmap(matrix=fitz.Matrix(zoom, zoom))
-            return pix.tobytes("png")
+            # scale=zoom → 72dpi 기준 배율 (zoom=2.0이면 144dpi)
+            buf = io.BytesIO()
+            doc[page].render(scale=zoom).to_pil().save(buf, format="PNG")
+            return buf.getvalue()
         finally:
             doc.close()
 

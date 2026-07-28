@@ -544,10 +544,13 @@ def align_rows(en: str, ko: str) -> list[tuple[str, str, tuple[int, str] | None]
 def _pdf_page_count(data: bytes) -> int:
     """업로드 바이트에서 PDF 페이지 수 (진행바 추정용). 실패 시 0."""
     try:
-        import fitz
+        import pypdfium2 as pdfium
 
-        with fitz.open(stream=data, filetype="pdf") as doc:
-            return doc.page_count
+        doc = pdfium.PdfDocument(data)
+        try:
+            return len(doc)
+        finally:
+            doc.close()
     except Exception:  # noqa: BLE001
         return 0
 

@@ -4,15 +4,16 @@ version = "0.1.0"
 description = "논문 PDF를 헤더 정렬 마크다운 + 한국어 번역 마크다운으로 변환하는 CLI"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 dependencies = [
     "click>=8.4",
     "pydantic>=2.6",
     "ruamel.yaml>=0.18",
     "markdown-it-py>=3.0",
     "httpx>=0.27",
-    # pymupdf(AGPL): PDF 뷰어 렌더 + 깨진 글자 복구(text_clean)에만 사용
-    "pymupdf>=1.24",
+    # PDF 페이지 렌더(웹 UI 대조 뷰)·페이지 수·텍스트 레이어 판독. docling도 쓰는 PDFium 바인딩이라
+    # 추가 설치 부담이 없고, PyMuPDF(AGPL)와 달리 BSD-3/Apache-2.0이라 라이선스 제약이 없다.
+    "pypdfium2>=4",
     # PDF 추출 백엔드 — docling(MIT). torch 등 무거운 스택을 동반하지만 단일 백엔드로 유지.
     "docling>=2.114",
     # opencv 상한 고정: docling의 rapidocr가 opencv-python(상한 없음)을 요구해 깨진 5.0.0.93이

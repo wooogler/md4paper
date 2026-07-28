@@ -58,22 +58,24 @@ def _norm_for_match(s: str) -> str:
 
 
 def repair_garbled_from_pdf(md: str, pdf: Path, anchor: int = 18) -> tuple[str, int]:
-    """U+FFFD로 깨진 글자를 PDF 텍스트 레이어(pymupdf)에서 찾아 복구. 안전망.
+    """U+FFFD로 깨진 글자를 PDF 텍스트 레이어(pypdfium2)에서 찾아 복구. 안전망.
 
     반환: (복구된 텍스트, 복구 개수)
     """
     if "�" not in md:
         return md, 0
     try:
-        import fitz
+        import pypdfium2 as pdfium
     except ImportError:
         return md, 0
     try:
-        doc = fitz.open(pdf)
+        doc = pdfium.PdfDocument(pdf)
     except Exception:  # noqa: BLE001
         return md, 0
     try:
-        pdf_norm = _norm_for_match(" ".join(doc[p].get_text("text") for p in range(doc.page_count)))
+        pdf_norm = _norm_for_match(
+            " ".join(doc[p].get_textpage().get_text_range() for p in range(len(doc)))
+        )
     finally:
         doc.close()
 
@@ -96,15 +98,15 @@ def repair_garbled_from_pdf(md: str, pdf: Path, anchor: int = 18) -> tuple[str, 
 
 
 def sniff_text_coverage(pdf: Path) -> float:
-    """텍스트 레이어가 있는 페이지 비율 (born-digital 판별). pymupdf 없으면 -1."""
+    """텍스트 레이어가 있는 페이지 비율 (born-digital 판별). pypdfium2 없으면 -1."""
     try:
-        import fitz
+        import pypdfium2 as pdfium
     except ImportError:
         return -1.0
-    doc = fitz.open(pdf)
+    doc = pdfium.PdfDocument(pdf)
     try:
-        pages = doc.page_count or 1
-        return sum(1 for pg in doc if pg.get_text("text").strip()) / pages
+        pages = len(doc) or 1
+        return sum(1 for pg in doc if pg.get_textpage().get_text_range().strip()) / pages
     finally:
         doc.close()
 

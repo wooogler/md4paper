@@ -19,7 +19,7 @@ def run_checks() -> list[tuple[str, bool, str, bool]]:
     py_ok = sys.version_info >= (3, 11)
     checks.append(_check("Python >= 3.11", py_ok, sys.version.split()[0]))
 
-    for mod in ("click", "pydantic", "ruamel.yaml", "markdown_it", "fitz"):
+    for mod in ("click", "pydantic", "ruamel.yaml", "markdown_it", "pypdfium2"):
         spec = importlib.util.find_spec(mod)
         checks.append(_check(f"모듈 {mod}", spec is not None, "" if spec else "미설치"))
 
