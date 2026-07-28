@@ -188,9 +188,47 @@ class UIController:
         old_block = _render_authors_detail(entries, old_parts)
         if old_block and old_block in raw:
             new_block = _render_authors_detail(entries, new_parts)
-            self.wd.raw_md.write_text(raw.replace(old_block, new_block, 1), encoding="utf-8")
+            at = raw.index(old_block)
+            new_raw = raw.replace(old_block, new_block, 1)
+            self.wd.raw_md.write_text(new_raw, encoding="utf-8")
+            delta = new_block.count("\n") - old_block.count("\n")
+            if delta:
+                self._shift_line_anchors(raw.count("\n", 0, at), delta, new_raw)
             return True
         return False  # 원본 블록을 못 찾음(수동 편집 등) → 매니페스트만 갱신
+
+    def _shift_line_anchors(self, after_line: int, delta: int, new_raw: str) -> None:
+        """raw.md 줄 수가 바뀌었으니 라인 앵커(매니페스트·blocks.json)를 함께 민다.
+
+        렌더러는 raw.md의 **절대 줄 번호**로 섹션을 찾는다(render_markdown의 by_line).
+        안 밀면 헤더가 엉뚱한 줄에 붙어, 원본 헤더는 그대로 남고 매니페스트 헤더가 따로 찍혀
+        문서 전체가 중복·뒤섞인다(이메일 표기를 끄면 저자당 한 줄씩 줄어 실제로 발생했다).
+        """
+        from md4paper.workdir import hash_text
+
+        for s in self.manifest.sections:
+            if s.line > after_line:
+                s.line += delta
+        if not self.wd.blocks_json.exists():
+            return
+        try:
+            blocks = json.loads(self.wd.blocks_json.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return  # 앵커 파일이 깨졌으면 건드리지 않는다 (재변환이 정답)
+        for item in blocks.get("headings", []):
+            if isinstance(item.get("line"), int) and item["line"] > after_line:
+                item["line"] += delta
+        for item in blocks.get("figures", []):
+            for field in ("image_line", "caption_line"):
+                if isinstance(item.get(field), int) and item[field] > after_line:
+                    item[field] += delta
+            item["consumed_lines"] = [
+                ln + delta if ln > after_line else ln for ln in item.get("consumed_lines", [])
+            ]
+        blocks["n_lines"] = len(new_raw.splitlines())
+        blocks["raw_md_hash"] = hash_text(new_raw)
+        self.wd.blocks_json.write_text(
+            json.dumps(blocks, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # --- 저장 / 렌더 ---
     def save(self) -> tuple[int, int]:

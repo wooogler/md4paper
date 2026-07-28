@@ -490,3 +490,29 @@ def test_cli_convert_runs_frontmatter_stage(tmp_path, monkeypatch):
     assert "frontmatter" in wd.load_status()  # 단계가 실제로 돌았다
     raw = wd.raw_md.read_text(encoding="utf-8")
     assert "## [Andrew Jelson]" not in raw  # 저자 줄이 헤더로 남지 않는다
+
+
+def test_manifest_persists_author_parts(tmp_path):
+    """저자 표기(author_parts)는 매니페스트에 저장·복원된다.
+
+    저장 안 하면 다시 열 때 config 기본값으로 되돌아가, UI 체크박스와 실제 raw.md 저자 블록이
+    어긋난다(그 상태에서 토글하면 옛 블록을 못 찾아 조용히 무시됨).
+    """
+    from md4paper.ir import Flavor, Manifest
+
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.structure.mkdir(parents=True)
+    m = Manifest(title="T", flavor=Flavor.STANDARD, author_parts=["affiliation"], sections=[])
+    manifest_io.save(m, wd)
+
+    assert "author_parts" in wd.sections_yaml.read_text(encoding="utf-8")
+    assert manifest_io.load(wd).author_parts == ["affiliation"]
+
+
+def test_manifest_without_author_parts_falls_back_to_config(tmp_path):
+    """옛 매니페스트(키 없음)는 config 기본값(이메일+소속)을 따른다."""
+    wd = WorkDir(tmp_path / "old.md4")
+    wd.structure.mkdir(parents=True)
+    wd.sections_yaml.write_text("title: T\ncitation_parts:\n- number\nsections: []\n", encoding="utf-8")
+
+    assert manifest_io.load(wd).author_parts == ["email", "affiliation"]

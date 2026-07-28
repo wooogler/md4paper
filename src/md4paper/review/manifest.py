@@ -39,6 +39,9 @@ def to_yaml(manifest: Manifest) -> str:
     root = CommentedMap()
     root["title"] = manifest.title
     root["citation_parts"] = list(manifest.citation_parts)
+    # 저자 표기 — 저장 안 하면 다시 열 때 config 기본값으로 되돌아가, UI 체크박스와 실제
+    # raw.md 저자 블록이 어긋난다(그 상태에서 토글하면 옛 블록을 못 찾아 조용히 무시된다).
+    root["author_parts"] = list(manifest.author_parts)
     root["reference_links"] = manifest.reference_links
     root["flavor"] = manifest.flavor.value
     root["caption_style"] = manifest.caption_style
@@ -139,9 +142,20 @@ def load(wd: WorkDir) -> Manifest:
     else:
         parts = ["number"]
 
+    # 저자 표기 — 옛 매니페스트(키 없음)는 config 기본값을 따른다.
+    if isinstance(data.get("author_parts"), list):
+        from md4paper.config import _AUTHOR_PARTS
+
+        author_parts = [str(p) for p in data["author_parts"] if str(p) in _AUTHOR_PARTS]
+    else:
+        from md4paper.config import resolve_author_parts
+
+        author_parts = resolve_author_parts()
+
     return Manifest(
         title=str(data.get("title", "")),
         citation_parts=parts,
+        author_parts=author_parts,
         reference_links=bool(data.get("reference_links", True)),
         flavor=Flavor(data.get("flavor", "standard")),
         caption_style=data.get("caption_style", "bold-italic"),

@@ -455,3 +455,45 @@ def test_universal_export_zip_keeps_images_folder(ctrl):
     stem = ctrl.wd.root.stem
     assert f"{stem}-en/{stem}.en.md" in names  # 종전 구조 유지
     assert any(n.startswith(f"{stem}-en/images/") for n in names)
+
+
+def test_set_author_parts_shifts_line_anchors(tmp_path):
+    """이메일 표기를 끄면 raw.md 줄 수가 줄어드니 라인 앵커도 함께 밀려야 한다.
+
+    렌더러는 raw.md의 절대 줄 번호로 섹션을 찾으므로, 안 밀면 헤더가 엉뚱한 줄에 붙어
+    원본 헤더는 남고 매니페스트 헤더가 또 찍혀 문서가 통째로 중복된다(실측).
+    """
+    import json
+
+    from md4paper import pipeline
+    from md4paper.extract.front_matter import _render_authors_detail
+    from md4paper.ir import AuthorEntry
+    from md4paper.ui.controller import UIController
+    from md4paper.workdir import WorkDir
+
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.extract.mkdir(parents=True)
+    authors = [
+        AuthorEntry(name="A One", emails=["a@x.edu"], affiliations=["X Lab"]),
+        AuthorEntry(name="B Two", emails=["b@y.edu"], affiliations=["Y Lab"]),
+    ]
+    block = _render_authors_detail(authors, ["email", "affiliation"])
+    wd.raw_md.write_text(
+        f"## Paper Title\n\n{block}\n\n## Abstract\n\nAbstract body.\n\n"
+        "## 1 Introduction\n\nIntro body.\n",
+        encoding="utf-8",
+    )
+    wd.authors_json.write_text(
+        json.dumps([a.model_dump() for a in authors], ensure_ascii=False), encoding="utf-8")
+    pipeline.run_structure(wd)
+
+    ctrl = UIController(wd)
+    assert ctrl.set_author_parts(["affiliation"]) is True  # 이메일 끄기 → 2줄 줄어듦
+    ctrl.save_and_reassemble()
+
+    en = wd.en_md.read_text(encoding="utf-8")
+    assert "a@x.edu" not in en                       # 이메일이 실제로 빠졌고
+    heads = [ln for ln in en.splitlines() if ln.startswith("#")]
+    assert len(heads) == len(set(heads)), f"헤더가 중복됐다: {heads}"
+    assert sum(1 for h in heads if h.endswith("Abstract")) == 1
+    assert sum(1 for h in heads if h.endswith("1 Introduction")) == 1
