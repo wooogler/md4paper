@@ -167,6 +167,17 @@ def convert(
     if meta.get("images") == 0:
         click.echo(click.style("참고: 추출된 그림이 없습니다.", fg="yellow"))
 
+    # 앞부분(저자·소속·저작권) 정규화 — 웹 UI(pipeline.convert)와 같은 단계.
+    # 키가 있으면 LLM 라벨+재조립, 없으면 규칙 폴백. 빠뜨리면 저자 줄이 원문 그대로 뭉쳐 나온다.
+    fm_provider = None
+    try:
+        fm_provider = config.build_provider()
+    except RuntimeError:
+        click.echo(click.style("참고: LLM 키 없음 — 저자 정리는 규칙 기반으로만 합니다.", fg="yellow"))
+    fm = pipeline.run_frontmatter(wd, provider=fm_provider)
+    if fm.get("changed"):
+        click.echo("앞부분(저자·서지) 정리 완료")
+
     manifest = pipeline.run_structure(wd, flavor=Flavor.STANDARD)
     click.echo(f"헤더 {len(manifest.sections)}개 감지 → {wd.sections_yaml}")
     n_review = sum(1 for s in manifest.sections if s.needs_review)

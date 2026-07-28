@@ -13,6 +13,18 @@ import pytest  # noqa: E402 — env 설정 후 임포트해야 함
 
 
 @pytest.fixture(autouse=True)
+def _no_real_api_keys(monkeypatch):
+    """개발자 환경의 실제 API 키가 테스트로 새지 않게 env를 비운다.
+
+    config.resolve_key()는 env를 먼저 보므로, 이걸 안 지우면 CLI/파이프라인 테스트가
+    진짜 LLM을 호출해 요금이 나갈 수 있다. 키가 필요한 테스트는 monkeypatch.setenv로
+    직접 넣으면 된다(픽스처보다 나중에 실행되므로 덮어써진다).
+    """
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _clean_heading_prefs():
     """헤더 선택 학습은 전역 파일에 쌓이므로 테스트마다 비운다.
 

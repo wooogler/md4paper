@@ -186,10 +186,26 @@ indices. If unsure whether a block is an author or boilerplate, and it contains 
 author."""
 
 
+def _layout_max_tokens(n_front: int) -> int:
+    """출력 토큰 상한 자동 산정 — authors_detail(저자별 이름·이메일·소속)이 출력 대부분을 차지한다.
+
+    1024 고정이면 저자가 많은 논문(8명 이상)에서 JSON이 중간에 잘리고, 파싱 실패는
+    조용한 규칙 폴백으로 이어져 저자 줄이 원문 그대로 남는다. 앞부분 블록 수에 비례시킨다.
+    """
+    return min(8192, max(2048, n_front * 320))
+
+
+# 프롬프트에 넣을 블록당 최대 길이. 2단 조판 논문은 저자 여러 명이 한 블록에 흘러 나오는데
+# (예: "A ∗ Google llion@… B ∗ Google nikip@… C ∗ …"), 여기서 자르면 뒤쪽 저자가 LLM에
+# 아예 보이지 않아 조용히 누락되고 이메일도 중간에 잘린다. 앞부분 블록은 원래 짧아 비용 영향은 작다.
+_BLOCK_CHARS = 800
+
+
 def _llm_layout(provider: Provider, blocks: list[str], n_front: int) -> FrontMatterLayout:
-    numbered = "\n".join(f"[{i}] {blocks[i].strip()[:200]}" for i in range(n_front))
+    numbered = "\n".join(f"[{i}] {blocks[i].strip()[:_BLOCK_CHARS]}" for i in range(n_front))
     user = f"{numbered}\n\n(There are {n_front} leading blocks, indices 0..{n_front - 1}.)"
-    return provider.parse(_SYSTEM, user, FrontMatterLayout, max_tokens=1024)
+    return provider.parse(_SYSTEM, user, FrontMatterLayout,
+                          max_tokens=_layout_max_tokens(n_front))
 
 
 def _alnum(s: str) -> str:
@@ -270,7 +286,10 @@ def _is_figure_block(block: str) -> bool:
 def _build_llm(provider: Provider, md: str, parts: list[str] | None) -> tuple[str, list[AuthorEntry]] | None:
     """LLM 라벨 → 코드 재조립. (정규화 md, 검증된 구조화 저자) 반환. 검증 실패 시 None."""
     blocks = _split_blocks(md)
-    if not blocks or not _heading(blocks[0]):
+    # 제목이 첫 블록이 아닐 수 있다 — 저작권 고지·arXiv 스탬프·학회 배너가 제목 앞에 오는 논문이 흔하다.
+    # (blocks[0]만 검사하면 그런 논문에서 LLM 경로가 통째로 건너뛰어져 저자 줄이 원문 그대로 남는다.)
+    # LLM이 title 인덱스를 짚어주므로, 앞부분 어딘가에 헤더가 하나라도 있으면 진행한다.
+    if not blocks or not any(_heading(b) for b in blocks[:_MAX_FRONT]):
         return None
     # LLM에 보낼 앞부분 범위 (본문 시작 추정 + 여유, 상한 캡)
     approx = _find_body_start(blocks) or _MAX_FRONT

@@ -64,20 +64,12 @@ def repair_garbled_from_pdf(md: str, pdf: Path, anchor: int = 18) -> tuple[str, 
     """
     if "�" not in md:
         return md, 0
+    from md4paper import pdfio
+
     try:
-        import pypdfium2 as pdfium
-    except ImportError:
+        pdf_norm = _norm_for_match(pdfio.full_text(pdf))
+    except Exception:  # noqa: BLE001 — 손상 PDF·pypdfium2 미설치 등
         return md, 0
-    try:
-        doc = pdfium.PdfDocument(pdf)
-    except Exception:  # noqa: BLE001
-        return md, 0
-    try:
-        pdf_norm = _norm_for_match(
-            " ".join(doc[p].get_textpage().get_text_range() for p in range(len(doc)))
-        )
-    finally:
-        doc.close()
 
     out: list[str] = []
     pos = fixed = 0
@@ -99,16 +91,12 @@ def repair_garbled_from_pdf(md: str, pdf: Path, anchor: int = 18) -> tuple[str, 
 
 def sniff_text_coverage(pdf: Path) -> float:
     """텍스트 레이어가 있는 페이지 비율 (born-digital 판별). pypdfium2 없으면 -1."""
+    from md4paper import pdfio
+
     try:
-        import pypdfium2 as pdfium
+        return pdfio.text_page_ratio(pdf)
     except ImportError:
         return -1.0
-    doc = pdfium.PdfDocument(pdf)
-    try:
-        pages = len(doc) or 1
-        return sum(1 for pg in doc if pg.get_textpage().get_text_range().strip()) / pages
-    finally:
-        doc.close()
 
 
 _IMG_REF_RE = re.compile(r"(!\[[^\]]*\]\()([^)]+)(\))")

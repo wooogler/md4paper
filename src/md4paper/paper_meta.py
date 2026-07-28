@@ -86,17 +86,11 @@ def _year_from_pdf_date(raw: str) -> int | None:
 
 def pdf_year(pdf_path: str) -> int | None:
     """PDF 내장 메타데이터의 생성/수정 연도 — front matter에 출판연도가 없을 때의 폴백."""
+    from md4paper import pdfio
+
     try:
-        import pypdfium2 as pdfium  # docling도 쓰는 PDFium 바인딩(BSD/Apache)
-    except ImportError:
-        return None
-    try:
-        doc = pdfium.PdfDocument(str(pdf_path))
-        try:
-            meta = doc.get_metadata_dict() or {}
-        finally:
-            doc.close()
-    except Exception:  # noqa: BLE001 — 손상 PDF 등
+        meta = pdfio.metadata(str(pdf_path))
+    except Exception:  # noqa: BLE001 — 손상 PDF·pypdfium2 미설치 등
         return None
     return _year_from_pdf_date(meta.get("CreationDate") or meta.get("ModDate") or "")
 

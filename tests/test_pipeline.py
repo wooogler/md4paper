@@ -461,3 +461,32 @@ def test_build_uses_llm_runin_decisions(tmp_path):
     by = {s.text: s for s in man.sections}
     assert by["The Test Set"].level == 3          # LLM: 진짜 소제목 → 승격
     assert by["Systematize Iteration"].level == "skip"  # LLM: 헤더 아님 → 본문
+
+
+def test_cli_convert_runs_frontmatter_stage(tmp_path, monkeypatch):
+    """CLI convert도 웹 UI(pipeline.convert)와 같은 앞부분 정규화 단계를 거친다.
+
+    예전엔 cli.convert가 extract→structure→assemble만 불러서 저자 줄이 원문 그대로
+    뭉쳐 나왔다(웹 UI 경로에만 run_frontmatter가 있었음).
+    """
+    from click.testing import CliRunner
+
+    from md4paper.cli import cli
+
+    src = tmp_path / "paper.md"
+    src.write_text(
+        "## Paper Title\n\n"
+        "## [Andrew Jelson](https://orcid.org/1)\n\n"
+        "CS Virginia Tech, USA jelson@vt.edu\n\n"
+        "## Abstract\n\nReal abstract body.\n\n"
+        "## 1 Introduction\n\nBody text.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    result = CliRunner().invoke(cli, ["convert", str(src)])
+    assert result.exit_code == 0, result.output
+
+    wd = WorkDir(tmp_path / "paper.md4")
+    assert "frontmatter" in wd.load_status()  # 단계가 실제로 돌았다
+    raw = wd.raw_md.read_text(encoding="utf-8")
+    assert "## [Andrew Jelson]" not in raw  # 저자 줄이 헤더로 남지 않는다

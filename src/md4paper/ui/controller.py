@@ -410,37 +410,21 @@ class UIController:
         pdf = self.source_pdf()
         if not pdf:
             return 0
-        try:
-            import pypdfium2 as pdfium
-        except ImportError:
-            return 0
-        doc = pdfium.PdfDocument(pdf)
-        try:
-            return len(doc)
-        finally:
-            doc.close()
+        from md4paper import pdfio
+
+        return pdfio.page_count(pdf)
 
     def pdf_page_png(self, page: int = 0, zoom: float = 1.5) -> bytes | None:
         """PDF 한 페이지를 PNG 바이트로 렌더 (원본 대조용). 없으면 None."""
         pdf = self.source_pdf()
         if not pdf:
             return None
-        try:
-            import io
+        from md4paper import pdfio
 
-            import pypdfium2 as pdfium
-        except ImportError:
-            return None
-        doc = pdfium.PdfDocument(pdf)
         try:
-            if not (0 <= page < len(doc)):
-                return None
-            # scale=zoom → 72dpi 기준 배율 (zoom=2.0이면 144dpi)
-            buf = io.BytesIO()
-            doc[page].render(scale=zoom).to_pil().save(buf, format="PNG")
-            return buf.getvalue()
-        finally:
-            doc.close()
+            return pdfio.render_page_png(pdf, page, zoom=zoom)
+        except Exception:  # noqa: BLE001 — 손상 PDF 등
+            return None
 
 
 def _ref_urls(wd: WorkDir) -> dict[str, str]:
