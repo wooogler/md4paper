@@ -398,6 +398,17 @@ PDF는 우리 것으로 덮어씀 + 빈 폴더 제거)한 뒤 원하는 이름�
 하나로 확정될 때만** 교체(머리말 반복처럼 후보가 여럿이어도 문자열이 같으면 안전) ④ 길이가 원본의 0.5~4배 밖이면 기각.
 못 고친 글자는 `garbled_chars`에 더해 홈 목록·CLI의 ⚠ 경고로 노출. 실측: 깨진 14줄 전부 복구, 남은 0자.
 
+### 서지 ③ 오래된 논문이 최근 연도로 나옴 (수정 완료)
+증상: 1986년 논문(Rouse & Morris)이 `2025_...`로 명명됨. venue도 빈 값.
+원인 2단: ① docling이 저널 머리말("Psychological Bulletin / 1986, Vol. 100 / Copyright 1986 by APA")을
+**통째로 버려서** `front_text()`에 연도가 없었다(frontmatter.txt도 빈 값) → LLM이 정직하게 year=None 반환.
+② 폴백 `pdf_year()`가 PDF 생성일을 썼는데, 이 PDF는 2025년에 다시 만든 재배포본(Producer: PDFlib+PDI)이라 2025.
+오래된 논문의 스캔·재배포본에서는 **생성일이 출판연도와 무관**하다.
+수정: ① `front_text()`가 `pdfio.first_page_text()`로 **PDF 1페이지 머리말을 앞에 붙인다**(추출기가 버려도
+텍스트 레이어에는 남아 있다 — 연도·venue의 가장 확실한 출처). ② `pdf_year()`는 1페이지의 저작권 연도
+(`Copyright 1986` / `© 1986`)를 먼저 보고, 없을 때만 생성일로 폴백.
+실측: year 2025→1986, venue ""→"Psychological Bulletin", 폴더 `1986_LookingBlackBox_Rouse`로 정리됨.
+
 ### 목록 정리 — 숨기기 vs 삭제 (구현 완료)
 '변환한 논문' 카드의 휴지통은 두 선택지를 준다: **목록에서 숨기기**(`status.json`의 `hidden` 플래그만 — 파일 무손실)와
 **파일 삭제**(기존 `delete_workdir`, 되돌릴 수 없음). 목록이 길어져 치우고 싶은 것과 진짜로 지우고 싶은 것은 다른 요구인데

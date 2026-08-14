@@ -58,6 +58,12 @@ def full_text(src) -> str:  # noqa: ANN001
         return " ".join(doc[p].get_textpage().get_text_range() for p in range(len(doc)))
 
 
+def first_page_text(src) -> str:  # noqa: ANN001
+    """1페이지 텍스트 (저널 머리말·저작권 줄 — 연도·venue의 가장 확실한 출처)."""
+    with open_document(src) as doc:
+        return doc[0].get_textpage().get_text_range() if len(doc) else ""
+
+
 def text_page_ratio(src) -> float:  # noqa: ANN001
     """텍스트 레이어가 있는 페이지 비율 (born-digital 판별)."""
     with open_document(src) as doc:

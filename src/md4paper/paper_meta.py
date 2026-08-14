@@ -28,9 +28,32 @@ Also return `short_title`: a compact CamelCase identifier for the paper's MAIN t
   Optimization of ..." → "ContinualHITLOptimization"."""
 
 
-def front_text(wd: WorkDir, cap: int = 4000) -> str:
-    """서지 추출 입력 — raw.md 앞부분(제목·저자·초록) + 걷어낸 저작권/venue 텍스트."""
+def _pdf_head(wd: WorkDir, limit: int = 700) -> str:
+    """원본 PDF 1페이지 맨 앞 텍스트 (pypdfium2). 없거나 실패하면 빈 문자열.
+
+    저널 머리말("Psychological Bulletin / 1986, Vol. 100 / Copyright 1986 by ...")은 연도·venue의
+    가장 확실한 출처인데 추출기가 통째로 버리는 일이 있다(1986년 논문이 2025년으로 나온 실사례).
+    PDF 텍스트 레이어에는 그대로 남아 있으므로 서지 추출 입력에 함께 넣는다.
+    """
+    if not wd.meta_json.exists():
+        return ""
+    try:
+        src = json.loads(wd.meta_json.read_text(encoding="utf-8")).get("source", "")
+        if not str(src).lower().endswith(".pdf"):
+            return ""
+        from md4paper import pdfio
+
+        return re.sub(r"[ \t]+", " ", pdfio.first_page_text(src)).strip()[:limit]
+    except Exception:  # noqa: BLE001 — 손상 PDF·pypdfium2 미설치 등
+        return ""
+
+
+def front_text(wd: WorkDir, cap: int = 4600) -> str:
+    """서지 추출 입력 — PDF 1페이지 머리말 + raw.md 앞부분(제목·저자·초록) + 걷어낸 저작권 텍스트."""
     parts: list[str] = []
+    head = _pdf_head(wd)
+    if head:
+        parts.append("[PDF PAGE 1 HEADER — journal name, volume, copyright year]\n" + head)
     if wd.raw_md.exists():
         parts.append(wd.raw_md.read_text(encoding="utf-8")[:2600])
     if wd.frontmatter_txt.exists():
@@ -84,13 +107,28 @@ def _year_from_pdf_date(raw: str) -> int | None:
     return y if 1990 <= y <= datetime.now().year + 1 else None
 
 
+# 1페이지의 저작권 표기 — "Copyright 1986 by ...", "© 2024" 등 (출판연도의 강한 단서)
+_COPYRIGHT_YEAR_RE = re.compile(r"(?:©|\(c\)|copyright)\s*(?:by\s+)?((?:19|20)\d{2})", re.I)
+
+
 def pdf_year(pdf_path: str) -> int | None:
-    """PDF 내장 메타데이터의 생성/수정 연도 — front matter에 출판연도가 없을 때의 폴백."""
+    """front matter에 출판연도가 없을 때의 폴백 — 1페이지 저작권 연도 > PDF 생성 연도.
+
+    오래된 논문을 최근에 다시 만든 PDF(스캔·재배포본)는 **생성 연도가 출판 연도와 무관하다**
+    — 1986년 논문이 2025년으로 나온 실사례가 있었다. 1페이지의 'Copyright 1986' 쪽이
+    훨씬 믿을 만하므로 먼저 본다.
+    """
     from md4paper import pdfio
 
     try:
-        meta = pdfio.metadata(str(pdf_path))
+        m = _COPYRIGHT_YEAR_RE.search(pdfio.first_page_text(str(pdf_path)))
+        if m:
+            return int(m.group(1))
     except Exception:  # noqa: BLE001 — 손상 PDF·pypdfium2 미설치 등
+        pass
+    try:
+        meta = pdfio.metadata(str(pdf_path))
+    except Exception:  # noqa: BLE001
         return None
     return _year_from_pdf_date(meta.get("CreationDate") or meta.get("ModDate") or "")
 
