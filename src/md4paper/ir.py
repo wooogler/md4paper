@@ -216,6 +216,17 @@ class PaperMeta(BaseModel):
     short_title: str = ""  # 파일명용 CamelCase 약칭 (예: "ContinualHITLOptimization"); 폴더 자동 명명에 사용
 
 
+class StoredPaperMeta(PaperMeta):
+    """paper_meta.json에 저장되는 형태 — 추출값 + 온라인 보강 정보.
+
+    보강 필드를 PaperMeta에 두면 LLM 구조화 출력 스키마에도 들어가 모델이 DOI를 지어내게 된다
+    → 추출 스키마(PaperMeta)와 저장 스키마를 나눈다.
+    """
+
+    doi: str = ""  # 서지 API로 보강했을 때만 채워짐
+    meta_source: str = ""  # 값의 출처: ""(PDF/LLM) | "openalex" | "crossref" | "openalex+crossref"
+
+
 # --- 용어집 (translate 단계) ----------------------------------------------
 
 

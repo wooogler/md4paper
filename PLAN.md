@@ -410,6 +410,19 @@ PDF는 우리 것으로 덮어씀 + 빈 폴더 제거)한 뒤 원하는 이름�
 (`Copyright 1986` / `© 1986`)를 먼저 보고, 없을 때만 생성일로 폴백.
 실측: year 2025→1986, venue ""→"Psychological Bulletin", 폴더 `1986_LookingBlackBox_Rouse`로 정리됨.
 
+### 서지 보강 `enrich.py` — 공개 API로 빈 연도·venue 채우기 (구현 완료, §5 --enrich 대체)
+PDF에 연도·학회가 아예 없는 논문(프리프린트·구형 스캔본)은 LLM도 못 채운다 → 공개 서지 API를 옵트인으로 조회.
+**설계의 핵심은 제목 유사도 게이트(≥0.90)다.** Crossref `query.bibliographic`은 유사도와 무관하게 1등을 반환하므로
+게이트 없이 쓰면 오답이 조용히 들어온다(실측: "Designing a Meta-Reflective Dashboard…" → 2010년 책). cite/parse의 반환각 검증과 같은 규율.
+- 1차 **OpenAlex**(키 불필요, 저널·학회·arXiv 커버, 실측 4/4 정확) → 저장소(arXiv)만 잡히면 **Crossref**로 출판 venue 보강.
+- **비어 있는 필드만** 채움(PDF가 진실원). 템플릿 자리표시자("Journal Title", "Conference acronym 'XX")는 빈 값으로 취급 —
+  `paper_meta.extract`도 저장 전에 같은 필터를 거친다.
+- 출처를 `meta_source`에 기록. LLM 스키마(`PaperMeta`)와 저장 스키마(`StoredPaperMeta`)를 분리 — 보강 필드를 추출
+  스키마에 두면 모델이 DOI를 지어낸다.
+- **질의 제목 자체를 검증**(`usable_title`: ≥16자·≥3단어·섹션 헤딩 아님). 유사도 게이트는 '우리 제목이 맞다'는 전제 위에서만
+  동작한다 — 제목 추출이 실패해 "1 Introduction"이던 논문이 Crossref "Introduction"(0.92)과 붙어 언어학 저널이 들어온 실제 사고를 막는다.
+- 실측(56편): 22편 보강(연도 3·venue 22), 오매치 0. 네트워크 실패·레이트리밋은 조용히 무시.
+
 ### 목록 정리 — 숨기기 vs 삭제 (구현 완료)
 '변환한 논문' 카드의 휴지통은 두 선택지를 준다: **목록에서 숨기기**(`status.json`의 `hidden` 플래그만 — 파일 무손실)와
 **파일 삭제**(기존 `delete_workdir`, 되돌릴 수 없음). 목록이 길어져 치우고 싶은 것과 진짜로 지우고 싶은 것은 다른 요구인데

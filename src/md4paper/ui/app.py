@@ -2223,6 +2223,29 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
         naming_rows.refresh()
         ui.notify(f"이름 규칙 저장됨 · 예: {paper_meta.naming_preview()}", type="positive")
 
+    async def enrich_now() -> None:
+        """연도·venue가 빈 논문만 온라인 서지에서 채우고, 바뀌면 이름까지 정리."""
+        from md4paper import enrich
+        from md4paper.workdir import recent_workdirs
+
+        enrich_btn.props("loading")
+        try:
+            roots = [r["root"] for r in recent_workdirs(state["upload_dir"], limit=100_000,
+                                                        include_hidden=True)]
+            counts = await run.io_bound(enrich.enrich_many, roots,
+                                        mailto=config.resolve_enrich_mailto() or None)
+            renamed = 0
+            if counts["papers"]:
+                renamed = (await run.io_bound(paper_meta.apply_naming, state["upload_dir"]))["renamed"]
+        finally:
+            enrich_btn.props(remove="loading")
+        msg = (f"{counts['checked']}편 확인 · {counts['papers']}편 보강"
+               f" (연도 {counts.get('year', 0)} · 학회 {counts.get('venue', 0)})")
+        if renamed:
+            msg += f" · 이름 {renamed}편 정리"
+        ui.notify(msg, type="positive" if counts["papers"] else "info", timeout=6000)
+        on_workspace_change()
+
     async def apply_naming_now() -> None:
         naming_btn.props("loading")
         try:
@@ -2267,6 +2290,10 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
             naming_btn = ui.button("기존 논문·PDF 이름 정리", icon="drive_file_rename_outline",
                                    on_click=apply_naming_now).props("dense outline no-caps") \
                 .tooltip("이미 변환한 논문의 폴더·PDF·저장 위치 사본 이름을 지금 규칙으로 맞춥니다")
+            enrich_btn = ui.button("서지 정보 보강", icon="travel_explore",
+                                   on_click=lambda: enrich_now()).props("dense outline no-caps") \
+                .tooltip("연도·학회가 비어 있는 논문을 공개 서지 API(OpenAlex·Crossref)에서 찾아 채웁니다 — "
+                         "논문 제목만 전송하고, 제목이 일치할 때만 채택합니다")
         ui.label("논문 폴더·원본 PDF·저장 위치의 md/PDF가 모두 이 규칙의 이름을 씁니다 — "
                  "이름이 같아야 md에서 PDF를 바로 찾을 수 있어요.").classes("text-xs text-gray-400")
         ui.separator().classes("q-my-xs")

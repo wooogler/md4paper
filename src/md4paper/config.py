@@ -202,6 +202,14 @@ def naming_template_error(template: str) -> str | None:
     return None
 
 
+def resolve_enrich_mailto() -> str:
+    """서지 API polite pool에 쓸 연락 이메일: config [enrich].mailto. 없으면 빈 문자열.
+
+    OpenAlex/Crossref는 mailto를 붙이면 더 넉넉한 풀로 보내준다(필수는 아님).
+    """
+    return str(load_config().get("enrich", {}).get("mailto") or "").strip()
+
+
 def resolve_naming_template() -> str:
     """논문 파일·폴더 이름 규칙: config [output].naming > 기본 {year}_{title}_{author}.
 

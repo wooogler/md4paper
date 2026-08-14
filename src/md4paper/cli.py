@@ -154,6 +154,40 @@ def library_cmd(en_dir: Path | None, ko_dir: Path | None, pdf_dir: Path | None,
         click.echo("변경: md4paper library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF")
 
 
+@cli.command("enrich")
+@click.argument("workdir", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--all", "do_all", is_flag=True, help="작업 폴더의 모든 논문을 보강")
+@click.option("--mailto", default=None, help="서지 API polite pool 연락처 (config [enrich].mailto에 저장)")
+@click.option("--rename/--no-rename", default=True, help="보강 후 이름 규칙으로 정리 (기본: 함)")
+def enrich_cmd(workdir: Path | None, do_all: bool, mailto: str | None, rename: bool) -> None:
+    """비어 있는 연도·venue를 공개 서지 API(OpenAlex·Crossref)로 채운다.
+
+    논문 제목만 전송하며, 제목이 충분히 일치할 때만 채택한다(오매치 방지). PDF에서 읽은 값은 덮어쓰지 않는다.
+    """
+    from md4paper import enrich, paper_meta
+    from md4paper.workdir import recent_workdirs
+
+    if mailto:
+        config.set_section_value("enrich", "mailto", mailto)
+    contact = config.resolve_enrich_mailto() or None
+    if not workdir and not do_all:
+        raise click.UsageError("WORKDIR을 주거나 --all을 쓰세요.")
+    ws = config.resolve_workspace()
+    roots = ([r["root"] for r in recent_workdirs(ws, limit=100_000, include_hidden=True)]
+             if do_all else [workdir])
+
+    def show(n: int, root: Path, filled: list) -> None:  # noqa: ANN001
+        if filled:
+            click.echo(f"  [{n}] {Path(root).stem}: {', '.join(filled)} 채움")
+
+    counts = enrich.enrich_many(roots, mailto=contact, on_progress=show)
+    click.echo(f"{counts['checked']}편 확인 · {counts['papers']}편 보강 "
+               f"(연도 {counts.get('year', 0)} · venue {counts.get('venue', 0)})")
+    if rename and counts["papers"]:
+        r = paper_meta.apply_naming(ws)
+        click.echo(f"이름 정리: {r['renamed']}편 변경")
+
+
 @cli.command("naming")
 @click.argument("template", required=False)
 @click.option("--apply", "apply_now", is_flag=True,

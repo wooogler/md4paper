@@ -307,6 +307,18 @@ uv run md4paper naming "{author}{year}_{title}"           # 규칙 변경
 uv run md4paper naming --apply                            # 기존 논문·PDF 이름 정리
 ```
 
+### 서지 정보 보강 (선택)
+
+연도나 학회가 비어 있는 논문은 **공개 서지 API**에서 찾아 채울 수 있습니다. 저장 위치 패널의
+**서지 정보 보강** 버튼 또는 `md4paper enrich --all`입니다.
+
+- 1차 [OpenAlex](https://openalex.org), arXiv만 잡히면 [Crossref](https://www.crossref.org)로 출판 학회를 보강합니다. 둘 다 무료·키 불필요.
+- **논문 제목만 전송**합니다(본문은 나가지 않습니다). PDF에서 읽은 값은 **덮어쓰지 않고**, 비어 있는 칸만 채웁니다.
+- 조회 결과의 제목이 우리 제목과 충분히 일치할 때만 채택합니다. Crossref는 유사도와 무관하게 1등을
+  돌려주기 때문에(실측: 2026년 논문 질의에 2010년 책 반환) 이 검증이 없으면 엉뚱한 연도가 조용히 들어옵니다.
+- `[enrich].mailto`에 이메일을 넣으면 API의 polite pool을 씁니다: `md4paper enrich --all --mailto you@example.com`
+
+
 ---
 
 ## LLM API 키 설정 (번역·인용 기능에만 필요)
@@ -397,6 +409,7 @@ uv run md4paper ui paper.md4/           # 이 작업을 웹 UI로 열기
 uv run md4paper workspace               # 작업 폴더 조회 / 변경
 uv run md4paper library                 # 저장 위치(영어·한국어·PDF 폴더) 조회 / 변경
 uv run md4paper naming                  # 파일 이름 규칙 조회 / 변경 / --apply 일괄 정리
+uv run md4paper enrich --all            # 빈 연도·학회를 공개 서지 API로 보강
 uv run md4paper prefs list              # 기억된 헤더 처리 목록
 ```
 

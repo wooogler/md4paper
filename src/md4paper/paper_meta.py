@@ -64,7 +64,13 @@ def front_text(wd: WorkDir, cap: int = 4600) -> str:
 
 
 def extract(provider: Provider, text: str, *, max_tokens: int = 1024) -> PaperMeta:
-    return provider.parse(_SYSTEM, text, PaperMeta, max_tokens=max_tokens)
+    meta = provider.parse(_SYSTEM, text, PaperMeta, max_tokens=max_tokens)
+    # 템플릿 자리표시자("Journal Title", "Conference acronym 'XX")는 학회명이 아니다 → 비워 둔다
+    # (그래야 enrich가 '빈 값'으로 보고 실제 venue를 채울 수 있다)
+    from md4paper.enrich import clean_venue
+
+    meta.venue = clean_venue(meta.venue)
+    return meta
 
 
 def save(wd: WorkDir, meta: PaperMeta) -> None:
