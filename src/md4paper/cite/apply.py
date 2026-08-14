@@ -38,6 +38,11 @@ def load_cached_refs(wd: WorkDir) -> list:
     return [RefEntry(**d) for d in data.get("accepted", [])]
 
 
+def ref_urls(wd: WorkDir) -> dict[str, str]:
+    """참고문헌 번호 → DOI/arXiv URL (내부 앵커를 못 쓰는 Notion 등에서 외부 링크로). 없으면 빈 dict."""
+    return {r.label: r.url() for r in load_cached_refs(wd) if r.url()}
+
+
 def apply_links(wd: WorkDir, refs: list, parts: list[str], reference_links: bool = True) -> dict:
     """이미 파싱된 참고문헌으로 본문 인용 링크 + 참고문헌 목록을 다시 적용 (결정론적·무료).
 

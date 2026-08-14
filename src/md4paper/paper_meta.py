@@ -68,7 +68,7 @@ def authors_short(authors: list[str], limit: int = 2) -> str:
     return ", ".join(names[:limit]) + " et al."
 
 
-# --- 폴더 자동 명명: {year}_{ShortTitle}_{1저자성} --------------------------
+# --- 폴더·파일 자동 명명 — 이름 규칙 템플릿(config [output].naming, 기본 {year}_{title}_{author}) ---
 _STOP = {"a", "an", "the", "of", "for", "and", "to", "with", "in", "on",
          "from", "by", "via", "using", "under", "over", "at"}
 
@@ -108,19 +108,85 @@ def _camel_fallback(title: str) -> str:
     return "".join(w[:1].upper() + w[1:] for w in words[:5])[:28]
 
 
-def folder_base(meta: dict | PaperMeta) -> str:
-    """서지에서 폴더 기준명 '{year}_{ShortTitle}_{LastName}' (없는 조각은 생략).
+def folder_base(meta: dict | PaperMeta, template: str | None = None) -> str:
+    """서지 + 이름 규칙 → 폴더/파일 기준명. 규칙은 config [output].naming (기본 {year}_{title}_{author}).
 
-    ShortTitle을 못 만들면(제목 없음) 빈 문자열 반환 → 호출측에서 리네임을 건너뛴다.
+    조각: {year} 연도 · {title} 제목 약칭(CamelCase) · {author} 1저자 성 · {venue} 학회(영숫자만).
+    규칙에 {title}이 있는데 제목을 못 만들면 빈 문자열 반환 → 호출측에서 리네임을 건너뛴다.
+    없는 조각(연도 미상 등)은 빠지고, 그 자리에 겹친 구분자는 하나로 줄인다.
     """
+    from md4paper import config
+
     d = meta.model_dump() if isinstance(meta, PaperMeta) else dict(meta)
+    tpl = template or config.resolve_naming_template()
     short = re.sub(r"[^A-Za-z0-9]", "", d.get("short_title") or "") or _camel_fallback(d.get("title") or "")
-    if not short:
+    if "{title}" in tpl and not short:
         return ""
     authors = d.get("authors") or []
-    parts = [str(d["year"])] if d.get("year") else []
-    parts.append(short)
-    last = _last_name(authors[0]) if authors else ""
-    if last:
-        parts.append(last)
-    return "_".join(parts)
+    values = {
+        "{year}": str(d["year"]) if d.get("year") else "",
+        "{title}": short,
+        "{author}": _last_name(authors[0]) if authors else "",
+        "{venue}": re.sub(r"[^A-Za-z0-9]+", "", d.get("venue") or "")[:20],
+    }
+    out = tpl
+    for key, val in values.items():
+        out = out.replace(key, val or "\x00")  # 빈 조각은 센티널로 — 그 자리 구분자만 정리
+
+    def _drop_empty(m: re.Match) -> str:
+        if m.start() == 0 or m.end() == len(m.string):  # 문자열 가장자리 → 구분자째 제거
+            return ""
+        seps = m.group(0).replace("\x00", "")
+        return seps[:1]  # 가운데 → 구분자 하나만 남김 (리터럴 '--' 등은 건드리지 않는다)
+
+    out = re.sub(r"[_\-. ]*(?:\x00[_\-. ]*)+", _drop_empty, out)
+    out = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", out)  # 파일명 금지 문자 제거 (규칙의 리터럴 부분 방어)
+    return out.strip("_-. ")
+
+
+# 이름 규칙 미리보기용 예시 서지 (UI·CLI에서 "예: 2017_AttentionIsAllYouNeed_Vaswani"로 표시)
+_EXAMPLE_META = PaperMeta(
+    title="Attention Is All You Need", authors=["Ashish Vaswani", "Noam Shazeer"],
+    year=2017, venue="NeurIPS", short_title="AttentionIsAllYouNeed",
+)
+
+
+def naming_preview(template: str | None = None) -> str:
+    """이름 규칙을 예시 논문에 적용한 결과 (규칙이 어떤 이름을 만드는지 즉시 보여주기)."""
+    return folder_base(_EXAMPLE_META, template)
+
+
+def apply_naming(workspace) -> dict:  # noqa: ANN001 — Path | str
+    """작업 폴더의 모든 논문(숨김 포함)을 현재 이름 규칙으로 정리.
+
+    논문 폴더·.md4·원본 PDF를 리네임(rename_workdir)하고, 저장 위치가 지정돼 있으면
+    새 이름으로 다시 내보낸 뒤 옛 이름 사본을 청소한다. 서지가 없는 논문은 건너뛴다.
+    반환: {"renamed": n, "unchanged": n, "no_meta": n}
+    """
+    from pathlib import Path
+
+    from md4paper import library
+    from md4paper.workdir import WorkDir, recent_workdirs, rename_workdir
+
+    ws = Path(workspace)
+    counts = {"renamed": 0, "unchanged": 0, "no_meta": 0}
+    for r in recent_workdirs(ws, limit=100_000, include_hidden=True):
+        wd = WorkDir(r["root"])
+        meta = load(wd)
+        base = folder_base(meta) if meta else ""
+        if not base:
+            counts["no_meta"] += 1
+            continue
+        old_stem = wd.root.stem
+        new_wd = rename_workdir(wd, base, ws)
+        if new_wd.root == wd.root:
+            counts["unchanged"] += 1
+            continue
+        counts["renamed"] += 1
+        if library.configured():  # 저장 위치 사본도 새 이름으로 (자동 저장 꺼져 있어도 — 명시적 정리 동작)
+            try:
+                library.export_paper(new_wd)
+                library.remove_stem(old_stem)
+            except OSError:
+                pass  # 사본 정리 실패가 리네임 자체를 막지 않게
+    return counts

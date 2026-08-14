@@ -467,9 +467,9 @@ class UIController:
 
 def _ref_urls(wd: WorkDir) -> dict[str, str]:
     """참고문헌 번호 → DOI/arXiv URL (Notion 인용을 외부 링크로 걸 때 사용). 없으면 빈 dict."""
-    from md4paper.cite.apply import load_cached_refs
+    from md4paper.cite.apply import ref_urls
 
-    return {r.label: r.url() for r in load_cached_refs(wd) if r.url()}
+    return ref_urls(wd)
 
 
 def _zip_add_paper(z, wd: WorkDir, which: str, target: str = "universal") -> str | None:  # noqa: ANN001

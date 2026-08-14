@@ -14,17 +14,25 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
-# $/1M 토큰 (input, output) — 2026-07 기준. 인트로 가격/변동 있으니 재검증 대상.
+# $/1M 토큰 (input, output) — 2026-08 기준. 인트로 가격/변동 있으니 재검증 대상.
+# 2026-07-30 OpenAI 인하: luna $1/$6 → $0.2/$1.2, terra $2.5/$15 → $2/$12 (sol은 그대로).
+# 캐시된 입력(luna $0.02, terra $0.2)은 모델링하지 않으므로 캐시 히트 시 실제보다 과대 추정된다.
+# gemini-3.1-flash-lite는 gemini-2.5-flash-lite 가격($0.1/$0.4)을 잘못 적어둔 것을 바로잡음.
+# gemini는 표준 티어·텍스트 입력 기준(오디오 입력, 200k 초과 프롬프트는 단가가 다름).
+# claude-sonnet-5는 표준가 기준 — 2026-08-31까지는 인트로 $2/$10이라 그동안은 과대 추정된다.
+# MODEL_TIERS에서 빠진 모델도 남겨둔다: --model로 직접 고를 수 있고, 미등록이면 비용이 0으로 나온다.
 PRICING: dict[str, tuple[float, float]] = {
-    "gpt-5.6-luna": (1.0, 6.0),
-    "gpt-5.6-terra": (2.5, 15.0),
+    "gpt-5.6-luna": (0.2, 1.2),
+    "gpt-5.6-terra": (2.0, 12.0),
     "gpt-5.6-sol": (5.0, 30.0),
-    "claude-sonnet-5": (3.0, 15.0),
-    "claude-opus-4-8": (5.0, 25.0),
     "claude-haiku-4-5": (1.0, 5.0),
-    "gemini-3.1-pro": (2.0, 12.0),
+    "claude-sonnet-5": (3.0, 15.0),
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "gemini-3.1-flash-lite": (0.25, 1.5),
+    "gemini-3.5-flash-lite": (0.3, 2.5),
     "gemini-3.6-flash": (1.5, 7.5),
-    "gemini-3.1-flash-lite": (0.1, 0.4),
+    "gemini-3.1-pro-preview": (2.0, 12.0),
 }
 
 
@@ -99,17 +107,23 @@ class FakeProvider(Provider):
 
 
 def get_provider(name: str, api_key: str | None = None, model: str | None = None) -> Provider:
-    """프로바이더 이름 → 어댑터 인스턴스 (어댑터 모듈을 지연 임포트)."""
+    """프로바이더 이름 → 어댑터 인스턴스 (어댑터 모듈을 지연 임포트).
+
+    모델 미지정 시 기본값은 config.DEFAULT_MODELS 한 곳에서만 온다 — 여기에 따로
+    적어두면 config와 어긋난다(실제로 anthropic·gemini가 어긋나 있었다).
+    """
+    from md4paper.config import DEFAULT_MODELS
+
     if name == "openai":
         from md4paper.llm.openai import OpenAIProvider
 
-        return OpenAIProvider(api_key, model or "gpt-5.6-luna")
+        return OpenAIProvider(api_key, model or DEFAULT_MODELS["openai"])
     if name == "anthropic":
         from md4paper.llm.anthropic import AnthropicProvider
 
-        return AnthropicProvider(api_key, model or "claude-sonnet-5")
+        return AnthropicProvider(api_key, model or DEFAULT_MODELS["anthropic"])
     if name == "gemini":
         from md4paper.llm.gemini import GeminiProvider
 
-        return GeminiProvider(api_key, model or "gemini-3.1-pro")
+        return GeminiProvider(api_key, model or DEFAULT_MODELS["gemini"])
     raise ValueError(f"알 수 없는 프로바이더: {name}")

@@ -123,7 +123,7 @@ sections:
 2. **용어집 (별도 생성/편집 아티팩트)**: 제목+초록으로 1회 structured-output → `glossary.yaml` `{term, korean, policy}`. **`md4paper glossary`로 따로 생성**하거나 `translate`가 없으면 자동 생성 후 `$EDITOR` 검토(`--yes`로 생략). 웹 UI(M5)는 "자동 생성 → 표시 → 번역어 수정 → 번역"을 이 파일 위에 얹는다. 번역은 파일의 최신 내용을 소비.
 3. **번역**: 섹션별 호출(`llm.complete()`; 기본 모델은 §4, 프로바이더별 노브는 어댑터가 처리). **고정 시스템 프롬프트 = 스타일 규칙(선택된 한국어 문체 + 첫 등장 병기 + citation 마커 원문 유지 + 표 셀 `|` 이스케이프) + 용어집 + 제목/초록(문서 컨텍스트)**. 한국어 문체는 `korean_style` 설정으로 프롬프트 조각이 갈아끼워진다(§8, 웹 UI 주요 설정). 이 프리픽스는 전 섹션 공통이라 캐싱 대상: OpenAI(≥1024토큰 자동)·Gemini(암묵 캐싱 기본)는 자동 히트, Anthropic은 `cache_control: ephemeral` 명시. **동기 호출이 기본**, `--batch`는 opt-in(세 프로바이더 모두 50% 할인, 최악 24h — 대량 백로그용).
 4. **검증(결정론적, load-bearing)**: 복원 후 원문과 비교 — 헤더 레벨/개수, 이미지·링크 수, 인라인 코드·수식(`$`) 수, 표 파이프(`|`) 수, 플레이스홀더 잔존. 실패 → 위반 인용해 1회 재시도 → 또 실패 → 영어 원문 + `<!-- md4paper: untranslated -->` 주석으로 계속(구조는 확실히 보존).
-5. **조립 + 캐시**: 플레이스홀더 복원, 순서대로 스티칭 → `paper.ko.md`. 청크 내용해시 캐시(`cache.json`, 키에 시스템 프롬프트=문체+용어집+컨텍스트 + 모델 → 무엇이든 바뀌면 재번역). 비용(동기, 논문당 대략): **gpt-5.6-luna ~$0.2(기본)** / gpt-5.6-terra·claude-sonnet-5 ~$0.5 / gemini-3.1-pro ~$0.4; `--batch`는 M6.
+5. **조립 + 캐시**: 플레이스홀더 복원, 순서대로 스티칭 → `paper.ko.md`. 청크 내용해시 캐시(`cache.json`, 키에 시스템 프롬프트=문체+용어집+컨텍스트 + 모델 → 무엇이든 바뀌면 재번역). 비용(동기, 논문당 대략): **gpt-5.6-luna ~$0.04(기본, 2026-07-30 인하 반영)** / gpt-5.6-terra·gemini-3.1-pro-preview ~$0.4 / claude-sonnet-5 ~$0.5; `--batch`는 M6.
 
 ### Stage 7 — 로컬 웹 UI ✅ (`md4paper ui [WORKDIR] [--upload-dir DIR] [--port N] [--no-show]`)
 > **파일 업로드**: WORKDIR 없이 실행하면 업로드 홈(`/home`)에서 시작 — PDF/.md를 드롭하면 백그라운드로 convert(`run.io_bound`) 후 `/review`로 이동. WORKDIR을 주면 기존 작업 디렉토리를 바로 연다. 업로드 파일·결과는 `--upload-dir`(기본 cwd)에 `<이름>.md4/`로 저장.
@@ -148,6 +148,9 @@ md4paper cite WORKDIR [--style keep|authoryear|short] [--no-links] [--provider .
 md4paper glossary WORKDIR [--provider ...] [--model ...]        # 번역 전 용어집 자동 생성(검토·수정용)
 md4paper translate WORKDIR [--provider ...] [--model ...] [--style 문체] [--yes]   # 용어집 생성→편집→번역
 md4paper run PAPER.pdf [flags]        # convert → cite → translate, 리뷰 정지 1회
+md4paper workspace [PATH]             # 작업 폴더(원본·.md4) 조회/설정
+md4paper library [--en|--ko|--pdf DIR] [--off en|ko|pdf|all] [--export]  # 결과 md·PDF가 쌓일 폴더 (§11)
+md4paper naming [TEMPLATE] [--apply] [--reset]   # 파일 이름 규칙({year}_{title}_{author}) 조회/설정/일괄 정리 (§11)
 ```
 
 프로바이더/모델 해석 순서: CLI 플래그(`--provider`/`--model`) → `config.toml`의 기본값 → **내장 기본(openai / `gpt-5.6-luna`)**. 키 조회 순서: env 변수(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `config.toml`. Gemini는 `GOOGLE_API_KEY` 우선순위 함정을 피하려 키를 클라이언트에 **명시적으로** 전달.
@@ -163,7 +166,7 @@ md4paper run PAPER.pdf [flags]        # convert → cite → translate, 리뷰 �
 | pydantic v2 | manifest 검증 + 모든 JSON 아티팩트 스키마 + 3사 공통 structured-output 스키마 삼역 |
 | markdown-it-py | 파서 기반 청킹·구조 diff 검증 (정규식 청킹은 펜스 블록을 깨뜨린 전례 다수) |
 | **LLM: 손수 만든 ~150줄 어댑터** over `anthropic` + `openai`(v2, Responses API) + `google-genai`(통합 SDK) | 프로바이더 3개 × 연산 2개(`complete`/`parse`)뿐이라 얇은 Protocol이 정답. 세 SDK 모두 pydantic 모델을 직접 받아 파싱 인스턴스 반환(`messages.parse` / `responses.parse` / `response_schema`), 프로바이더별 노브(캐시·thinking)도 그대로 노출. **LiteLLM 제외**(무거운 의존성 + 2026-03 PyPI 공급망 사고), pydantic-ai는 폴백 후보 |
-| 기본 모델 (사용자 선택) | **기본 openai `gpt-5.6-luna`($1/$6, 최저가 티어 — 사용자 선호)**; 대안 openai `gpt-5.6-terra`($2.5/$15) · anthropic `claude-sonnet-5`($3/$15, 인트로 $2/$10)·`claude-opus-4-8`(고품질) · gemini `gemini-3.1-pro`($2/$12)·`gemini-3.6-flash`(저가). EN→KO는 2026 벤치에서 우열이 뚜렷치 않아 사용자 선택으로 둠 |
+| 기본 모델 (사용자 선택) | **기본 openai `gpt-5.6-luna`($0.2/$1.2, 2026-07-30 인하 전 $1/$6 — 최저가 티어, 사용자 선호)**; 대안 openai `gpt-5.6-terra`($2/$12, 인하 전 $2.5/$15) · anthropic `claude-haiku-4-5`($1/$5)·`claude-sonnet-5`($3/$15, 2026-08-31까지 인트로 $2/$10)·`claude-opus-5`(고품질, $5/$25) · gemini `gemini-3.5-flash-lite`($0.3/$2.5)·`gemini-3.6-flash`($1.5/$7.5)·`gemini-3.1-pro-preview`($2/$12). EN→KO는 2026 벤치에서 우열이 뚜렷치 않아 사용자 선택으로 둠 |
 | 키 관리 | env 변수 우선(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `~/.config/md4paper/config.toml`(0600, `md4paper keys set`). simonw/llm·aider 관행을 따르고 OS keyring은 제외(의존성·헤드리스 마찰). Gemini는 키를 클라이언트에 명시 전달(`GOOGLE_API_KEY` 우선순위 함정 회피) |
 | **NiceGUI ≥3.14 (MIT)** | 로컬 웹 UI. FastAPI+Vue/Quasar가 wheel에 번들 → **Node·빌드 스텝 0**, `uv add nicegui`가 패키징 전부. 마크다운+KaTeX 내장, 웹소켓으로 `watchfiles` 파일 감시 간단, FastAPI라서 향후 JSON 엔드포인트 확장 자유. 필요 시 FastAPI+SPA로 탈출로 존재(밑이 FastAPI라 백엔드 코드 보존) |
 | pymupdf | 웹 UI의 PDF 페이지→PNG 렌더(원본 대조), extract 단계의 born-digital 스니핑 겸용 |
@@ -181,6 +184,7 @@ md4paper/
 ├── workdir.py                # 디렉토리 레이아웃, status.json 해시 북키핑, 재개/무효화
 ├── ir.py                     # pydantic 모델 전부 (파일 스키마의 단일 진실원)
 ├── config.py                 # ~/.config/md4paper/config.toml 로드, 키/프로바이더/모델 해석 순서
+├── library.py                # 결과 마크다운을 쌓을 전역 폴더(영어·한국어 따로) — 복사·이미지 격리 (§11)
 ├── llm/
 │   ├── base.py               # Protocol: complete(system,user)->str, parse(system,user,schema)->BaseModel; 재시도/비용 집계
 │   ├── anthropic.py          # messages.parse, cache_control 브레이크포인트, thinking:disabled
@@ -196,6 +200,7 @@ md4paper/
 ├── regions.py                # 섹션 영역 찾기 (cite=References, translate=Abstract 공유)
 ├── translate/{context,chunker,glossary,engine,validate,apply}.py  # context=초록 주입, chunker=플레이스홀더 보호, validate=구조 검증
 └── ui/                       # NiceGUI 로컬 앱 — controller.py(순수 로직, 테스트됨) + app.py(뷰)
+    └── folder_dialog.py      # OS 기본 폴더 선택 대화상자 (osascript / PowerShell / zenity·kdialog)
 ```
 
 ## 6. 마일스톤 (각각 독립적으로 출시 가능)
@@ -228,8 +233,8 @@ md4paper/
 | 참고문헌 링크 | 기본 on — 제목을 DOI/arXiv URL로 하이퍼링크(바로 논문 접근) + 단축명 병기. `--no-links`/`reference_links:false`로 끔 |
 | 한국어 문체 | **선택 가능**(`korean_style`): 해라체(기본, ~한다) / 합니다체(~합니다) / 해요체(~해요) / custom 프롬프트. config.toml 기본값 → sections.yaml 논문별 오버라이드 → **웹 UI 주요 설정**으로 실시간 변경(변경 시 재번역). 프롬프트 조각으로 구현되어 시스템 프롬프트에 갈아끼움 |
 | 병기(영문 병기) 정책 | 용어집이 지정한 전문용어 첫 등장 시만 병기 |
-| 번역 지연 vs 비용 | 동기 호출 기본(~$0.5/편), `--batch`(~$0.25, 최악 24h)는 opt-in |
-| 출력 위치 | PDF 옆 `paper.md4/`; Obsidian 등 노트 시스템으로 보낼 거면 이미지 링크 규약을 assemble에서 맞춰야 함 |
+| 번역 지연 vs 비용 | 동기 호출 기본(기본 모델 ~$0.04/편), `--batch`(~$0.02, 최악 24h)는 opt-in |
+| 출력 위치 | 작업 폴더(`<ws>/<이름>/<이름>.md4/`)가 진실원. **결과 마크다운은 전역 '저장 위치'(영어·한국어 폴더 각각)에 사본으로 쌓는다**(§11) — Obsidian 볼트 등에 바로 꽂는 경로 |
 | v1 입력 범위 | born-digital PDF(arXiv 등)만; 스캔본은 balanced 모드로 유예 |
 | 한국어판 캡션 | 캡션 본문은 번역, "Figure 3"/"Table 2" 라벨은 원문 유지(`figure_label: korean`으로 그림/표 변경 가능) |
 | 이미지 임베딩 플레이버 | `standard`(범용); Obsidian 볼트면 `obsidian`, Notion import면 `notion`, HTML 렌더면 `html`. config 기본값 → manifest·웹 UI로 논문별 변경 |
@@ -318,3 +323,84 @@ md4paper/
 - 서버 재시작 시 큐 소실 — 원본은 이미 디스크에 있으므로 재업로드 없이 수동 재변환 가능(수용).
 - 같은 파일 재변환 = 기존 워크디렉토리 덮어씀(현행 유지).
 - CLI로 wd 지정해 띄운 경우(`/`→리뷰 직행)는 그대로.
+
+## 11. 저장 위치 — 변환한 논문을 쌓을 전역 폴더 (구현 완료)
+
+### 목표
+매번 zip을 받아 푸는 대신, 변환·번역이 끝나면 **사용자가 고른 폴더에 결과 마크다운이 자동으로 쌓이게** 한다.
+**영어와 한국어를 서로 다른 폴더로** 보낼 수 있다(예: Obsidian 볼트의 `Papers/EN`, `Papers/KO`).
+폴더는 첫 화면에서 **OS 기본 폴더 선택 대화상자**로 고른다.
+
+### 설계
+1. **작업 폴더와 저장 위치는 다른 개념** — 작업 폴더(`[output].workspace`)는 원본 PDF·중간 산출물이 든 작업장(진실원),
+   저장 위치(`[library].en_dir`/`ko_dir`)는 결과 마크다운만 모아 노트 앱에 그대로 쓰는 **사본** 폴더다.
+   사본이라 지워도 안전하고, 언제든 다시 내보낼 수 있다(`library --export`). 홈에서 둘 다 대화상자로 바꾼다.
+2. **레이아웃** — `<폴더>/<논문이름>.md` + `<폴더>/images/<논문이름>/…`. 파일명은 작업 디렉토리 stem
+   (`{year}_{ShortTitle}_{1저자}` — 서지 기반 자동 리네임 결과)이라 여러 편이 한 폴더에 쌓여도 충돌하지 않는다.
+   이미지도 논문별 하위 폴더로 격리하고 마크다운의 `images/…` 참조(표준 `![](…)`·Obsidian `![[…]]` 둘 다)를 거기에 맞춰 고쳐 쓴다.
+   두 언어를 같은 폴더로 지정하면 이름이 겹치므로 `<이름>.en.md`/`<이름>.ko.md`로 자동 구분.
+3. **형식** — 다운로드 zip과 같은 `[output].export_target`(범용/Notion/Obsidian)을 그대로 적용(`export_format.to_export_target`).
+   en.md/ko.md 원본은 늘 canonical 유지 — 사본만 변환한다(형식을 바꿔 다시 내보내도 손실 없음).
+4. **자동 저장 시점**(`[library].auto`, 기본 켜짐) — ① 변환 큐 완료(리네임 후 최종 이름으로) ② 번역 완료
+   ③ 리뷰 화면의 `commit()`(구조·설정 변경 → 재조립). 실패는 조용히 무시(`auto_export`) — 사본 때문에 변환·번역이 막히면 안 된다.
+   수동 경로: 논문 화면 **폴더로 저장**, 홈의 **이미 변환한 논문도 지금 내보내기**, 목록 다중선택 **폴더로 저장**, CLI `library --export`.
+5. **폴더 선택 대화상자**(`ui/folder_dialog.py`) — 브라우저에는 실제 경로를 주는 API가 없다(File System Access는 샌드박스 핸들).
+   로컬 앱이라 **서버 프로세스 = 사용자 컴퓨터**이므로 OS 대화상자를 서버에서 띄운다:
+   macOS `osascript`(choose folder) · Windows PowerShell `FolderBrowserDialog` · Linux `zenity`/`kdialog`.
+   `run.io_bound`로 호출(이벤트 루프 차단 방지), 300초 타임아웃, 취소·미지원은 None. 헤드리스·SSH에서는 `available()`이 False가 되고
+   **경로 직접 입력 칸이 항상 함께** 있다(`MD4PAPER_NO_NATIVE_DIALOG`로 강제 비활성 — 테스트용).
+6. **재복사 억제** — 이미지는 크기·mtime이 같으면 건너뛴다(설정을 만질 때마다 수백 KB를 다시 쓰지 않도록).
+   참조되지 않은 이미지는 애초에 복사하지 않고, 이미 있는 파일도 지우지 않는다(다른 언어 사본이 참조 중일 수 있음).
+
+### 파일
+- `library.py`(신규): `dir_for`/`configured`/`auto_enabled`/`same_folder`/`file_name`/`export`/`export_paper`/`auto_export`/`export_many`.
+- `config.py`: `[library]` 해석(`resolve_library_dir`/`set_library_dir`/`resolve_library_auto`), `set_section_value(value=None)`으로 키 삭제.
+- `ui/folder_dialog.py`(신규), `ui/app.py`(`build_location_settings` 패널·작업 폴더 동적화·자동 저장 훅·`폴더로 저장` 버튼), `cli.py`(`md4paper library`).
+- `cite/apply.py`: `ref_urls(wd)` 공개(라이브러리·컨트롤러가 공유 — Notion 인용 링크용).
+- 테스트: `test_library.py`(폴더 분리·이미지 격리·형식 적용·덮어쓰기·같은 폴더 접미사·auto 스위치·실패 무시), `test_folder_dialog.py`(AppleScript 이스케이프·취소·타임아웃·경로 정규화), `test_home_queue.py`(변환 완료 시 자동 저장), `test_ui_server.py`(패널 렌더).
+
+### 리스크·결정
+- 사본이 원본과 어긋날 수 있음 → 자동 저장을 기본 켜고 재조립 시점에도 갱신. 어긋나면 `library --export`로 전부 재생성.
+- 원격 브라우저(SSH 포트포워딩)에서는 대화상자가 서버 쪽에 뜬다 → 경로 직접 입력 칸을 항상 유지.
+- 작업 폴더를 바꾸면 이전 폴더의 논문은 목록에서 사라진다(삭제되진 않음) — 되돌리면 다시 보인다.
+
+### 파일 이름 규칙 + PDF 사본 (구현 완료)
+"md에서 원본 PDF를 못 찾겠다"는 문제의 해법 두 가지를 §11에 추가했다:
+1. **이름 규칙 템플릿** `[output].naming` (기본 `{year}_{title}_{author}`) — 논문 폴더·작업 폴더 PDF·저장 위치 md/PDF가
+   전부 이 규칙의 기준명을 공유한다. 조각: {year}/{title}(약칭 CamelCase)/{author}(1저자 성)/{venue}(영숫자 20자).
+   빈 조각은 자리 구분자와 함께 빠지고(센티널 방식 — 리터럴 `--`는 보존), 파일명 금지 문자는 렌더에서 제거.
+   검증(`config.naming_template_error`): 자리표시자 ≥1 + 금지 문자 없음; 저장값이 깨져 있으면 기본 규칙 폴백.
+2. **PDF 저장 위치** `[library].pdf_dir` — 변환 완료 시 원본 PDF(meta.json source)를 `<기준명>.pdf`로 복사(크기·mtime 같으면 스킵).
+   md와 같은 이름이라 노트 앱에서 나란히 찾아진다.
+3. **일괄 정리** `paper_meta.apply_naming(ws)` — 기존 논문 전체(숨김 포함)를 현재 규칙으로: rename_workdir(폴더·.md4·PDF·meta source)
+   → 저장 위치 재내보내기 → 옛 기준명 사본 청소(`library.remove_stem`: <stem>*.md·images/<stem>/·<stem>.pdf만).
+   서지 없으면 건너뜀. 멱등(재실행 시 unchanged). UI '기존 논문·PDF 이름 정리' 버튼 + `md4paper naming --apply`.
+
+### 이름 뒤 '(2)' 버그 — 변환 안 된 업로드 잔여물이 이름을 점유 (수정 완료)
+증상: 겹치는 논문이 없는데도 폴더·저장 위치 파일이 `2024_Clio_Tamkin (2).md`처럼 됨(실사용 51편 중 8편).
+원인: 업로드는 **원본을 즉시 디스크에 저장**하고 변환은 큐에서 나중에 도는데(§10-1), 그 사이에 서버를 끄거나
+큐가 날아가면 `<ws>/<이름>/<이름>.pdf`만 든 **껍데기 폴더**가 남는다. 재업로드하면 `save_source`가 이 폴더를
+'이미 있는 논문'으로 보고 `(2)` 폴더를 만들고, 이어서 `rename_workdir`도 같은 이유로 `(2)`를 유지 → 최종 산출물
+이름이 영구히 오염된다. 껍데기는 sections.yaml이 없어 목록에 안 보이므로 사용자는 충돌 원인을 볼 수도 없다.
+수정: `workdir.is_upload_stub()`(= .md4가 없는 폴더)를 **이름 충돌 판정에서 빈 이름으로 취급**한다.
+`save_source`는 껍데기를 재사용하고, `rename_workdir`는 껍데기를 흡수(`_absorb_stub`: 내용물 이동 + 같은 이름
+PDF는 우리 것으로 덮어씀 + 빈 폴더 제거)한 뒤 원하는 이름을 그대로 쓴다. **진짜 변환된 논문**이 이름을 쓰고
+있으면 종전대로 `(2)`(같은 논문을 두 번 변환한 정상 케이스). 기존에 오염된 이름은 '기존 논문·PDF 이름 정리'로 복구된다.
+
+### 추출 깨짐 ② 2바이트 코드가 한자로 묶임 (수정 완료)
+증상: 특정 논문의 제목·저자·초록이 `⁌潯歩⁉湴⁴⁂污⁂潸`처럼 한자로 나옴(구형 CID 폰트 PDF, 실사용 57편 중 1편).
+원인: docling이 2바이트 문자 코드를 UTF-16 코드포인트로 잘못 묶는다 — `"Looki"`(6바이트) → `"⁌潯歩"`(3글자).
+게다가 추출 과정에서 글자가 일부 유실돼 되돌려도 `"Looki Int t Bla Box"`가 된다(단독 복호로는 못 고침).
+기존 `garbled_chars`는 U+FFFD만 세므로 **경고조차 뜨지 않았다**(meta에 0).
+수정(`text_clean.repair_mojibake_from_pdf`): **pypdfium2가 읽는 PDF 텍스트 레이어는 멀쩡하다**는 점을 이용해,
+깨진 줄을 바이트로 되돌려 남은 단어 조각(≥3글자)을 순서대로 잇는 정규식으로 PDF 원문 위치를 찾고 그 구간을 가져온다.
+안전장치: ① 두 바이트가 모두 출력 가능 ASCII인 글자만 후보(진짜 한자·한글 제외) ② 줄의 30% 이상 ③ **PDF에서 결과가
+하나로 확정될 때만** 교체(머리말 반복처럼 후보가 여럿이어도 문자열이 같으면 안전) ④ 길이가 원본의 0.5~4배 밖이면 기각.
+못 고친 글자는 `garbled_chars`에 더해 홈 목록·CLI의 ⚠ 경고로 노출. 실측: 깨진 14줄 전부 복구, 남은 0자.
+
+### 목록 정리 — 숨기기 vs 삭제 (구현 완료)
+'변환한 논문' 카드의 휴지통은 두 선택지를 준다: **목록에서 숨기기**(`status.json`의 `hidden` 플래그만 — 파일 무손실)와
+**파일 삭제**(기존 `delete_workdir`, 되돌릴 수 없음). 목록이 길어져 치우고 싶은 것과 진짜로 지우고 싶은 것은 다른 요구인데
+예전엔 삭제 하나뿐이었다. 숨김은 전역 목록이 아니라 **작업 디렉토리 안**에 기록한다(everything-is-a-file — 폴더를 옮겨도 따라간다).
+`recent_workdirs(..., include_hidden=False)`가 기본 필터, 목록 상단의 '숨긴 논문 N편 보기' 토글 + 카드의 '다시 표시' 버튼이 복원 경로다
+(숨김이 '영영 사라짐'이 되지 않도록 되돌릴 길을 항상 노출).

@@ -81,8 +81,19 @@ def test_ui_server_renders(tmp_path):
 
 
 def test_ui_home_upload_page(tmp_path):
+    # 목록 카드 렌더까지 함께 보기 위해 논문 하나를 변환해 둔다
+    pipeline.convert(CORPUS / "sample_arxiv.md", WorkDir(tmp_path / "p" / "p.md4"))
     # 워크디렉토리 없이 실행 → 업로드 홈
     body = _serve_and_get(["--upload-dir", str(tmp_path)], _free_port())
     assert "논문 PDF" in body
     assert "끌어다" in body  # 업로드 드롭존 (docling 단일 백엔드라 변환 방식 선택 없음)
     assert "AI 서비스" in body  # 프로바이더/키 설정 섹션
+    # 저장 위치 패널 — 영어/한국어/PDF를 각각 다른 폴더로, 이름 규칙·작업 폴더도 여기서 변경
+    assert "저장 위치" in body
+    assert "영어 마크다운" in body and "한국어 마크다운" in body and "PDF 원본" in body
+    assert "이름 규칙" in body and "기존 논문·PDF 이름 정리" in body
+    assert "작업 폴더" in body
+    # 목록 카드의 제목 말줄임 — .nicegui-column은 자식을 컬럼 폭으로 stretch하지 않으므로
+    # 제목 라벨에 truncate+min-w-0, 그 부모 행에 w-full이 없으면 긴 제목이 화면 밖으로 흘러넘친다.
+    assert '"truncate","min-w-0"' in body  # 제목 라벨
+    assert '"no-wrap","w-full","min-w-0"' in body  # 제목을 감싸는 행

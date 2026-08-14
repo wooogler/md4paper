@@ -207,11 +207,46 @@ def delete_workdir(root: Path, workspace: Path) -> bool:
     return True
 
 
+def _absorb_stub(container: Path, stub: Path) -> None:
+    """우리 논문 폴더의 내용물을 껍데기 폴더로 옮기고, 빈 원본 폴더를 치운다.
+
+    폴더를 통째로 rename할 수 없을 때(목적지가 이미 있음)의 경로. 같은 이름이 있으면
+    우리 것으로 덮어쓴다 — 껍데기에 남은 건 변환되지 않은 같은 논문의 PDF이기 때문이다.
+    """
+    import shutil
+
+    for item in container.iterdir():
+        target = stub / item.name
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        item.replace(target)
+    try:
+        container.rmdir()
+    except OSError:
+        pass  # 예상 밖의 잔여물이 남았으면 폴더를 지우지 않고 둔다
+
+
+def is_upload_stub(container: Path) -> bool:
+    """변환된 논문이 없는 '업로드 잔여물' 폴더인지 (.md4가 하나도 없음).
+
+    업로드는 원본을 즉시 디스크에 저장하고 변환은 큐에서 나중에 돈다 → 도중에 서버를 끄거나
+    큐가 날아가면 PDF만 든 폴더가 남는다. 이 껍데기가 이름을 계속 점유하면 같은 논문을 다시
+    올릴 때마다 '(2)'가 붙으므로, 이름 충돌 판정에서는 '비어 있는 이름'으로 취급한다.
+    """
+    try:
+        return container.is_dir() and not any(
+            c.suffix == ".md4" and c.is_dir() for c in container.iterdir())
+    except OSError:
+        return False
+
+
 def rename_workdir(wd: WorkDir, new_base: str, workspace: Path) -> WorkDir:
     """논문 폴더를 새 기준명으로 이동 — 컨테이너 폴더·.md4·PDF·meta.json(source)까지 함께.
 
     구조: <ws>/<old>/{<old>.pdf, <old>.md4/}  →  <ws>/<new>/{<new>.pdf, <new>.md4/}
-    이름 충돌 시 '<new> (2)' 처럼 유일화. 예상 구조가 아니거나 이미 그 이름이면 원본 wd를 그대로 반환.
+    이름이 **다른 변환된 논문**에 쓰이고 있으면 '<new> (2)'로 유일화하고, 변환 안 된 업로드
+    잔여물(is_upload_stub)이 점유하고 있을 뿐이면 그 폴더를 흡수해 원하는 이름을 그대로 쓴다.
+    예상 구조가 아니거나 이미 그 이름이면 원본 wd를 그대로 반환.
     (뷰어는 meta.json의 source(PDF 절대경로)로 PDF를 찾으므로 그 값도 새 경로로 갱신한다.)
     """
     ws = Path(workspace).resolve()
@@ -223,19 +258,22 @@ def rename_workdir(wd: WorkDir, new_base: str, workspace: Path) -> WorkDir:
         return wd
     final = new_base
     i = 2
-    while (ws / final).exists() and (ws / final) != container:
+    while (ws / final).exists() and (ws / final) != container and not is_upload_stub(ws / final):
         final = f"{new_base} ({i})"
         i += 1
     if final == old_stem:
         return wd  # 이미 원하는 이름
     new_container = ws / final
-    container.rename(new_container)
+    if new_container.exists():
+        _absorb_stub(container, new_container)  # 껍데기가 점유 중 → 내용물을 옮겨 담고 이름을 가져온다
+    else:
+        container.rename(new_container)
     new_md4 = new_container / f"{final}.md4"
     (new_container / f"{old_stem}.md4").rename(new_md4)
     old_pdf = new_container / f"{old_stem}.pdf"
     new_pdf = new_container / f"{final}.pdf"
     if old_pdf.exists():
-        old_pdf.rename(new_pdf)
+        old_pdf.replace(new_pdf)  # 껍데기가 남긴 같은 이름 PDF(동일 논문)는 덮어쓴다
     new_wd = WorkDir(new_md4)
     if new_wd.meta_json.exists():  # PDF 절대경로 갱신 (뷰어 대조가 안 깨지게)
         try:
@@ -248,11 +286,32 @@ def rename_workdir(wd: WorkDir, new_base: str, workspace: Path) -> WorkDir:
     return new_wd
 
 
-def recent_workdirs(workspace: Path, limit: int = 20) -> list[dict]:
+def set_hidden(root: Path, hidden: bool = True) -> bool:
+    """논문을 목록에서 숨기거나 되돌린다 — 파일은 그대로 두고 status.json에 표시만 남긴다.
+
+    삭제는 되돌릴 수 없지만 이건 표시만 지우는 안전한 정리 수단이다(목록이 길어졌을 때).
+    """
+    wd = WorkDir(Path(root))
+    if not wd.root.is_dir():
+        return False
+    try:
+        status = wd.load_status()
+        if hidden:
+            status["hidden"] = True
+        else:
+            status.pop("hidden", None)
+        wd.save_status(status)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = False) -> list[dict]:
     """작업 폴더에서 유효한 .md4 작업 디렉토리를 최근 수정순으로.
 
-    반환 항목: {name, root(Path), title, authors, year, venue, has_ko, opened, mtime}
+    반환 항목: {name, root(Path), title, authors, year, venue, has_ko, opened, hidden, mtime}
     서지(authors/year/venue)는 paper_meta.json(LLM 추출)이 있으면 채우고, 없으면 빈 값.
+    사용자가 숨긴 논문(status.json의 hidden)은 include_hidden일 때만 포함한다.
     """
     if not workspace.is_dir():
         return []
@@ -283,13 +342,16 @@ def recent_workdirs(workspace: Path, limit: int = 20) -> list[dict]:
                 venue = pm.get("venue") or ""
             except (OSError, ValueError):
                 pass
-        opened = False
+        opened = hidden = False
         st_path = md4 / "status.json"
         if st_path.exists():
             try:
-                opened = bool(json.loads(st_path.read_text(encoding="utf-8")).get("opened_at"))
+                st = json.loads(st_path.read_text(encoding="utf-8"))
+                opened, hidden = bool(st.get("opened_at")), bool(st.get("hidden"))
             except (OSError, ValueError):
                 pass
+        if hidden and not include_hidden:
+            continue
         found.append({
             "name": md4.stem,
             "root": md4,
@@ -299,6 +361,7 @@ def recent_workdirs(workspace: Path, limit: int = 20) -> list[dict]:
             "venue": venue,
             "has_ko": (md4 / "out" / "paper.ko.md").exists(),
             "opened": opened,  # 리뷰 화면을 한 번이라도 연 적 있는지 (미열람 표시용)
+            "hidden": hidden,  # 사용자가 목록에서 감춘 논문 (파일은 그대로)
             "mtime": md4.stat().st_mtime,
         })
     found.sort(key=lambda d: d["mtime"], reverse=True)

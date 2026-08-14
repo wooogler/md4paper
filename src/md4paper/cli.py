@@ -117,6 +117,72 @@ def workspace(path: Path | None) -> None:
     click.echo(f"작업 폴더 설정됨: {config.resolve_workspace()}")
 
 
+@cli.command("library")
+@click.option("--en", "en_dir", type=click.Path(path_type=Path), default=None,
+              help="영어 마크다운을 쌓을 폴더")
+@click.option("--ko", "ko_dir", type=click.Path(path_type=Path), default=None,
+              help="한국어 마크다운을 쌓을 폴더")
+@click.option("--pdf", "pdf_dir", type=click.Path(path_type=Path), default=None,
+              help="원본 PDF 사본을 쌓을 폴더 (md와 같은 기준명)")
+@click.option("--off", "which_off", type=click.Choice(["en", "ko", "pdf", "all"]), default=None,
+              help="지정 해제")
+@click.option("--export", "export_all", is_flag=True, help="작업 폴더의 논문을 지금 전부 내보내기")
+def library_cmd(en_dir: Path | None, ko_dir: Path | None, pdf_dir: Path | None,
+                which_off: str | None, export_all: bool) -> None:
+    """저장 위치 조회/설정 — 변환한 논문의 마크다운·PDF가 쌓일 폴더 (종류별 따로)."""
+    from md4paper import library
+
+    for which, path in (("en", en_dir), ("ko", ko_dir), ("pdf", pdf_dir)):
+        if path is not None:
+            config.set_library_dir(which, str(path))
+            click.echo(f"{which} 저장 위치: {config.resolve_library_dir(which)}")
+    if which_off:
+        for which in (library.KINDS if which_off == "all" else (which_off,)):
+            config.set_library_dir(which, None)
+            click.echo(f"{which} 저장 위치 해제됨")
+    if export_all:
+        from md4paper.workdir import recent_workdirs
+
+        roots = [r["root"] for r in recent_workdirs(config.resolve_workspace(), limit=1000)]
+        ok, failed = library.export_many(roots)
+        click.echo(f"{ok}편 내보냄" + (f" · {failed}편 실패" if failed else ""))
+    if en_dir is None and ko_dir is None and pdf_dir is None and not which_off and not export_all:
+        for which in library.KINDS:
+            cur = config.resolve_library_dir(which)
+            click.echo(f"{which}: {cur if cur else '미설정'}")
+        click.echo(f"자동 저장: {'켜짐' if config.resolve_library_auto() else '꺼짐'}")
+        click.echo("변경: md4paper library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF")
+
+
+@cli.command("naming")
+@click.argument("template", required=False)
+@click.option("--apply", "apply_now", is_flag=True,
+              help="기존 논문의 폴더·PDF·저장 위치 사본 이름을 지금 규칙으로 정리")
+@click.option("--reset", is_flag=True, help="기본 규칙으로 되돌리기")
+def naming_cmd(template: str | None, apply_now: bool, reset: bool) -> None:
+    """논문 파일 이름 규칙 조회/설정 — 폴더·PDF·저장 위치 사본이 모두 이 이름을 쓴다."""
+    from md4paper import paper_meta
+
+    if reset:
+        config.set_section_value("output", "naming", None)
+        click.echo(f"기본 규칙으로 되돌림: {config.DEFAULT_NAMING}")
+    if template:
+        err = config.naming_template_error(template)
+        if err:
+            raise click.ClickException(f"이름 규칙 오류: {err}")
+        config.set_section_value("output", "naming", template)
+        click.echo("이름 규칙 설정됨")
+    click.echo(f"현재 규칙: {config.resolve_naming_template()}")
+    click.echo(f"예시: {paper_meta.naming_preview()}")
+    if apply_now:
+        counts = paper_meta.apply_naming(config.resolve_workspace())
+        click.echo(f"{counts['renamed']}편 이름 변경 · {counts['unchanged']}편 유지"
+                   + (f" · {counts['no_meta']}편 서지 없음(건너뜀)" if counts["no_meta"] else ""))
+    elif not template and not reset:
+        click.echo("조각: {year} 연도 · {title} 제목 약칭 · {author} 1저자 성 · {venue} 학회")
+        click.echo('변경: md4paper naming "{year}_{title}_{author}" · 기존 논문 정리: md4paper naming --apply')
+
+
 @keys.command("list")
 def keys_list() -> None:
     """설정된 프로바이더/키 여부 표시 (값은 마스킹)."""

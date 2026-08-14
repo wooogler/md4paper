@@ -11,7 +11,7 @@ import re
 import time
 from pathlib import Path
 
-from md4paper import config
+from md4paper import config, library
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir
@@ -617,7 +617,10 @@ def _auto_metadata(wd: WorkDir) -> None:
 
 
 def _auto_rename(wd: WorkDir, workspace: Path) -> WorkDir:
-    """서지에서 폴더명을 '{year}_{ShortTitle}_{1저자성}'으로 정리 (실패·불가 시 원본 wd 유지)."""
+    """서지에서 폴더·PDF 이름을 이름 규칙([output].naming, 기본 {year}_{title}_{author})으로 정리.
+
+    실패·불가(서지 없음 등) 시 원본 wd 유지.
+    """
     from md4paper import paper_meta
     from md4paper.workdir import rename_workdir
 
@@ -695,6 +698,7 @@ def build(ctrl: UIController) -> None:
     def commit() -> None:
         """구조/설정 변경을 자동 저장 + 재조립 (별도 저장 버튼 없이 항상 최신)."""
         ctrl.save_and_reassemble()
+        library.auto_export(ctrl.wd)  # 저장 위치를 지정했으면 그 폴더의 사본도 최신으로
 
     def change_level(sid: str, value) -> None:  # noqa: ANN001
         """레벨 변경 → 자동 저장 + 즉시 프리뷰·트리에 반영."""
@@ -1185,6 +1189,7 @@ def build(ctrl: UIController) -> None:
                     .tooltip("스크롤 시 PDF 페이지 따라오기 " + ("(켜짐)" if viewer_state["sync"] else "(꺼짐)"))
             ui.space()
             export_fmt_review()
+            library_button()
             ui.button("영어 zip", icon="download", on_click=download_en).props("flat dense no-caps color=primary")
             ui.button("한국어 zip", icon="download", on_click=download_ko).props("flat dense no-caps color=primary")
 
@@ -1361,7 +1366,10 @@ def build(ctrl: UIController) -> None:
                 side_by_side.refresh()
                 translate_state["failures"] = summary.get("failures", {})
                 bar.value = 1
+                saved = await run.io_bound(library.auto_export, ctrl.wd)  # 저장 위치로 자동 저장
                 msg = f"번역 완료 (≈${summary['cost_usd']:.4f})"
+                if saved:
+                    msg += f" · 저장 위치에 {len(saved)}개 파일 저장"
                 if summary.get("passthrough"):
                     msg += f" · {summary['passthrough']}개 섹션은 아래 표시(구조 검증 실패)"
                 ui.notify(msg, type="positive")
@@ -1518,6 +1526,7 @@ def build(ctrl: UIController) -> None:
                 edit_toggle()
             ui.space()
             export_fmt_review()
+            library_button()
             ui.button("영어 다운로드 (zip)", icon="download", on_click=download_en) \
                 .props("flat dense no-caps color=primary")
 
@@ -1764,6 +1773,31 @@ def build(ctrl: UIController) -> None:
         name, data = ctrl.export_zip("ko", config.resolve_export_target())
         ui.download.content(data, name, media_type="application/zip")
 
+    async def save_to_library() -> None:
+        """홈에서 지정한 '저장 위치' 폴더에 결과 마크다운을 저장 (자동 저장을 꺼 뒀을 때도 수동으로)."""
+        from nicegui import run as ng_run
+
+        if not library.configured():
+            ui.notify("저장 위치가 지정돼 있지 않습니다 — 홈의 '저장 위치'에서 폴더를 고르세요.", type="warning")
+            return
+        try:
+            saved = await ng_run.io_bound(library.export_paper, ctrl.wd)
+        except OSError as ex:
+            ui.notify(f"저장 실패: {ex}", type="negative")
+            return
+        if not saved:
+            ui.notify("저장할 마크다운이 없습니다.", type="warning")
+            return
+        ui.notify("저장됨 · " + " · ".join(str(p) for p in saved), type="positive")
+
+    def library_button() -> None:
+        """저장 위치가 지정돼 있을 때만 보이는 '폴더로 저장' 버튼."""
+        if not library.configured():
+            return
+        dests = " · ".join(str(d) for d in (library.dir_for(k) for k in library.KINDS) if d)
+        ui.button("폴더로 저장", icon="drive_file_move", on_click=save_to_library) \
+            .props("flat dense no-caps color=grey-8").tooltip(f"저장 위치: {dests}")
+
     # 내보내기 형식 드롭다운 — 변환·번역·뷰어 탭 다운로드 옆에 두되 전역 설정(config)을 그대로 쓴다.
     # 공유 refreshable이라 한 탭에서 바꾸면 다른 탭·홈의 선택도 같은 값으로 동기화된다.
     @ui.refreshable
@@ -1867,14 +1901,19 @@ def _mark_opened(wd: WorkDir) -> None:
 def save_source(data: bytes, filename: str, upload_dir: Path) -> Path:
     """업로드 바이트를 파일별 전용 하위 폴더에 저장하고 원본 경로 반환 (변환 전에 디스크에 보존).
 
-    같은 파일명의 폴더가 이미 있으면(=이미 변환한 논문) 덮어쓰지 않고 '<이름> (2)'처럼 고유 폴더를
-    새로 만든다 → 같은 PDF를 다시 올리면 기존 항목을 유지한 채 새 항목으로 변환된다.
+    같은 이름의 폴더에 **이미 변환한 논문**(.md4)이 들어 있으면 덮어쓰지 않고 '<이름> (2)'처럼
+    고유 폴더를 새로 만든다 → 같은 PDF를 다시 올려도 기존 항목이 살아남는다.
+    반면 .md4가 없는 폴더는 **변환되지 않은 업로드 잔여물**(중간에 껐거나 큐가 날아간 경우)이므로
+    그대로 재사용한다 — 안 그러면 실패한 업로드가 이름을 영영 점유해 (2)가 계속 붙는다.
+    (같은 파일명이 큐에서 처리 중이면 호출 전에 걸러지므로, 여기서 만나는 껍데기는 대기 중이 아니다.)
     """
+    from md4paper.workdir import is_upload_stub
+
     stem = Path(filename).stem
     workspace = upload_dir / stem
-    if workspace.exists():
+    if workspace.exists() and not is_upload_stub(workspace):
         i = 2
-        while (upload_dir / f"{stem} ({i})").exists():
+        while (upload_dir / f"{stem} ({i})").exists() and not is_upload_stub(upload_dir / f"{stem} ({i})"):
             i += 1
         workspace = upload_dir / f"{stem} ({i})"
     workspace.mkdir(parents=True, exist_ok=True)
@@ -1944,9 +1983,11 @@ async def _process_queue(state: dict) -> None:
                     await run.io_bound(_auto_glossary, wd)
                     item["status"], item["since"] = "meta", time.monotonic()
                     await run.io_bound(_auto_metadata, wd)
-                    # 서지에서 폴더명 자동 정리: {year}_{ShortTitle}_{1저자성}
+                    # 서지에서 폴더·PDF 이름 자동 정리 (이름 규칙 [output].naming)
                     wd = await run.io_bound(_auto_rename, wd, state["upload_dir"])
                     item["wd_root"] = str(wd.root)
+                # 전역 '저장 위치'가 지정돼 있으면 결과 마크다운을 거기에 쌓는다 (리네임 후 최종 이름으로)
+                await run.io_bound(library.auto_export, wd)
                 item["status"], item["done_at"] = "done", time.monotonic()
             except Exception as ex:  # noqa: BLE001 — 항목 실패가 큐 전체를 막지 않게
                 item["status"], item["error"] = "failed", str(ex)
@@ -1954,21 +1995,189 @@ async def _process_queue(state: dict) -> None:
         state["worker_running"] = False
 
 
+_LIB_LABEL = {"en": "영어 마크다운", "ko": "한국어 마크다운", "pdf": "PDF 원본"}
+
+
+def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: ANN001 — () -> None
+    """홈 '저장 위치' 패널 — 변환한 논문이 쌓일 폴더(영어·한국어 따로) + 작업 폴더.
+
+    폴더는 OS 기본 대화상자로 고르고(로컬 앱이라 서버 = 내 컴퓨터), 대화상자를 못 쓰는
+    환경에서는 경로를 직접 입력한다. 값은 전역 설정(config.toml)이라 다음 실행에도 유지된다.
+    """
+    from nicegui import run, ui
+
+    from md4paper.ui import folder_dialog
+    from md4paper.workdir import recent_workdirs
+
+    can_pick = folder_dialog.available()
+
+    def _no_dialog(btn) -> None:  # noqa: ANN001 — ui.button
+        btn.disable()
+        btn.tooltip("이 환경에선 폴더 대화상자를 열 수 없습니다 — 경로를 직접 입력하세요")
+
+    def set_dir(which: str, path: str | None) -> None:
+        """폴더 지정/해제 — 값이 실제로 바뀔 때만 저장하고 다시 그린다(blur마다 포커스가 튀지 않게)."""
+        raw = str(path).strip() if path else ""
+        new = Path(raw).expanduser() if raw else None
+        if library.dir_for(which) == new:
+            return
+        config.set_library_dir(which, str(new) if new else None)
+        lib_rows.refresh()
+        ui.notify(f"{_LIB_LABEL[which]} → {new}" if new else f"{_LIB_LABEL[which]} 저장 위치 해제됨",
+                  type="positive" if new else "info")
+
+    async def pick(which: str) -> None:
+        cur = library.dir_for(which) or state["upload_dir"]
+        picked = await run.io_bound(
+            folder_dialog.choose_folder, f"{_LIB_LABEL[which]}을 쌓을 폴더 선택", str(cur))
+        if picked:  # 취소면 조용히 원래 값 유지
+            set_dir(which, picked)
+
+    @ui.refreshable
+    def lib_rows() -> None:
+        for which in library.KINDS:
+            cur = library.dir_for(which)
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                ui.label(_LIB_LABEL[which]).classes("text-sm shrink-0").style("width:104px")
+                inp = ui.input(value=str(cur or ""), placeholder="폴더를 고르거나 경로를 붙여넣으세요") \
+                    .props("dense outlined").classes("flex-grow")
+                # 직접 입력은 포커스를 벗어나거나 Enter를 칠 때만 저장(타이핑 중 매번 쓰지 않게)
+                inp.on("blur", lambda _, w=which, i=inp: set_dir(w, (i.value or "").strip() or None))
+                inp.on("keydown.enter", lambda _, w=which, i=inp: set_dir(w, (i.value or "").strip() or None))
+                btn = ui.button(icon="folder_open", on_click=lambda _, w=which: pick(w)) \
+                    .props("dense outline").tooltip("폴더 선택 대화상자 열기")
+                if not can_pick:
+                    _no_dialog(btn)
+                clear = ui.button(icon="close", on_click=lambda _, w=which: set_dir(w, None)) \
+                    .props("flat dense round size=sm color=grey").tooltip("이 폴더 설정 해제")
+                clear.set_visibility(cur is not None)
+        if library.same_folder():
+            ui.label("두 폴더가 같아서 파일 이름 뒤에 .en / .ko를 붙여 구분합니다.") \
+                .classes("text-xs text-orange-600")
+
+    async def export_all() -> None:
+        if not library.configured():
+            ui.notify("먼저 폴더를 지정하세요.", type="warning")
+            return
+        roots = [r["root"] for r in recent_workdirs(state["upload_dir"], limit=1000)]
+        if not roots:
+            ui.notify("내보낼 논문이 없습니다.", type="warning")
+            return
+        export_btn.props("loading")
+        try:
+            ok, failed = await run.io_bound(library.export_many, roots)
+        finally:
+            export_btn.props(remove="loading")
+        msg = f"{ok}편을 저장 위치에 내보냈습니다" + (f" · {failed}편 실패" if failed else "")
+        ui.notify(msg, type="positive" if ok else "warning")
+
+    async def pick_workspace() -> None:
+        picked = await run.io_bound(
+            folder_dialog.choose_folder, "작업 폴더 선택 (원본 PDF·중간 파일)", str(state["upload_dir"]))
+        if not picked:
+            return
+        config.set_section_value("output", "workspace", picked)
+        state["upload_dir"] = Path(picked)
+        ws_row.refresh()
+        on_workspace_change()
+        ui.notify(f"작업 폴더 → {picked}", type="positive")
+
+    @ui.refreshable
+    def ws_row() -> None:
+        cur = str(state["upload_dir"])
+        with ui.row().classes("items-center gap-2 w-full no-wrap"):
+            ui.label("작업 폴더").classes("text-sm shrink-0").style("width:104px")
+            ui.label(cur).classes("text-xs text-gray-500 flex-grow min-w-0 truncate").tooltip(cur)
+            btn = ui.button("변경", icon="folder_open", on_click=pick_workspace) \
+                .props("dense outline no-caps")
+            if not can_pick:
+                _no_dialog(btn)
+
+    # --- 파일 이름 규칙 (논문 폴더·PDF·저장 위치 사본이 모두 이 규칙의 기준명을 공유) ---
+    from md4paper import paper_meta
+
+    def save_template(value: str) -> None:
+        tpl = (value or "").strip()
+        if tpl == config.resolve_naming_template():
+            return
+        err = config.naming_template_error(tpl)
+        if err:
+            ui.notify(f"이름 규칙 오류: {err}", type="negative")
+            naming_rows.refresh()  # 입력을 저장된 값으로 되돌림
+            return
+        config.set_section_value("output", "naming", tpl)
+        naming_rows.refresh()
+        ui.notify(f"이름 규칙 저장됨 · 예: {paper_meta.naming_preview()}", type="positive")
+
+    async def apply_naming_now() -> None:
+        naming_btn.props("loading")
+        try:
+            counts = await run.io_bound(paper_meta.apply_naming, state["upload_dir"])
+        finally:
+            naming_btn.props(remove="loading")
+        msg = f"{counts['renamed']}편 이름 변경"
+        if counts["no_meta"]:
+            msg += f" · {counts['no_meta']}편은 서지 정보가 없어 건너뜀"
+        ui.notify(msg, type="positive" if counts["renamed"] else "info")
+        on_workspace_change()  # 목록·경로 표시 새로고침
+
+    @ui.refreshable
+    def naming_rows() -> None:
+        with ui.row().classes("items-center gap-2 w-full no-wrap"):
+            ui.label("이름 규칙").classes("text-sm shrink-0").style("width:104px")
+            inp = ui.input(value=config.resolve_naming_template()) \
+                .props("dense outlined").classes("flex-grow min-w-0")
+            inp.on("blur", lambda _, i=inp: save_template(i.value))
+            inp.on("keydown.enter", lambda _, i=inp: save_template(i.value))
+        ui.label(f"예: {paper_meta.naming_preview()} — " +
+                 "조각: {year} 연도 · {title} 제목 약칭 · {author} 1저자 성 · {venue} 학회") \
+            .classes("text-xs text-gray-400")
+
+    with ui.expansion("저장 위치 — 변환한 논문을 모아둘 폴더", icon="folder_open",
+                      value=False).classes("w-full").props("dense"):
+        ui.label("변환·번역이 끝난 마크다운(원하면 원본 PDF도)을 고른 폴더에 쌓습니다. 영어·한국어·PDF를 "
+                 "각각 다른 폴더로 보낼 수 있어요 (예: Obsidian 볼트의 Papers/EN, Papers/KO, Papers/PDF).") \
+            .classes("text-xs text-gray-500")
+        lib_rows()
+        ui.switch("변환·번역이 끝나면 자동으로 저장", value=config.resolve_library_auto(),
+                  on_change=lambda e: config.set_section_value("library", "auto", e.value)) \
+            .props("dense").tooltip("끄면 아래 버튼이나 논문 화면에서 직접 내보낼 때만 저장합니다")
+        with ui.row().classes("items-center gap-2"):
+            export_btn = ui.button("이미 변환한 논문도 지금 내보내기", icon="drive_file_move",
+                                   on_click=export_all).props("dense outline no-caps")
+        ui.label("그림은 images/<논문 이름>/ 아래에 들어갑니다. 같은 논문을 다시 내보내면 덮어씁니다. "
+                 "내보내기 형식(범용·Notion·Obsidian) 설정을 그대로 따릅니다.").classes("text-xs text-gray-400")
+        ui.separator().classes("q-my-xs")
+        naming_rows()
+        with ui.row().classes("items-center gap-2"):
+            naming_btn = ui.button("기존 논문·PDF 이름 정리", icon="drive_file_rename_outline",
+                                   on_click=apply_naming_now).props("dense outline no-caps") \
+                .tooltip("이미 변환한 논문의 폴더·PDF·저장 위치 사본 이름을 지금 규칙으로 맞춥니다")
+        ui.label("논문 폴더·원본 PDF·저장 위치의 md/PDF가 모두 이 규칙의 이름을 씁니다 — "
+                 "이름이 같아야 md에서 PDF를 바로 찾을 수 있어요.").classes("text-xs text-gray-400")
+        ui.separator().classes("q-my-xs")
+        ws_row()
+        ui.label("작업 폴더에는 올린 원본 PDF와 작업 파일(.md4)이 들어갑니다 — 위 저장 위치와 별개입니다.") \
+            .classes("text-xs text-gray-400")
+
+
 def build_home(state: dict) -> None:
     """업로드 홈 — PDF/.md를 올리면 변환 후 리뷰로 이동."""
     from nicegui import run, ui
 
-    upload_dir: Path = state["upload_dir"]
+    def ws() -> Path:
+        """작업 폴더 — '저장 위치'에서 바꿀 수 있으므로 항상 state에서 읽는다."""
+        return state["upload_dir"]
 
     ui.add_css(_HOME_CSS)
     state.setdefault("queue", [])
     state.setdefault("recent_new", {})
 
     from md4paper.extract import DEFAULT_BACKEND, available_backends
-    from md4paper.workdir import delete_workdir, recent_workdirs
+    from md4paper.workdir import delete_workdir, recent_workdirs, set_hidden
 
     backend_ready = bool(available_backends())
-    search_state = {"q": "", "sort": "recent"}
+    search_state = {"q": "", "sort": "recent", "show_hidden": False}
     selected: set[str] = set()  # 다중 선택된 워크디렉토리 root (문자열)
     _PHASE_ICON = {"pending": "schedule", "extracting": "sync", "cite": "sync",
                    "glossary": "sync", "meta": "sync", "done": "check_circle", "failed": "error"}
@@ -1990,23 +2199,48 @@ def build_home(state: dict) -> None:
         name, data = ctrl.export_zip(which, config.resolve_export_target())
         ui.download.content(data, name, media_type="application/zip")
 
-    def confirm_delete(item: dict) -> None:
-        with ui.dialog() as dlg, ui.card():
-            ui.label("이 변환 파일을 삭제할까요?").classes("font-bold")
-            ui.label(item["title"]).classes("text-sm text-gray-500").style("max-width:420px")
-            ui.label("작업 디렉토리(원본 PDF·마크다운·이미지)가 영구 삭제됩니다.").classes("text-xs text-gray-400")
-            with ui.row().classes("justify-end w-full"):
-                ui.button("취소", on_click=dlg.close).props("flat")
+    def hide_paper(item: dict, hidden: bool = True) -> None:
+        """목록 표시만 끄기/되돌리기 (파일은 그대로 — status.json에 표시)."""
+        if not set_hidden(item["root"], hidden):
+            ui.notify("처리 실패 (경로 확인).", type="negative")
+            return
+        selected.discard(str(item["root"]))  # 숨기면 일괄 다운로드 선택에서도 빠진다
+        sel_bar.refresh()
+        recent_list.refresh()
+        ui.notify("목록에서 숨겼습니다 — 파일은 그대로입니다." if hidden else "목록에 다시 표시합니다.",
+                  type="positive")
 
-                def do_delete() -> None:
-                    ok = delete_workdir(item["root"], upload_dir)
-                    dlg.close()
-                    if ok:
-                        recent_list.refresh()
-                        ui.notify("삭제됨", type="positive")
-                    else:
-                        ui.notify("삭제 실패 (경로 확인).", type="negative")
-                ui.button("삭제", on_click=do_delete).props("color=negative")
+    def confirm_delete(item: dict) -> None:
+        """목록에서 없애는 두 가지 방법을 고르게 한다 — 표시만 숨기기(안전) vs 파일 영구 삭제."""
+        with ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:460px"):
+            ui.label("이 논문을 목록에서 없앨까요?").classes("font-bold")
+            ui.label(item["title"]).classes("text-sm text-gray-500")
+            ui.label("· 목록에서 숨기기 — 파일은 그대로 두고 목록에서만 감춥니다. "
+                     "나중에 '숨긴 논문 보기'에서 되돌릴 수 있습니다.").classes("text-xs text-gray-500")
+            ui.label("· 파일 삭제 — 작업 디렉토리(원본 PDF·마크다운·이미지)까지 지웁니다. 되돌릴 수 없습니다.") \
+                .classes("text-xs text-gray-500")
+
+            def do_delete() -> None:
+                ok = delete_workdir(item["root"], ws())
+                dlg.close()
+                if ok:
+                    selected.discard(str(item["root"]))
+                    sel_bar.refresh()
+                    recent_list.refresh()
+                    ui.notify("삭제됨", type="positive")
+                else:
+                    ui.notify("삭제 실패 (경로 확인).", type="negative")
+
+            def do_hide() -> None:
+                dlg.close()
+                hide_paper(item, True)
+
+            with ui.row().classes("justify-end w-full items-center gap-2"):
+                ui.button("취소", on_click=dlg.close).props("flat")
+                ui.button("파일 삭제", icon="delete_forever", on_click=do_delete) \
+                    .props("flat no-caps color=negative")
+                ui.button("목록에서 숨기기", icon="visibility_off", on_click=do_hide) \
+                    .props("unelevated no-caps color=primary")
         dlg.open()
 
     def _bib_line(r: dict) -> str:
@@ -2038,6 +2272,15 @@ def build_home(state: dict) -> None:
         name, data = bulk_zip(roots, which, config.resolve_export_target())
         ui.download.content(data, name, media_type="application/zip")
 
+    async def save_bulk_to_library() -> None:
+        """선택한 논문들을 전역 저장 위치(영어·한국어 폴더)로 내보내기."""
+        if not library.configured():
+            ui.notify("저장 위치가 지정돼 있지 않습니다 — 왼쪽 '저장 위치'에서 폴더를 고르세요.", type="warning")
+            return
+        ok, failed = await run.io_bound(library.export_many, [Path(p) for p in selected])
+        ui.notify(f"{ok}편 저장됨" + (f" · {failed}편 실패" if failed else ""),
+                  type="positive" if ok else "warning")
+
     @ui.refreshable
     def sel_bar() -> None:
         if not selected:
@@ -2046,6 +2289,9 @@ def build_home(state: dict) -> None:
             ui.label(f"{len(selected)}개 선택").classes("text-sm font-semibold text-primary")
             ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")).props("dense outline")
             ui.button("한국어 zip", icon="download", on_click=lambda: download_bulk("ko")).props("dense outline")
+            if library.configured():
+                ui.button("폴더로 저장", icon="drive_file_move", on_click=save_bulk_to_library) \
+                    .props("dense outline").tooltip("저장 위치로 내보내기")
             ui.space()
             ui.button("선택 해제", on_click=lambda: (selected.clear(), sel_bar.refresh(), recent_list.refresh())) \
                 .props("flat dense")
@@ -2054,9 +2300,18 @@ def build_home(state: dict) -> None:
         selected.add(root) if on else selected.discard(root)
         sel_bar.refresh()
 
+    def toggle_hidden_view() -> None:
+        search_state["show_hidden"] = not search_state["show_hidden"]
+        recent_list.refresh()
+
     @ui.refreshable
     def recent_list() -> None:
-        items = list(recent_workdirs(upload_dir))
+        # 사용자가 숨긴 논문은 기본적으로 빼고, '숨긴 논문 보기'를 켰을 때만 함께 보여준다.
+        items = list(recent_workdirs(ws(), include_hidden=True))
+        n_hidden = sum(1 for r in items if r["hidden"])
+        show_hidden = search_state["show_hidden"]
+        if not show_hidden:
+            items = [r for r in items if not r["hidden"]]
         # 아직 큐에서 처리 중인 논문(추출 후 참고문헌·용어집·서지 정리 진행 중)은 숨긴다.
         # 중간에 열면 citation 등 AI 설정이 덜 된 상태라 혼란 → 전체 처리 완료 후에만 목록에 노출.
         active_roots = {
@@ -2077,6 +2332,10 @@ def build_home(state: dict) -> None:
             items.sort(key=lambda r: (not r["has_ko"], -r["mtime"]))
         else:
             items.sort(key=lambda r: -r["mtime"])
+        if n_hidden:  # 되돌릴 길이 항상 보이도록 (숨김이 '영영 사라짐'이 되지 않게)
+            ui.button(f"숨긴 논문 {n_hidden}편 " + ("접기" if show_hidden else "보기"),
+                      icon="visibility" if show_hidden else "visibility_off",
+                      on_click=toggle_hidden_view).props("flat dense no-caps size=sm color=grey")
         if not items:
             ui.label("검색 결과가 없습니다." if q else "아직 변환한 논문이 없습니다. 왼쪽에서 PDF를 올리세요.") \
                 .classes("text-xs text-gray-400")
@@ -2096,13 +2355,16 @@ def build_home(state: dict) -> None:
                         "gap-0 flex-grow min-w-0 cursor-pointer") \
                         .on("click", lambda _, root=r["root"]: open_wd(root))
                     with title_area:
-                        with ui.row().classes("items-center gap-1.5 no-wrap min-w-0"):
+                        # .nicegui-column은 align-items:flex-start — 자식이 컬럼 폭으로 늘어나지 않아
+                        # w-full(컬럼 자식)·min-w-0(행 안 라벨) 없이는 truncate가 발동하지 않고
+                        # 긴 제목이 카드·화면 밖으로 흘러넘친다.
+                        with ui.row().classes("items-center gap-1.5 no-wrap w-full min-w-0"):
                             if unopened:
                                 ui.element("span").classes("md4-new-dot").tooltip("아직 열지 않음")
                             ui.label(r["title"]).classes(
-                                "text-sm truncate" + (" font-semibold" if unopened else "")).tooltip(r["title"])
+                                "text-sm truncate min-w-0" + (" font-semibold" if unopened else "")).tooltip(r["title"])
                         if bib:
-                            ui.label(bib).classes("text-xs text-gray-500 truncate")
+                            ui.label(bib).classes("text-xs text-gray-500 truncate w-full")
                         with ui.row().classes("items-center gap-2 no-wrap"):
                             if r["has_ko"]:
                                 ui.badge("번역 완료", color="green").props("outline")
@@ -2110,6 +2372,8 @@ def build_home(state: dict) -> None:
                                 ui.badge("영어 변환", color="blue").props("outline")
                             if unopened:
                                 ui.badge("NEW", color="primary")
+                            if r["hidden"]:
+                                ui.badge("숨김", color="grey").props("outline")
                             ui.label(_relative_time(r["mtime"])).classes("text-xs text-gray-400")
                     # 번역된 문서는 원문(EN)·번역(KO)을 각각 버튼으로. 미번역은 영어 하나만.
                     ui.button("EN", icon="download", on_click=lambda _, root=r["root"]: download_zip(root, "en")) \
@@ -2119,8 +2383,14 @@ def build_home(state: dict) -> None:
                         ui.button("KO", icon="download", on_click=lambda _, root=r["root"]: download_zip(root, "ko")) \
                             .props("flat dense no-caps size=sm color=primary").classes("shrink-0") \
                             .tooltip("한국어 번역 마크다운 zip (마크다운+이미지)")
-                    ui.button(icon="delete", on_click=lambda _, item=r: confirm_delete(item)) \
-                        .props("flat dense round size=sm color=grey").classes("shrink-0").tooltip("삭제")
+                    if r["hidden"]:  # 숨긴 논문은 삭제 대신 '다시 표시'
+                        ui.button(icon="visibility", on_click=lambda _, item=r: hide_paper(item, False)) \
+                            .props("flat dense round size=sm color=primary").classes("shrink-0") \
+                            .tooltip("목록에 다시 표시")
+                    else:
+                        ui.button(icon="delete", on_click=lambda _, item=r: confirm_delete(item)) \
+                            .props("flat dense round size=sm color=grey").classes("shrink-0") \
+                            .tooltip("목록에서 숨기기 / 파일 삭제")
 
     # ===== 왼쪽 업로드/큐 =====
     async def handle(e) -> None:  # noqa: ANN001 — NiceGUI upload 이벤트 (파일마다 발화)
@@ -2130,7 +2400,7 @@ def build_home(state: dict) -> None:
             ui.notify(f"{fname} 은(는) 이미 대기열에 있습니다.", type="info")
             return
         pages = _pdf_page_count(data) if fname.lower().endswith(".pdf") else 0
-        src = await run.io_bound(save_source, data, fname, upload_dir)
+        src = await run.io_bound(save_source, data, fname, ws())
         state["queue"].append({
             "name": fname, "src_path": str(src), "pages": pages,
             "backend": DEFAULT_BACKEND, "ocr": ocr.value,
@@ -2172,7 +2442,7 @@ def build_home(state: dict) -> None:
                     ui.icon(_PHASE_ICON[st], size="20px").classes(
                         color + (" md4-spin" if st in _AI_PHASES or st == "extracting" else ""))
                     with ui.column().classes("gap-0 flex-grow min-w-0"):
-                        ui.label(it["name"]).classes("text-sm truncate")
+                        ui.label(it["name"]).classes("text-sm truncate w-full")  # w-full 없으면 긴 파일명이 카드 밖으로
                         ui.label(sub).classes("text-xs " + ("text-red-500" if st == "failed" else "text-gray-400"))
                     if it.get("garbled"):
                         ui.icon("warning", size="18px").classes("text-orange-500 shrink-0") \
@@ -2181,6 +2451,10 @@ def build_home(state: dict) -> None:
                         ui.button(icon="close", on_click=lambda _, it=it: (
                             state["queue"].remove(it) if it in state["queue"] else None, queue_panel.refresh())) \
                             .props("flat dense round size=sm color=grey").classes("shrink-0").tooltip("취소" if st == "pending" else "닫기")
+
+    @ui.refreshable
+    def dropzone_caption() -> None:  # 작업 폴더는 '저장 위치'에서 바뀔 수 있으므로 갱신 가능하게
+        ui.label(f"논문별 세부 설정은 변환 후 화면에서. 작업 폴더: {ws()}").classes("text-xs text-gray-400")
 
     def poll() -> None:  # 큐 진행 갱신 + 전체 처리 완료(또는 실패) 시에만 목록에 등장 + 하이라이트
         q = state["queue"]
@@ -2394,6 +2668,10 @@ def build_home(state: dict) -> None:
                 ui.switch("참고문헌에 DOI/arXiv 링크 달기", value=config.resolve_reference_links(),
                           on_change=lambda e: save_global("cite", "reference_links", e.value, "참고문헌 링크"))
 
+            # 저장 위치 — 변환한 논문(영어·한국어 마크다운)이 쌓일 폴더 + 작업 폴더
+            build_location_settings(
+                state, lambda: (dropzone_caption.refresh(), recent_list.refresh()))
+
             if not backend_ready:
                 ui.label("⚠ 추출 엔진(docling)이 설치되지 않았습니다. `uv sync`로 설치하세요 — "
                          "PDF 변환이 되지 않습니다(.md 입력은 가능).") \
@@ -2410,7 +2688,7 @@ def build_home(state: dict) -> None:
                     ui.label("PDF를 끌어다 놓거나 클릭해 선택").classes("text-base")
                     ui.label("여러 개를 올리면 순서대로(배치) 변환합니다").classes("text-xs text-gray-400")
 
-            ui.label(f"논문별 세부 설정은 변환 후 화면에서. 저장 위치: {upload_dir}").classes("text-xs text-gray-400")
+            dropzone_caption()
 
             queue_panel()
 

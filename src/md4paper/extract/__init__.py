@@ -16,6 +16,7 @@ from md4paper.extract.text_clean import (
     ExtractError,
     clean_extracted,
     repair_garbled_from_pdf,
+    repair_mojibake_from_pdf,
     sniff_text_coverage,
 )
 from md4paper.workdir import WorkDir
@@ -74,14 +75,17 @@ def extract(
     # 공통 후처리: 깨진 글자 복구(안전망) → 수학 유니코드 정규화 + 엔티티 복구
     raw = wd.raw_md.read_text(encoding="utf-8")
     raw, repaired = repair_garbled_from_pdf(raw, source)
+    # 2바이트 코드가 한자처럼 묶인 깨짐(구형 CID 폰트)도 PDF 텍스트 레이어로 되살린다
+    raw, moji_fixed, moji_left = repair_mojibake_from_pdf(raw, source)
     wd.raw_md.write_text(clean_extracted(raw), encoding="utf-8")
 
     final = wd.raw_md.read_text(encoding="utf-8")
     meta = {
         **part,
         "text_coverage": coverage,
-        "garbled_chars": final.count("�"),
-        "garbled_repaired": repaired,
+        # 남은 깨짐: U+FFFD + 되살리지 못한 묶임 글자 (홈 목록·CLI가 ⚠로 경고)
+        "garbled_chars": final.count("�") + moji_left,
+        "garbled_repaired": repaired + moji_fixed,
         "source": str(source.resolve()),
         "python": sys.version.split()[0],
         "ok": True,

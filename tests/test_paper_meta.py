@@ -67,6 +67,50 @@ def test_folder_base_omits_missing_pieces():
     assert paper_meta.folder_base(PaperMeta(title="", short_title="")) == ""  # 제목 없으면 리네임 스킵
 
 
+# --- 이름 규칙 템플릿 (전역 설정) ---
+_META = PaperMeta(title="Attention Is All You Need", authors=["Ashish Vaswani", "Noam Shazeer"],
+                  year=2017, venue="NeurIPS", short_title="Attention")
+
+
+def test_folder_base_custom_template():
+    assert paper_meta.folder_base(_META, "{author}{year}_{title}") == "Vaswani2017_Attention"
+    assert paper_meta.folder_base(_META, "{venue}-{year} {title}") == "NeurIPS-2017 Attention"
+
+
+def test_folder_base_collapses_separators_from_missing_pieces():
+    m = PaperMeta(title="Deep Nets", short_title="DeepNets")  # 연도·저자 없음
+    assert paper_meta.folder_base(m, "{year}_{title}_{author}") == "DeepNets"
+    assert paper_meta.folder_base(m, "{author} - {title}") == "DeepNets"
+
+
+def test_folder_base_reads_template_from_config():
+    from md4paper import config
+
+    config.set_section_value("output", "naming", "{title}--{year}")
+    assert paper_meta.folder_base(_META) == "Attention--2017"
+
+
+def test_folder_base_strips_unsafe_chars_from_literal():
+    # 규칙의 리터럴은 검증되지만, 혹시 남은 금지 문자는 렌더에서 한 번 더 방어한다
+    assert "/" not in paper_meta.folder_base(_META, "{year}/{title}")
+
+
+def test_naming_template_validation_and_fallback():
+    from md4paper import config
+
+    assert config.naming_template_error("{year}_{title}") is None
+    assert config.naming_template_error("논문") is not None  # 자리표시자 없음
+    assert config.naming_template_error("{year}/{title}") is not None  # 경로 문자
+    assert config.naming_template_error("") is not None
+    # 잘못된 값이 저장돼 있으면(수동 편집 등) 기본 규칙으로 폴백
+    config.set_section_value("output", "naming", "nope")
+    assert config.resolve_naming_template() == config.DEFAULT_NAMING
+
+
+def test_naming_preview_uses_example_meta():
+    assert paper_meta.naming_preview("{year}_{title}_{author}") == "2017_AttentionIsAllYouNeed_Vaswani"
+
+
 def test_year_from_pdf_date():
     assert paper_meta._year_from_pdf_date("D:20260409012226+00'00'") == 2026
     assert paper_meta._year_from_pdf_date("2025-03-01") == 2025
@@ -104,7 +148,22 @@ def test_rename_workdir_moves_container_md4_pdf_and_updates_source(tmp_path):
 def test_rename_workdir_uniquifies_on_collision(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
-    (ws / "2025_Dup_Lee").mkdir()  # 이미 같은 이름 폴더 존재
+    (ws / "2025_Dup_Lee" / "2025_Dup_Lee.md4").mkdir(parents=True)  # 이미 '변환된' 논문이 점유
     wd = _seed_paper_folder(ws, "paper", ws / "paper" / "paper.pdf")
     new_wd = rename_workdir(wd, "2025_Dup_Lee", ws)
     assert new_wd.root == ws / "2025_Dup_Lee (2)" / "2025_Dup_Lee (2).md4"
+
+
+def test_rename_workdir_absorbs_unconverted_stub(tmp_path):
+    # .md4 없는 폴더 = 변환되지 않은 업로드 잔여물 → 충돌로 보지 않고 그 이름을 가져온다
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "2025_Dup_Lee").mkdir()
+    (ws / "2025_Dup_Lee" / "leftover.pdf").write_bytes(b"%PDF old")
+    wd = _seed_paper_folder(ws, "paper", ws / "paper" / "paper.pdf")
+
+    new_wd = rename_workdir(wd, "2025_Dup_Lee", ws)
+
+    assert new_wd.root == ws / "2025_Dup_Lee" / "2025_Dup_Lee.md4"
+    assert not (ws / "paper").exists()  # 옛 폴더 정리됨
+    assert (ws / "2025_Dup_Lee" / "2025_Dup_Lee.pdf").exists()

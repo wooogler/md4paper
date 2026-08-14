@@ -378,3 +378,54 @@ def test_unheader_captions_keeps_real_sections():
     # 진짜 섹션 제목은 'Table N/Figure N'으로 시작하지 않으므로 건드리지 않는다
     md = "## 5 Results\n\n## Tables and Figures\n\n## Figure-Ground Segmentation\n\nBody.\n"
     assert _unheader_captions(md) == md
+
+
+# --- 2바이트 코드가 한자로 잘못 묶인 깨짐 복구 (구형 CID 폰트 PDF) ---
+def _pair(text: str) -> str:
+    """ASCII 문자열을 두 바이트씩 한 글자로 묶어 '한자로 보이는' 깨짐을 만든다."""
+    b = text.encode("ascii")
+    if len(b) % 2:
+        b += b" "
+    return "".join(chr((b[i] << 8) | b[i + 1]) for i in range(0, len(b), 2))
+
+
+def test_mojibake_repaired_from_pdf_text_layer(tmp_path, monkeypatch):
+    """docling이 깨뜨린 줄을 PDF 텍스트 레이어의 원문으로 되살린다 (글자가 빠져 있어도 정렬)."""
+    from md4paper import pdfio
+    from md4paper.extract import text_clean
+
+    real = "Looking Into the Black Box: Prospects and Limits in the Search for Mental Models"
+    lossy = "Looki Int t Bla Box Prospec a Limit t Searc f Menta Model"  # 추출이 흘린 글자들
+    monkeypatch.setattr(pdfio, "full_text", lambda p: f"Psychological Bulletin 1986\n{real}\nWilliam B. Rouse")
+
+    md = f"## {_pair(lossy)}\n\nplain english paragraph stays as is\n"
+    out, fixed, left = text_clean.repair_mojibake_from_pdf(md, tmp_path / "x.pdf")
+
+    assert (fixed, left) == (1, 0)
+    assert out.startswith(f"## {real}")
+    assert "plain english paragraph stays as is" in out
+
+
+def test_mojibake_repair_skips_when_pdf_has_no_match(tmp_path, monkeypatch):
+    """PDF에서 확정되지 않으면 건드리지 않고, 남은 깨진 글자를 보고한다 (⚠ 경고용)."""
+    from md4paper import pdfio
+    from md4paper.extract import text_clean
+
+    monkeypatch.setattr(pdfio, "full_text", lambda p: "completely unrelated document text")
+    md = f"## {_pair('Looki Int t Bla Box Prospec a Limit')}\n"
+    out, fixed, left = text_clean.repair_mojibake_from_pdf(md, tmp_path / "x.pdf")
+    assert fixed == 0 and left > 0
+    assert out == md  # 추측해서 엉뚱한 문장을 넣지 않는다
+
+
+def test_mojibake_repair_leaves_real_cjk_alone(tmp_path, monkeypatch):
+    """진짜 한자·한글 논문은 대상이 아니다 (두 바이트가 ASCII인 글자만 후보)."""
+    from md4paper import pdfio
+    from md4paper.extract import text_clean
+
+    called = []
+    monkeypatch.setattr(pdfio, "full_text", lambda p: called.append(p) or "")
+    md = "## 심층 신경망 기반 기계 번역 연구\n\n## 深度學習研究方法論\n"
+    out, fixed, left = text_clean.repair_mojibake_from_pdf(md, tmp_path / "x.pdf")
+    assert (out, fixed, left) == (md, 0, 0)
+    assert not called  # 후보가 없으면 PDF를 읽지도 않는다
