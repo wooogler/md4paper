@@ -230,6 +230,53 @@ class UIController:
         self.wd.blocks_json.write_text(
             json.dumps(blocks, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    # --- 레이아웃 자동 수정 (깨진 헤더·수식·문단을 LLM으로 훑어 고치기) ---
+    def layout_fix_plan(self) -> dict:
+        """수정 규모 미리보기 {chunks, chars} — 모달에 보여줄 값. LLM은 부르지 않는다."""
+        from md4paper import relayout
+
+        raw = self.wd.raw_md.read_text(encoding="utf-8") if self.wd.raw_md.exists() else ""
+        return {"chunks": len(relayout.split_for_fix(raw)), "chars": len(raw)}
+
+    def fix_layout(self, provider, instructions: str = "", on_progress=None) -> dict:  # noqa: ANN001
+        """raw.md의 깨진 레이아웃을 LLM으로 수정 → 구조 재구축 → en.md 재조립.
+
+        구조를 다시 잡으므로 섹션 트리·일괄 레벨 조정이 고친 문서를 그대로 따라간다
+        (문서 설정과 사용자가 정한 레벨·번역 여부는 이어받는다). on_progress(done, total).
+        """
+        from md4paper import relayout
+
+        summary = relayout.run(self.wd, provider, instructions=instructions,
+                               manifest=self.manifest, on_progress=on_progress)
+        if summary.get("changed"):
+            self._adopt(manifest_io.load(self.wd))
+            self.clear_manual_edit()  # en.md를 새로 조립했으므로 직접 편집분은 사라졌다
+        return summary
+
+    def can_undo_layout_fix(self) -> bool:
+        from md4paper import relayout
+
+        return relayout.has_snapshot(self.wd)
+
+    def undo_layout_fix(self) -> bool:
+        """직전 레이아웃 수정을 되돌린다 (raw.md·구조·en.md 원상 복구). 되돌렸으면 True."""
+        from md4paper import relayout
+
+        if not relayout.restore(self.wd):
+            return False
+        self._adopt(manifest_io.load(self.wd))
+        self.clear_manual_edit()
+        return True
+
+    def _adopt(self, new: Manifest) -> None:
+        """새 매니페스트 내용을 기존 객체에 옮겨 담는다.
+
+        UI 클로저들이 manifest 객체를 직접 붙들고 있어(m.sections 등) 참조를 갈아치우면
+        섹션 트리가 옛 구조를 계속 그린다 → 같은 객체를 제자리에서 갱신한다.
+        """
+        for field in type(new).model_fields:
+            setattr(self.manifest, field, getattr(new, field))
+
     # --- 저장 / 렌더 ---
     def save(self) -> tuple[int, int]:
         """매니페스트 저장 + 헤더 이름별 선택 학습. 반환: (기억, 잊음) 수."""

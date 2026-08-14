@@ -1809,6 +1809,115 @@ def build(ctrl: UIController) -> None:
         ui.select(_EXPORT_TARGET, value=config.resolve_export_target(), on_change=_pick) \
             .props("dense outlined").classes("w-28").tooltip("다운로드 zip에 적용하는 형식 (전역 설정)")
 
+    # --- 레이아웃 자동 수정 (변환 탭) — 깨진 헤더·수식·문단을 처음부터 끝까지 훑어 AI로 고친다 ---
+    def _after_relayout() -> None:
+        """raw.md·구조가 통째로 바뀌었으므로 이 화면의 파생 뷰를 전부 다시 그린다."""
+        refresh_preview()
+        section_list.refresh()
+        batch_level_panel.refresh()
+        _refresh_translate_tree()
+        edit_toggle.refresh()
+        push_cite_tips()  # 재조립하며 인용 링크가 다시 붙었다 → 호버 툴팁 맵 갱신
+        library.auto_export(ctrl.wd)
+
+    with ui.dialog() as fix_dialog, ui.card().classes("gap-3").style("width:560px;max-width:92vw"):
+        ui.label("레이아웃 자동 수정").classes("text-lg font-bold")
+        ui.markdown(
+            "PDF에서 뽑은 마크다운을 **처음부터 끝까지 나눠 훑으며** AI가 레이아웃만 고칩니다 — "
+            "쪼개진 헤더(`## 2` + `## Background` → `## 2 Background`), 깨진 수식(`x t` → `$x_t$`), "
+            "끊긴 문단·목록·표 같은 것들. **글의 내용(단어)은 바꾸지 않습니다.**\n\n"
+            "고친 문서로 **섹션 트리와 일괄 레벨 조정도 다시 만들어집니다** "
+            "(지금 정해 둔 레벨·번역 여부·변환 설정은 그대로 이어받습니다)."
+        ).classes("text-sm")
+        fix_info = ui.label("").classes("text-xs text-gray-500")
+        fix_prompt = ui.textarea(
+            label="추가 지시 (선택)",
+            placeholder="예) 페이지마다 반복되는 학회명 머리글 줄을 지워줘 / 의사코드 블록은 코드 펜스로 묶어줘",
+        ).props('outlined autogrow input-style="min-height:66px"').classes("w-full")
+        fix_warn = ui.label("").classes("text-xs text-orange-8")
+        fix_bar = ui.linear_progress(value=0, show_value=False) \
+            .props("size=14px rounded").classes("w-full")
+        fix_bar.visible = False
+        fix_status = ui.label("").classes("text-sm text-gray-600")
+
+        async def run_layout_fix() -> None:
+            from nicegui import run
+
+            try:
+                prov = config.build_provider()  # 변환에 쓰던 기본 프로바이더
+            except RuntimeError as e:
+                ui.notify(str(e), type="negative")
+                return
+            for w in (fix_apply, fix_cancel, fix_undo, fix_prompt):
+                w.disable()
+            fix_dialog.props(add="persistent")  # 도는 동안 바깥 클릭·ESC로 닫히지 않게
+            fix_bar.visible = True
+            fix_bar.value = 0
+            prog = {"done": 0, "total": 0}
+
+            def tick() -> None:  # 워커 스레드가 prog를 갱신 → 타이머가 폴링 (NiceGUI 스레드 안전)
+                t = prog["total"]
+                fix_bar.value = (prog["done"] / t) if t else 0
+                fix_status.text = (f"수정 중… {prog['done']}/{t} 구간 ({int(fix_bar.value * 100)}%)"
+                                   if t else "구간을 나누는 중…")
+
+            timer = ui.timer(0.3, tick)
+            try:
+                summary = await run.io_bound(
+                    ctrl.fix_layout, prov, fix_prompt.value or "",
+                    lambda d, t: prog.update(done=d, total=t),
+                )
+                if not summary.get("changed"):
+                    ui.notify("고칠 레이아웃을 찾지 못했습니다 — 문서는 그대로입니다.", type="info")
+                else:
+                    _after_relayout()
+                    msg = (f"레이아웃 수정 완료 · {summary['chunks']}구간 중 {summary['fixed']}개 수정 "
+                           f"(≈${summary['cost_usd']:.4f})")
+                    if summary["kept"]:
+                        msg += f" · {summary['kept']}개 구간은 내용 보존 검증에 걸려 원문 유지"
+                    ui.notify(msg, type="positive")
+                fix_dialog.close()
+            except Exception as ex:  # noqa: BLE001 — API 오류 등을 그대로 보여준다
+                ui.notify(str(ex), type="negative")
+                fix_status.text = f"실패: {ex}"
+            finally:
+                timer.deactivate()
+                fix_dialog.props(remove="persistent")
+                fix_bar.visible = False
+                for w in (fix_apply, fix_cancel, fix_prompt):
+                    w.enable()
+                fix_undo.set_visibility(ctrl.can_undo_layout_fix())
+                fix_undo.enable()
+
+        async def undo_layout_fix() -> None:
+            from nicegui import run
+
+            if not await run.io_bound(ctrl.undo_layout_fix):
+                ui.notify("되돌릴 이전 상태가 없습니다.", type="warning")
+                return
+            _after_relayout()
+            ui.notify("레이아웃 수정 전으로 되돌렸습니다.", type="positive")
+            fix_dialog.close()
+
+        with ui.row().classes("items-center w-full gap-2"):
+            fix_undo = ui.button("직전 상태로 되돌리기", icon="undo", on_click=undo_layout_fix) \
+                .props("flat dense no-caps color=grey-8").tooltip("마지막 수정 직전의 마크다운·구조로 복구")
+            ui.space()
+            fix_cancel = ui.button("취소", on_click=fix_dialog.close).props("flat no-caps")
+            fix_apply = ui.button("적용", icon="auto_fix_high", on_click=run_layout_fix) \
+                .props("color=primary no-caps")
+
+    def open_fix_dialog() -> None:
+        plan = ctrl.layout_fix_plan()
+        prov = config.resolve_provider()
+        fix_info.text = (f"본문 {plan['chars']:,}자를 {plan['chunks']}개 구간으로 나눠 "
+                         f"{_short_provider(prov)} {config.resolve_model(prov)}에 보냅니다.")
+        fix_warn.text = ("직접 편집한 마크다운이 있습니다 — 문서를 다시 만들면서 그 편집은 사라집니다."
+                         if ctrl.has_manual_edit() else "")
+        fix_status.text = ""
+        fix_undo.set_visibility(ctrl.can_undo_layout_fix())
+        fix_dialog.open()
+
     # ===== 단계 패널 (탭 컨트롤은 헤더에) =====
     # 번역까지 끝난 논문은 뷰어를, 아니면 변환 탭을 기본으로 연다.
     _start_tab = step_sbs if ctrl.ko_markdown() else step_convert
@@ -1818,6 +1927,11 @@ def build(ctrl: UIController) -> None:
             with ui.splitter(value=46).classes("w-full").style("height: calc(100vh - 108px)") as sp1:
                 with sp1.before:
                     with ui.column().classes(_panel).style(_scroll):
+                        ui.button("레이아웃 자동 수정", icon="auto_fix_high", on_click=open_fix_dialog) \
+                            .props("outline no-caps color=primary").classes("w-full").tooltip(
+                                "쪼개진 헤더·깨진 수식·끊긴 문단을 AI가 문서 전체에서 찾아 고칩니다")
+                        cap("PDF 추출이 어그러뜨린 부분을 AI가 훑어 고치고, 섹션 트리를 다시 만듭니다.")
+
                         with ui.expansion("변환 설정", icon="settings").classes("w-full"):
                             convert_settings()
 
