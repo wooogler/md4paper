@@ -182,10 +182,12 @@ class WorkDir:
         return bool(entry and entry.get("done") and entry.get("input_hash") == input_hash)
 
 
-def delete_workdir(root: Path, workspace: Path) -> bool:
+def delete_workdir(root: Path, workspace: Path, *, with_library: bool = True) -> bool:
     """작업 디렉토리(.md4)와 그 부모 논문 폴더를 삭제. 안전 검사 후 True.
 
     workspace 밖이거나 .md4가 아니면 거부한다(실수로 엉뚱한 폴더를 지우지 않도록).
+    `with_library`면 저장 위치(라이브러리)에 쌓아 둔 사본(마크다운·이미지·PDF)도 함께 지운다.
+    그 폴더는 작업 폴더 밖(사용자의 옵시디언 볼트 등)이라 여기서 정리하지 않으면 고아로 남는다.
     """
     import shutil
 
@@ -195,6 +197,10 @@ def delete_workdir(root: Path, workspace: Path) -> bool:
         return False
     if ws not in root.parents:
         return False  # 작업 폴더 밖 → 거부
+    if with_library:
+        from md4paper import library  # 지연 임포트 — library가 workdir를 임포트한다(순환 방지)
+
+        library.remove_stem(root.stem)  # 라이브러리 파일명은 논문 폴더 이름(root.stem)
     shutil.rmtree(root, ignore_errors=True)
     # 논문별 전용 하위 폴더(<이름>/<이름>.md4)면 남은 원본 PDF 등 잔여물까지 폴더째 정리한다.
     # (예전엔 '비었을 때만' 지워서 원본 PDF가 남아 폴더가 남았다.) 단, 다른 논문(.md4)이

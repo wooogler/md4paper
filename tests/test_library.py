@@ -189,6 +189,51 @@ def test_remove_stem_cleans_old_copies(tmp_path):
     assert not (tmp_path / "PDF" / "old-name.pdf").exists()
 
 
+# --- 논문 삭제 시 라이브러리 사본 정리 ---
+def _exported(tmp_path: Path):
+    """저장 위치를 설정하고 논문 하나를 실제로 내보낸 상태."""
+    config.set_library_dir("en", str(tmp_path / "EN"))
+    config.set_library_dir("pdf", str(tmp_path / "PDF"))
+    wd = _wd(tmp_path, ko=None)
+    _add_pdf(wd, tmp_path)
+    library.export_paper(wd)
+    assert (tmp_path / "EN" / "2017_Attention_Vaswani.md").exists()
+    return wd, tmp_path / "ws"
+
+
+def test_delete_workdir_also_clears_library_copies(tmp_path):
+    """기본값 — 사본까지 지운다. 안 지우면 사용자 볼트에 고아 파일이 남는다."""
+    from md4paper.workdir import delete_workdir
+
+    wd, ws = _exported(tmp_path)
+    assert delete_workdir(wd.root, ws) is True
+    assert not wd.root.exists()
+    assert not (tmp_path / "EN" / "2017_Attention_Vaswani.md").exists()
+    assert not (tmp_path / "EN" / "images" / "2017_Attention_Vaswani").exists()
+    assert not (tmp_path / "PDF" / "2017_Attention_Vaswani.pdf").exists()
+
+
+def test_delete_workdir_can_keep_library_copies(tmp_path):
+    """체크박스를 끈 경우 — 작업 폴더만 지우고 볼트는 건드리지 않는다."""
+    from md4paper.workdir import delete_workdir
+
+    wd, ws = _exported(tmp_path)
+    assert delete_workdir(wd.root, ws, with_library=False) is True
+    assert not wd.root.exists()
+    assert (tmp_path / "EN" / "2017_Attention_Vaswani.md").exists()
+    assert (tmp_path / "PDF" / "2017_Attention_Vaswani.pdf").exists()
+
+
+def test_delete_workdir_rejected_leaves_library_alone(tmp_path):
+    """안전 검사에 걸려 거부되면 사본도 그대로 — 삭제는 검사를 통과한 뒤에만 일어난다."""
+    from md4paper.workdir import delete_workdir
+
+    wd, _ = _exported(tmp_path)
+    assert delete_workdir(wd.root, tmp_path / "other-ws") is False  # 작업 폴더 밖
+    assert wd.root.exists()
+    assert (tmp_path / "EN" / "2017_Attention_Vaswani.md").exists()
+
+
 # --- 기존 논문 이름 정리 (이름 규칙 일괄 적용) ---
 def test_apply_naming_renames_folder_pdf_and_library(tmp_path):
     import json

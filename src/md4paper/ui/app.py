@@ -2360,9 +2360,17 @@ def build_home(state: dict) -> None:
                      "나중에 '숨긴 논문 보기'에서 되돌릴 수 있습니다.").classes("text-xs text-gray-500")
             ui.label("· 파일 삭제 — 작업 디렉토리(원본 PDF·마크다운·이미지)까지 지웁니다. 되돌릴 수 없습니다.") \
                 .classes("text-xs text-gray-500")
+            # 저장 위치 사본은 작업 폴더 밖(사용자 볼트)이라, 안 지우면 고아로 남는다 → 기본 켬.
+            # 볼트를 건드리는 게 싫으면 끄고 지울 수 있게 체크박스로 노출한다.
+            lib_dirs = [str(d) for d in (library.dir_for(k) for k in library.KINDS) if d]
+            drop_lib = ui.checkbox("저장 위치의 사본도 함께 삭제", value=True) \
+                .props("dense").classes("text-sm") if lib_dirs else None
+            for d in dict.fromkeys(lib_dirs):  # 어느 폴더가 지워지는지 경로를 그대로 (중복 제거)
+                ui.label(d).classes("text-xs text-gray-400 ml-8 break-all leading-tight")
 
             def do_delete() -> None:
-                ok = delete_workdir(item["root"], ws())
+                ok = delete_workdir(item["root"], ws(),
+                                    with_library=bool(drop_lib and drop_lib.value))
                 dlg.close()
                 if ok:
                     selected.discard(str(item["root"]))
