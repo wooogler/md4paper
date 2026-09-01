@@ -13,6 +13,7 @@ from pathlib import Path
 
 from md4paper import config, library
 from md4paper.ir import Flavor, GlossaryEntry
+from md4paper.ui import desktop
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir
 
@@ -1759,19 +1760,19 @@ def build(ctrl: UIController) -> None:
         ui.separator().classes("my-2")
         translate_method_panel()  # 번역 방식 설정은 섹션 선택 아래에 (덜 자주 만지므로 아코디언)
 
-    def download_en() -> None:
+    async def download_en() -> None:
         if not ctrl.en_markdown():
             ui.notify("영어 마크다운이 없습니다 — 먼저 변환하세요.", type="warning")
             return
         name, data = ctrl.export_zip("en", config.resolve_export_target())  # 마크다운(형식 변환) + images/ zip
-        ui.download.content(data, name, media_type="application/zip")
+        await desktop.deliver(name, data)
 
-    def download_ko() -> None:
+    async def download_ko() -> None:
         if not ctrl.ko_markdown():
             ui.notify("아직 번역 결과가 없습니다.", type="warning")
             return
         name, data = ctrl.export_zip("ko", config.resolve_export_target())
-        ui.download.content(data, name, media_type="application/zip")
+        await desktop.deliver(name, data)
 
     async def save_to_library() -> None:
         """홈에서 지정한 '저장 위치' 폴더에 결과 마크다운을 저장 (자동 저장을 꺼 뒀을 때도 수동으로)."""
@@ -1987,7 +1988,14 @@ _HOME_CSS = """
 .md4-dropwrap { position: relative; width: 100%; }
 .md4-upload { position: absolute; inset: 0; z-index: 2; opacity: 0; cursor: pointer; }
 .md4-upload, .md4-upload > .q-uploader { width: 100%; height: 100%; min-height: 156px; max-height: none; }
-.md4-upload .q-uploader__header { display: none; }
+/* 헤더(= 파일 선택 버튼 + 그 안의 <input type=file>)를 드롭존 전체로 펼친다. 부모가 opacity:0이라
+   보이지는 않는다. display:none으로 감추면 클릭으로 파일 선택창을 열 방법이 없어져 서버를 거쳐
+   JS로 input.click()을 불러야 하는데, 그러면 사용자 제스처가 끊겨 웹뷰(WKWebView)가 창을 막는다. */
+.md4-upload .q-uploader__header { position: absolute; inset: 0; padding: 0; }
+.md4-upload .q-uploader__header-content { height: 100%; padding: 0; }
+.md4-upload .q-uploader__header .q-btn { position: absolute; inset: 0; }
+/* 업로더의 파일 목록은 보이지도 않으면서 헤더 위에 겹쳐 클릭을 가로챈다 (DOM 순서상 위). */
+.md4-upload .q-uploader__list { pointer-events: none; }
 .md4-hint { position: relative; z-index: 1; border: 2px dashed #cfcfcf; border-radius: 14px;
   min-height: 156px; padding: 22px; transition: border-color .15s ease, background .15s ease; }
 .md4-dropwrap:hover .md4-hint { border-color: #2383e2; background: rgba(35,131,226,.05); }
@@ -2123,7 +2131,7 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
     from md4paper.ui import folder_dialog
     from md4paper.workdir import recent_workdirs
 
-    can_pick = folder_dialog.available()
+    can_pick = folder_dialog.available() or desktop.active()  # 앱 창은 자체 대화상자를 갖는다
 
     def _no_dialog(btn) -> None:  # noqa: ANN001 — ui.button
         btn.disable()
@@ -2142,8 +2150,7 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
 
     async def pick(which: str) -> None:
         cur = library.dir_for(which) or state["upload_dir"]
-        picked = await run.io_bound(
-            folder_dialog.choose_folder, f"{_LIB_LABEL[which]}을 쌓을 폴더 선택", str(cur))
+        picked = await desktop.choose_folder(f"{_LIB_LABEL[which]}을 쌓을 폴더 선택", str(cur))
         if picked:  # 취소면 조용히 원래 값 유지
             set_dir(which, picked)
 
@@ -2186,8 +2193,7 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
         ui.notify(msg, type="positive" if ok else "warning")
 
     async def pick_workspace() -> None:
-        picked = await run.io_bound(
-            folder_dialog.choose_folder, "작업 폴더 선택 (원본 PDF·중간 파일)", str(state["upload_dir"]))
+        picked = await desktop.choose_folder("작업 폴더 선택 (원본 PDF·중간 파일)", str(state["upload_dir"]))
         if not picked:
             return
         config.set_section_value("output", "workspace", picked)
@@ -2331,14 +2337,14 @@ def build_home(state: dict) -> None:
         else:
             ui.notify("작업 디렉토리가 손상되었습니다.", type="negative")
 
-    def download_zip(root: Path, which: str) -> None:
+    async def download_zip(root: Path, which: str) -> None:
         ctrl = UIController(WorkDir(root))
         md = ctrl.en_markdown() if which == "en" else ctrl.ko_markdown()
         if not md:
             ui.notify("해당 마크다운이 없습니다.", type="warning")
             return
         name, data = ctrl.export_zip(which, config.resolve_export_target())
-        ui.download.content(data, name, media_type="application/zip")
+        await desktop.deliver(name, data)
 
     def hide_paper(item: dict, hidden: bool = True) -> None:
         """목록 표시만 끄기/되돌리기 (파일은 그대로 — status.json에 표시)."""
@@ -2411,7 +2417,7 @@ def build_home(state: dict) -> None:
             r["title"], " ".join(r.get("authors") or []), r.get("venue") or "", str(r.get("year") or ""),
         ]).lower()
 
-    def download_bulk(which: str) -> None:
+    async def download_bulk(which: str) -> None:
         from md4paper.ui.controller import bulk_zip
 
         roots = [Path(p) for p in selected]
@@ -2419,7 +2425,7 @@ def build_home(state: dict) -> None:
             ui.notify("선택된 논문이 없습니다.", type="warning")
             return
         name, data = bulk_zip(roots, which, config.resolve_export_target())
-        ui.download.content(data, name, media_type="application/zip")
+        await desktop.deliver(name, data)
 
     async def save_bulk_to_library() -> None:
         """선택한 논문들을 전역 저장 위치(영어·한국어 폴더)로 내보내기."""
@@ -2828,10 +2834,9 @@ def build_home(state: dict) -> None:
 
             # 드롭존
             with ui.element("div").classes("md4-dropwrap"):
-                up = ui.upload(on_upload=handle, multiple=True, auto_upload=True) \
+                # 클릭은 위 CSS가 펼쳐 놓은 진짜 <input type=file>이 그대로 받는다 (JS 개입 없음).
+                ui.upload(on_upload=handle, multiple=True, auto_upload=True) \
                     .props('accept=".pdf,.md,.markdown"').classes("md4-upload")
-                up.on("click", lambda: ui.run_javascript(
-                    "document.querySelector('.md4-upload input[type=file]')?.click()"))
                 with ui.column().classes("md4-hint items-center justify-center gap-1 w-full"):
                     ui.icon("cloud_upload", size="42px").classes("text-primary")
                     ui.label("PDF를 끌어다 놓거나 클릭해 선택").classes("text-base")
@@ -2888,10 +2893,12 @@ def pick_port(preferred: int = 8080) -> int:
 
 
 def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
-        port: int = 8080, show: bool = True) -> None:
+        port: int = 8080, show: bool = True, native: bool = False) -> None:
     """UI 서버 실행 (블로킹). wd가 None이면 업로드 홈에서 시작.
 
     port가 이미 쓰이면 빈 포트로 자동 대체하고 실제 주소를 출력한다.
+    native=True면 브라우저 대신 앱 창(pywebview)으로 띄운다 — 서버는 그대로 127.0.0.1에만 붙고,
+    창을 닫으면 서버도 함께 내려간다.
     """
     from fastapi.responses import FileResponse, Response
     from nicegui import app as fastapi_app
@@ -2963,5 +2970,11 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         build(UIController(wdir))
 
     port = pick_port(port)
-    print(f"md4paper UI: http://127.0.0.1:{port}  (Ctrl+C로 종료)")
-    ui.run(host="127.0.0.1", port=port, show=show, reload=False, title="md4paper")
+    if native:
+        desktop.configure()  # 창 크기·Dock 아이콘·다운로드 설정 (웹뷰 프로세스로 전달된다)
+        print(f"md4paper 앱 창 시작 (내부 주소 http://127.0.0.1:{port})")
+    else:
+        print(f"md4paper UI: http://127.0.0.1:{port}  (Ctrl+C로 종료)")
+    ui.run(host="127.0.0.1", port=port, show=show and not native, reload=False, title="md4paper",
+           favicon=str(desktop.ICON) if desktop.ICON.is_file() else None,
+           native=native, window_size=(1440, 900) if native else None)

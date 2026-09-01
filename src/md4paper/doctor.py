@@ -34,6 +34,21 @@ def run_checks() -> list[tuple[str, bool, str, bool]]:
         )
     )
 
+    # 웹 UI·앱 창은 선택 extra다 — 없어도 CLI 변환은 된다.
+    ui_ok = importlib.util.find_spec("nicegui") is not None
+    checks.append(_check("웹 UI (nicegui)", ui_ok,
+                         "설치됨" if ui_ok else "미설치 — `uv sync --extra ui`", optional=True))
+    native_ok = importlib.util.find_spec("webview") is not None
+    checks.append(_check("앱 창 (pywebview)", native_ok,
+                         "설치됨" if native_ok else "미설치(선택) — `uv sync --extra ui --extra native`",
+                         optional=True))
+
+    from md4paper import launcher
+
+    where = launcher.default_location()
+    checks.append(_check("앱 아이콘 등록", where.exists(),
+                         str(where) if where.exists() else "없음(선택) — `md4paper app`", optional=True))
+
     ks = config.key_status()
     provider = config.resolve_provider()
     prov_ok = ks.get(provider, False)

@@ -200,8 +200,11 @@ md4paper/
 ├── cite/{parse,link,render,apply}.py  # parse=구조화+반환각, link=본문 치환, render=DOI/arXiv 링크, apply=오케스트레이션
 ├── regions.py                # 섹션 영역 찾기 (cite=References, translate=Abstract 공유)
 ├── translate/{context,chunker,glossary,engine,validate,apply}.py  # context=초록 주입, chunker=플레이스홀더 보호, validate=구조 검증
+├── launcher.py               # 데스크톱 런처 설치 — macOS .app / Windows .lnk / Linux .desktop (§13)
 └── ui/                       # NiceGUI 로컬 앱 — controller.py(순수 로직, 테스트됨) + app.py(뷰)
-    └── folder_dialog.py      # OS 기본 폴더 선택 대화상자 (osascript / PowerShell / zenity·kdialog)
+    ├── folder_dialog.py      # OS 기본 폴더 선택 대화상자 (osascript / PowerShell / zenity·kdialog)
+    ├── desktop.py            # 네이티브 창 모드 분기 — 저장 대화상자·폴더 선택·Dock 아이콘 (§13)
+    └── assets/icon.png       # 앱 아이콘 원본 (설치 때 .icns/.ico로 변환; tools/make_icon.py로 생성)
 ```
 
 ## 6. 마일스톤 (각각 독립적으로 출시 가능)
@@ -399,6 +402,25 @@ PDF는 우리 것으로 덮어씀 + 빈 폴더 제거)한 뒤 원하는 이름�
 하나로 확정될 때만** 교체(머리말 반복처럼 후보가 여럿이어도 문자열이 같으면 안전) ④ 길이가 원본의 0.5~4배 밖이면 기각.
 못 고친 글자는 `garbled_chars`에 더해 홈 목록·CLI의 ⚠ 경고로 노출. 실측: 깨진 14줄 전부 복구, 남은 0자.
 
+### 추출 ③ 투고 원고(working draft)의 줄 번호가 본문에 섞임 (수정 완료)
+증상: CHI 투고본처럼 여백에 줄 번호를 찍은 원고를 넣으면 `raw.md`가 `1 / 2 / 3 … 52`로 시작하고
+페이지마다 번호 52개가 본문 앞에 쌓인다(15쪽 논문에서 780개, raw.md 1549줄 중 대부분).
+게다가 번호 뭉치가 **문단 한가운데로 끼어들어** 문장이 끊긴다("…using a structured" / 번호 52개 / "rubric assessing…").
+원인: docling이 여백의 줄 번호를 하나하나 본문 `text` 아이템으로 뽑고, 2단 읽기 순서상 gutter 열을 먼저 내보낸다.
+라벨이 `text`라 러닝 헤더/푸터 제외(`_EXCLUDE_LABELS`)에도, 저작권 boilerplate 필터에도 걸리지 않는다.
+수정(`docling_backend._drop_line_numbers`, 마크다운 export 전에 문서에서 삭제): bbox로 gutter를 찾는다.
+판정 조건 — ① 맨숫자(`^\d{1,4}$`) 아이템이 ② 한 세로줄로 정렬(왼쪽/오른쪽 정렬 모두 시도, 오차 6pt)되고
+③ 위→아래로 **증가**하며 ④ 그 세로 띠가 본문 블록과 **가로로 겹치지 않고**(여백이거나 컬럼 사이)
+⑤ 문서에서 **두 쪽 이상** 그렇게 나타날 때. ⑤가 오탐의 핵심 방어선이다 — 표 인식에 실패해 떨어져 나온
+숫자 열은 한 페이지에서만 나타난다.
+2패스인 이유: 확실한 페이지(≥6개)로 gutter의 x 위치를 **먼저 확정**한 뒤, 그 위치의 낱개 번호를 나머지 쪽에서 마저 걷는다
+(본문이 짧은 마지막 쪽). 홀/짝수 쪽 여백이 좌우로 갈리므로(실측 47.4pt / 84.1pt) 위치는 여러 개를 모은다.
+추가로 docling이 번호를 옆 블록에 **섞어 넣는** 경우(참고문헌에서 관찰: `729 730 [5] Brian Huot…`)가 있다.
+bbox가 gutter에서 시작하는 블록의 맨 앞 숫자를 텍스트에서 뗀다 — 안 떼면 `cite/parse`의 항목 시작 정규식이
+`[5]`를 못 찾아 참고문헌 항목이 앞 항목에 붙는다.
+실측: 780개 중 779개 제거(남은 맨숫자 0), 끊겼던 문단 3곳이 `_join_broken_paragraphs`로 다시 이어짐.
+줄 번호 없는 논문 4편 재추출 시 제거 0건(오탐 없음). 제거 개수는 `meta.line_numbers_dropped`.
+
 ### 서지 ③ 오래된 논문이 최근 연도로 나옴 (수정 완료)
 증상: 1986년 논문(Rouse & Morris)이 `2025_...`로 명명됨. venue도 빈 값.
 원인 2단: ① docling이 저널 머리말("Psychological Bulletin / 1986, Vol. 100 / Copyright 1986 by APA")을
@@ -429,6 +451,15 @@ PDF에 연도·학회가 아예 없는 논문(프리프린트·구형 스캔본)
 예전엔 삭제 하나뿐이었다. 숨김은 전역 목록이 아니라 **작업 디렉토리 안**에 기록한다(everything-is-a-file — 폴더를 옮겨도 따라간다).
 `recent_workdirs(..., include_hidden=False)`가 기본 필터, 목록 상단의 '숨긴 논문 N편 보기' 토글 + 카드의 '다시 표시' 버튼이 복원 경로다
 (숨김이 '영영 사라짐'이 되지 않도록 되돌릴 길을 항상 노출).
+
+**삭제 범위 — 저장 위치 사본까지 (구현 완료).** `delete_workdir`은 `.md4`(추출 캐시·status.json 포함)와
+부모 논문 폴더(원본 PDF)를 지우지만, **저장 위치(라이브러리) 사본은 작업 폴더 밖**(사용자의 옵시디언 볼트 등)이라
+그대로 남아 고아가 됐다. '되돌릴 수 없습니다'라고 해놓고 사본이 남는 건 놀라운 결과다 →
+`delete_workdir(..., with_library=True)`가 기본값이고 `library.remove_stem(root.stem)`을 부른다
+(리네임 경로가 이미 쓰던 함수 — 우리가 썼을 경로만 지운다).
+남의 볼트를 건드리는 일이라 다이얼로그에 **체크박스로 노출하고 실제 폴더 경로를 그대로 보여준다**(끄면 작업 폴더만 삭제).
+라이브러리 미설정이면 체크박스 자체를 숨긴다. 안전 검사(`.md4`인지·작업 폴더 안인지)를 **통과한 뒤에만** 사본을 지운다 —
+거부된 삭제가 볼트를 건드리면 안 된다.
 
 ## 12. 레이아웃 자동 수정 — 깨진 마크다운을 LLM으로 훑어 고치기 (구현 완료)
 
@@ -478,3 +509,71 @@ PDF 추출은 단어는 살리지만 **구조를 잃는다**. 실제 사례: `##
 - 되돌리기는 **1단계**(마지막 수정 직전)만 — 스냅샷을 하나만 둔다. 버튼 문구도 '직전 상태로'로 정확히 적는다.
 - 직접 편집한 en.md는 재조립으로 사라진다 → 모달에 경고를 띄우고 `manual_edit` 플래그를 해제한다.
 - 비용은 문서 전체를 한 번 훑는 만큼 든다(≈번역 1회 수준) → 모달에 글자 수·구간 수·모델을 미리 보여준다.
+
+
+## 13. 데스크톱 앱 — 아이콘으로 여는 네이티브 창 (구현 완료)
+
+### 목표
+터미널에서 `uv run md4paper ui`를 치는 대신 **아이콘을 눌러** 연다. 브라우저 탭이 아니라 독립 앱 창으로 뜨고,
+Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인다. 서버 구조(127.0.0.1 바인딩, 로컬 전용)는 그대로다.
+
+### 설계
+1. **NiceGUI native 모드(pywebview)** — `ui.run(native=True, window_size=...)`. 웹뷰는 spawn된 별도 프로세스에서 돌고,
+   서버 프로세스는 메서드 큐로 그 창을 조작한다. 창을 닫으면 서버도 내려간다. `native`는 선택 extra다(pywebview + pyobjc).
+2. **번들 안에 인터프리터를 심볼릭 링크로 둔다** — macOS는 `[NSBundle mainBundle]`을 **실행 파일 경로**로 판정한다.
+   셸 스크립트가 번들 바깥의 파이썬을 실행하면 실행 중에는 'Python'이라는 이름의 앱이 된다. 그래서 번들 안에
+   `Contents/MacOS/python`(→ venv의 python), `Contents/pyvenv.cfg`, `Contents/lib`를 심볼릭 링크로 걸어 **번들 자체를
+   가상환경 모양**으로 만든다. 그러면 `sys.prefix`가 `Contents`가 되어 site-packages가 그대로 잡히고, 프로세스가
+   이 앱으로 인식된다. 실측: `lsappinfo`에 `"md4paper" bundleID=io.github.wooogler.md4paper type=Foreground`,
+   웹뷰 보조 프로세스도 `md4paper Web Content`로 뜬다. 가상환경이 아니면(시스템 파이썬) 절대 경로 실행으로 물러선다.
+3. **다운로드는 서버가 직접 쓴다** — `ui.download`는 blob URL + `<a download>` 클릭인데, 웹뷰 백엔드가 이걸 어떻게
+   처리할지는 설정에 달려 있어 **아무 일도 안 일어날 수** 있다(WKWebView는 `ALLOW_DOWNLOADS`가 꺼져 있으면 무시,
+   `target=_blank`는 외부 브라우저로 샐 수 있다). 로컬 앱이라 서버 = 사용자 컴퓨터이므로, 네이티브 모드에서는
+   창 프록시의 저장 대화상자(`create_file_dialog(SAVE)`)로 위치를 받아 파일을 직접 쓴다. 취소·실패·쓰기 오류를
+   각각 다른 알림으로 구분한다 — '눌렀는데 아무 반응 없음'이 이 기능의 유일한 실패 모드라서.
+   폴백은 다운로드 폴더에 쓰고 파일 탐색기로 그 자리를 연다.
+4. **폴더 선택도 창 프록시로** — osascript 대화상자는 별도 프로세스라 앱 창 **뒤에** 숨을 수 있다. 네이티브 모드에선
+   `create_file_dialog(FOLDER)`를 쓰고, 실패하면 기존 OS 대화상자로 물러선다(브라우저 모드는 그대로 osascript).
+5. **`__main__.py`에 `__main__` 가드** — 런처는 `python -m md4paper ui --native`로 실행한다. spawn은 자식에서 진입
+   모듈을 다시 실행하므로, 가드가 없으면 자식이 CLI를 처음부터 돌려 앱이 무한히 겹쳐 뜬다.
+6. **아이콘은 커밋된 PNG 하나** — 그리기가 시스템 한글 폰트에 의존하므로 사용자 컴퓨터에서 그리지 않는다.
+   설치 때 `.icns`(iconutil, 없으면 Pillow)·`.ico`(Pillow)로 변환한다. 브라우저 모드의 파비콘도 같은 파일이다.
+7. **드래그&드롭은 손대지 않아도 된다** — pywebview의 cocoa `performDragOperation_`은 `super()`를 호출해 WKWebView의
+   기본 처리를 그대로 태운다(파일이 DOM에 온다). pywebview는 전체 경로를 덧붙일 뿐이다. 그래서 기존 업로더가 그대로 동작한다.
+
+### 파일
+- `launcher.py`(신규): `install`/`remove`/`default_location`/`launch_command`/`venv_root`/`write_icns`/`write_ico`.
+- `ui/desktop.py`(신규): `window`/`active`/`deliver`/`choose_folder`/`configure`/`reveal`/`unique_path`.
+- `__main__.py`(신규), `ui/assets/icon.png`(신규), `tools/make_icon.py`(아이콘 생성기).
+- `cli.py`: `ui --native`, `app` 명령(`--remove`/`--dir`/`--desktop`).
+- `ui/app.py`: 다운로드 4곳을 `desktop.deliver`로(핸들러가 async가 된다), 폴더 선택 2곳을 `desktop.choose_folder`로,
+  `run(native=...)`.
+- 테스트: `test_launcher.py`(번들 구조·신원·폴백·재설치·제거·.desktop·CLI), `test_desktop.py`(브라우저/네이티브 분기·
+  취소·대화상자 실패 폴백·쓰기 오류·이름 충돌).
+
+### 리스크·결정
+- **extra가 조용히 빠진다** — `uv sync --extra ui`만 하면 pywebview가 제거된다. 런처 셸 래퍼가 실패를 감지해
+  로그 위치와 복구 명령을 알림창으로 띄운다(Finder 실행은 표준 출력이 어디에도 안 남는다).
+- **경로를 박아 넣는다** — 저장소를 옮기거나 venv를 갈아엎으면 다시 `md4paper app`을 실행해야 한다. uv로 매번
+  self-heal 하는 방법도 있으나(`uv run --extra ...`), 그러면 프로세스 신원(2)을 포기해야 해서 택하지 않았다.
+- **아이콘 실행은 셸 환경변수를 물려받지 않는다** — env로만 API 키를 두던 사용자는 앱에서 키가 안 보인다.
+  `md4paper app`이 그 상황을 감지해 경고하고, README에도 적었다.
+- 저장 대화상자 자체(NSSavePanel)는 자동 테스트로 눌러 볼 수 없다 — 메서드 큐 왕복(`get_size`·`get_current_url`)까지
+  실측으로 확인하고, 우리 쪽 분기는 가짜 창으로 단위 테스트했다.
+
+### 배포 — 설치 파일 대신 '사용자 컴퓨터에서 조립'
+`install.sh`/`install.ps1`이 ① uv 설치 ② `uv tool install "md4paper[ui,native] @ git+..."` ③ `md4paper app`을 잇는다.
+사용자는 터미널에 **한 줄**을 붙여넣고, 아이콘을 받는다. 같은 줄을 다시 실행하면 업데이트다(`--force`가 git을 다시 읽는다).
+
+- **왜 .dmg/.exe를 만들지 않나** — 의존성이 torch·opencv·docling까지 약 1.3GB다. PyInstaller/py2app로 묶으면
+  1.5GB+ 배포 파일에 히든 임포트·네이티브 라이브러리·모델 데이터 파일 씨름이 붙고, macOS는 **코드 서명 + 공증**
+  (Apple Developer 연 $99)이, 윈도우는 SmartScreen 경고가 따라온다. 아키텍처별 빌드 CI도 필요하다.
+  "지원을 약속하지 않는" 개인 도구에 그만한 상시 비용을 얹을 이유가 없다.
+- **로컬 조립의 이득** — 앱 번들이 사용자 컴퓨터에서 만들어지므로 quarantine 속성이 없다 → **서명·공증 없이도
+  경고 없이 열린다**. 아키텍처(arm64/x86_64)도 uv가 알아서 맞춘다. 받는 용량은 필요한 휠뿐이다.
+- **`uv tool install`이 만드는 환경도 그대로 쓸 수 있다** — `~/.local/share/uv/tools/md4paper`가 정상 venv라
+  §13-2의 번들 미러링이 클론 없이도 성립한다(실측: 캐시가 있으면 설치 4.6초, `lsappinfo`에 md4paper로 등록).
+  심볼릭 링크가 `bin/python`·`lib`·`pyvenv.cfg` 세 개라 tool 업그레이드로 내부가 갈려도 경로가 유지된다.
+- **남는 한계** — 터미널 한 줄은 여전히 필요하다. 그것마저 없애려면 서명·공증을 감수하고 py2app을 해야 한다.
+- **못 띄우는 환경 대비** — `cli._native_available()`이 pywebview·웹뷰 백엔드를 미리 확인하고, 안 되면
+  경고를 남기고 **브라우저로 연다**. 배포된 컴퓨터에서 아이콘이 '눌러도 무반응'이 되는 게 최악이라서.

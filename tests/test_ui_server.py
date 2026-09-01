@@ -101,3 +101,9 @@ def test_ui_home_upload_page(tmp_path):
     # 제목 라벨에 truncate+min-w-0, 그 부모 행에 w-full이 없으면 긴 제목이 화면 밖으로 흘러넘친다.
     assert '"truncate","min-w-0"' in body  # 제목 라벨
     assert '"no-wrap","w-full","min-w-0"' in body  # 제목을 감싸는 행
+    # 드롭존 클릭 — 진짜 <input type=file>이 드롭존을 덮고 있어야 파일 선택창이 뜬다.
+    # 입력을 감춰 두고(display:none) 서버를 거쳐 JS로 input.click()을 부르면 사용자 제스처가 끊겨
+    # 웹뷰(앱 창)가 선택창을 막는다 — 드래그&드롭만 되고 클릭은 먹통이 됐다.
+    assert ".md4-upload .q-uploader__header { position: absolute; inset: 0;" in body
+    assert ".q-uploader__header { display: none" not in body
+    assert ".md4-upload .q-uploader__list { pointer-events: none; }" in body  # 목록이 클릭을 가로챈다

@@ -26,7 +26,8 @@ PDF를 통째로 LLM에 던지고 "번역해줘" 하는 방식과의 차이는, 
 - **원본과 대조하며 검수합니다.** 섹션 제목을 누르면 그 PDF 페이지로 이동하고, EN | KO 나란히 보기로
   번역을 확인하고, 마크다운을 직접 손볼 수 있습니다.
 - **정해진 규칙은 LLM에 맡기지 않습니다.** 번호 기반 헤더 재정렬, 그림·표 캡션 짝짓기, 이미지 이름
-  정리, 수식·코드·링크 보호는 코드가 결정론적으로 처리합니다. LLM은 번역·용어집·참고문헌 파싱에만
+  정리, 수식·코드·링크 보호, 러닝 헤더·저작권 문구·**투고 원고 여백의 줄 번호** 제거는 코드가
+  결정론적으로 처리합니다. LLM은 번역·용어집·참고문헌 파싱에만
   씁니다 — 그래서 결과가 재현되고 비용도 예측 가능합니다.
 
 ---
@@ -63,14 +64,44 @@ PDF를 통째로 LLM에 던지고 "번역해줘" 하는 방식과의 차이는, 
 | 메모리 | 4GB 이상 권장 (GPU 필수 아님, CPU로 동작) |
 | 네트워크 | 설치·첫 모델 다운로드에 필요. 이후 추출은 오프라인 가능 |
 | LLM 키 | 번역/인용/용어집에만 필요(선택). OpenAI · Anthropic · Google Gemini 중 하나 |
+| 앱 창 | 선택 — 아이콘으로 여는 독립 창(pywebview). macOS·Windows는 OS 웹뷰를 그대로 쓰고, Linux는 WebKit2GTK가 필요합니다(없으면 브라우저로 열립니다) |
 
 ---
 
 ## 설치
 
+### 한 줄 설치 — 아이콘까지 한 번에 (권장)
+
+터미널에 이 줄을 붙여넣으면 uv·파이썬·md4paper·앱 아이콘까지 한 번에 끝납니다.
+
+**macOS / Linux**:
+```bash
+curl -LsSf https://raw.githubusercontent.com/wooogler/md4paper/main/install.sh | sh
+```
+
+**Windows** (PowerShell):
+```powershell
+irm https://raw.githubusercontent.com/wooogler/md4paper/main/install.ps1 | iex
+```
+
+끝나면 Launchpad·시작 메뉴에 **md4paper 아이콘**이 생깁니다. 눌러서 여세요
+(→ [앱으로 열기](#앱으로-열기--아이콘-등록-선택)). 같은 줄을 다시 실행하면 최신 버전으로 업데이트됩니다.
+
+- **무엇을 하나** — uv(파이썬까지 관리하는 패키지 관리자)가 없으면 설치하고, `uv tool install`로
+  md4paper를 넣고, `md4paper app`으로 아이콘을 등록합니다. 스크립트는 [install.sh](install.sh) ·
+  [install.ps1](install.ps1)에 그대로 있으니 실행 전에 읽어 보세요(모르는 스크립트를 파이프로
+  실행하는 건 원래 조심할 일입니다).
+- 의존성 약 1.3GB를 받으므로 처음에는 몇 분 걸립니다.
+- **설치 파일(.dmg·.exe)이 아니라 스크립트인 이유** — 앱을 **사용자 컴퓨터에서 조립**하기 때문에
+  코드 서명·공증이 필요 없고, macOS의 "확인되지 않은 개발자" 경고나 Windows SmartScreen 경고도
+  뜨지 않습니다. 1.5GB짜리 설치 파일을 내려받을 일도 없습니다.
+- 제거: `md4paper app --remove && uv tool uninstall md4paper`
+
+### 직접 설치 — uv를 이미 쓰거나, 코드를 고칠 사람
+
 패키지 관리자 [uv](https://docs.astral.sh/uv/)만 설치하면 Python까지 uv가 처리합니다.
 
-### 1단계 — uv 설치
+#### 1단계 — uv 설치
 
 **Windows** (PowerShell):
 ```powershell
@@ -86,9 +117,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 확인: `uv --version`
 
-### 2단계 — md4paper 설치하고 웹 UI 켜기
+#### 2단계 — md4paper 설치하고 웹 UI 켜기
 
-#### 방법 A: 클론해서 쓰기 (권장)
+##### 방법 A: 클론해서 쓰기 (개발용 권장)
 
 **Windows** (PowerShell):
 ```powershell
@@ -109,7 +140,7 @@ uv run md4paper ui
 `--extra ui`가 웹 UI(NiceGUI)를 포함합니다. 의존성 내려받는 데 처음 몇 분 걸립니다.
 설치가 잘 됐는지 보려면 `uv run md4paper doctor`.
 
-#### 방법 B: 클론 없이 바로 실행
+##### 방법 B: 클론 없이 바로 실행
 
 **Windows** (PowerShell):
 ```powershell
@@ -126,9 +157,48 @@ uvx --from 'md4paper[ui] @ git+https://github.com/wooogler/md4paper' md4paper ui
 
 ---
 
+## 앱으로 열기 — 아이콘 등록 (선택)
+
+[한 줄 설치](#한-줄-설치--아이콘까지-한-번에-권장)를 했다면 아이콘이 **이미 등록돼 있습니다**.
+클론해서 쓰고 있다면 저장소에서 두 줄을 실행하세요:
+
+```bash
+uv sync --extra ui --extra native   # 앱 창 의존성(pywebview) 추가
+uv run md4paper app                 # 아이콘 등록
+```
+
+| OS | 만들어지는 것 | 어디서 열리나 |
+|---|---|---|
+| macOS | `~/Applications/md4paper.app` | Launchpad · Spotlight · Finder · Dock |
+| Windows | 시작 메뉴의 `md4paper` (`--desktop`을 주면 바탕화면에도) | 시작 메뉴 |
+| Linux | `~/.local/share/applications/md4paper.desktop` | 앱 메뉴 |
+
+아이콘을 누르면 브라우저 탭이 아니라 **독립 앱 창**이 뜹니다 — 화면과 기능은 웹 UI와 똑같습니다.
+서버는 여전히 127.0.0.1에만 붙고, 창을 닫으면 서버도 함께 내려갑니다. 터미널에서 같은 창을 띄우려면
+`uv run md4paper ui --native`입니다(브라우저로 열고 싶으면 그냥 `md4paper ui`).
+
+- **zip 내려받기**는 앱 창에서도 됩니다 — 브라우저 다운로드 대신 **OS 저장 대화상자**가 떠서 위치를
+  고릅니다.
+- **환경변수는 상속되지 않습니다.** 아이콘으로 띄우면 셸에서 `export` 한 `OPENAI_API_KEY` 같은 값이
+  보이지 않습니다. 홈 화면 왼쪽 **AI 설정**에 키를 저장해 두세요(`~/.config/md4paper/config.toml`).
+- **아무 일도 일어나지 않으면** 로그를 보세요 — macOS는 `~/Library/Logs/md4paper.log`. 실행에
+  실패하면 앱이 알림창으로 알려 줍니다.
+- **저장소를 옮기거나 가상환경을 다시 만들었다면** `md4paper app`을 다시 실행하세요.
+  런처에 인터프리터 경로가 박혀 있습니다. (한 줄 설치로 넣었다면 업데이트해도 경로가 그대로라
+  다시 할 필요가 없습니다.)
+- **앱 창을 못 띄우는 환경**(리눅스에 WebKit2GTK·Qt가 없는 경우 등)에서는 아이콘이 먹통이 되는 대신
+  **브라우저로 엽니다**. 이유는 실행 로그에 적힙니다.
+- 제거: `md4paper app --remove`
+
+> `uv sync --extra X`는 지정하지 않은 extra를 제거합니다. 앱 창을 쓰려면 **항상 두 개를 같이**
+> 주세요: `uv sync --extra ui --extra native`.
+
+---
+
 ## 웹 UI 사용법
 
 `md4paper ui`를 실행하면 터미널에 `http://127.0.0.1:8080` 주소가 찍히고 브라우저가 열립니다.
+(브라우저 대신 앱 창으로 쓰고 싶으면 → [앱으로 열기](#앱으로-열기--아이콘-등록-선택))
 **서버는 127.0.0.1(내 컴퓨터)에만 바인딩되므로 외부에서 접속할 수 없습니다.** 포트가 사용 중이면
 빈 포트를 자동으로 골라 실제 주소를 출력합니다. (`--port 9000`으로 지정, `--no-show`로 브라우저
 자동 열기 끄기, `md4paper ui <이름>.md4/`로 기존 작업 바로 열기)
@@ -147,6 +217,8 @@ PDF를 끌어다 놓으면 바로 변환이 시작됩니다. 여러 개를 올�
 - 목록에서 여러 편을 체크해 한 zip으로 **내보내기**할 수 있습니다.
 - 카드 오른쪽 휴지통은 **목록에서 숨기기**(파일은 그대로 두고 목록에서만 감춤)와 **파일 삭제**(작업
   디렉토리까지 영구 삭제) 중에서 고릅니다. 숨긴 논문은 목록 위의 **숨긴 논문 N편 보기**로 언제든 되돌립니다.
+  파일 삭제는 원본 PDF·추출 캐시·이미지가 든 논문 폴더를 통째로 지우고, 저장 위치에 쌓아 둔 사본까지
+  함께 정리합니다(다이얼로그의 체크박스를 끄면 사본은 남깁니다 — 지워질 폴더 경로를 그 자리에 보여줍니다).
 
 ### 2. 변환 — 원어 마크다운 다듬기
 
@@ -386,6 +458,8 @@ uv run md4paper keys list            # 설정 여부 확인 (값은 마스킹)
 | 설정·API 키 | `~/.config/md4paper/config.toml` (Windows: `C:\Users\<사용자>\.config\md4paper\config.toml`) |
 | 헤더 처리 기억 | `~/.config/md4paper/heading_prefs.json` |
 | Docling 모델 캐시 | `~/.cache/huggingface` (Windows: `C:\Users\<사용자>\.cache\huggingface`) |
+| 앱 런처(선택) | macOS `~/Applications/md4paper.app` · Windows 시작 메뉴 · Linux `~/.local/share/applications` |
+| 앱 실행 로그 | macOS `~/Library/Logs/md4paper.log` (아이콘으로 띄웠을 때) |
 
 작업 폴더 변경: 홈의 **저장 위치 → 작업 폴더 → 변경**, `uv run md4paper workspace <경로>`,
 또는 `md4paper ui --upload-dir <경로>`. 결과 마크다운을 쌓을 폴더는
@@ -411,6 +485,7 @@ uv run md4paper library                 # 저장 위치(영어·한국어·PDF �
 uv run md4paper naming                  # 파일 이름 규칙 조회 / 변경 / --apply 일괄 정리
 uv run md4paper enrich --all            # 빈 연도·학회를 공개 서지 API로 보강
 uv run md4paper prefs list              # 기억된 헤더 처리 목록
+uv run md4paper app                     # 더블클릭용 앱 아이콘 등록 (--remove로 제거)
 ```
 
 주요 옵션:
@@ -429,6 +504,11 @@ uv run md4paper prefs list              # 기억된 헤더 처리 목록
 
 - `md4paper doctor`를 먼저 실행하세요. 필수 항목이 모두 ✓면 변환은 됩니다.
   LLM 키가 `-`로 표시되는 건 실패가 아니라 "선택 기능 미설정"입니다.
+- 앱 아이콘을 눌렀는데 아무 창도 안 뜸 → 실행 로그(macOS `~/Library/Logs/md4paper.log`)를 보세요.
+  대개 `uv sync --extra ui --extra native`를 안 했거나, 저장소를 옮긴 뒤 `md4paper app`을
+  다시 실행하지 않은 경우입니다.
+- 앱 창에 AI 키가 안 보임 → 아이콘 실행은 셸 환경변수를 물려받지 않습니다. 홈의 **AI 설정**에
+  키를 저장하세요.
 - 첫 변환이 오래 걸림 → Docling 모델(약 1.1GB)을 내려받는 중입니다. 두 번째부터 빨라집니다.
 - 결과가 이상함 → 섹션 트리에서 헤더 레벨을 교정하고, PDF 나란히 보기로 대조하세요.
   스캔 PDF라면 OCR이 필요합니다.

@@ -30,6 +30,8 @@ dependencies = [
 ui = ["nicegui>=3.14", "watchfiles>=0.21", "latex2mathml>=3.77"]
 # 참고문헌 enrichment
 enrich = ["httpx>=0.27"]
+# 데스크톱 앱 창 (pywebview) — `md4paper ui --native`, `md4paper app`가 만드는 런처가 쓴다
+native = ["pywebview>=5.4"]
 
 [project.scripts]
 md4paper = "md4paper.cli:main"

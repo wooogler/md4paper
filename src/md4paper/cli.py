@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
+import os
+import sys
 from pathlib import Path
 
 import click
@@ -338,12 +341,34 @@ def _edit_manifest(wd: WorkDir) -> None:
 # --- 이후 마일스톤 스텁 ---------------------------------------------------
 
 
+def _native_available() -> bool:
+    """앱 창(pywebview + OS 웹뷰)을 띄울 수 있는지. 안 되면 이유를 알리고 False → 브라우저로 연다.
+
+    아이콘으로 띄웠을 때 '눌렀는데 아무 일도 안 일어남'을 만들지 않으려는 장치다. 리눅스에서
+    WebKit2GTK·Qt가 없으면 pywebview는 import까지는 되고 창을 만들 때 죽는데, 그건 사용자가 그
+    자리에서 고칠 수 없다 — 브라우저로라도 열어 주는 편이 낫다.
+    """
+    if importlib.util.find_spec("webview") is None:
+        click.echo(click.style("앱 창 의존성(pywebview)이 없어 브라우저로 엽니다 — "
+                               "`uv sync --extra ui --extra native`", fg="yellow"), err=True)
+        return False
+    try:
+        from webview.guilib import initialize
+
+        initialize()  # OS 웹뷰 백엔드 탐색 (macOS는 cocoa, 윈도우는 WebView2, 리눅스는 GTK/Qt)
+    except Exception as e:  # noqa: BLE001 — 백엔드가 여럿이라 예외 종류도 제각각이다
+        click.echo(click.style(f"앱 창을 띄울 수 없어 브라우저로 엽니다 ({e})", fg="yellow"), err=True)
+        return False
+    return True
+
+
 @cli.command()
 @click.argument("workdir", required=False, type=click.Path(path_type=Path))
 @click.option("--upload-dir", type=click.Path(path_type=Path), default=None, help="업로드 파일·결과 저장 위치 (기본: 프로젝트 output/ 폴더)")
 @click.option("--port", default=8080, help="로컬 포트")
 @click.option("--no-show", is_flag=True, help="브라우저 자동 열기 비활성")
-def ui(workdir: Path | None, upload_dir: Path | None, port: int, no_show: bool) -> None:
+@click.option("--native", is_flag=True, help="브라우저 탭 대신 앱 창으로 열기 (`md4paper app` 런처가 쓰는 모드)")
+def ui(workdir: Path | None, upload_dir: Path | None, port: int, no_show: bool, native: bool) -> None:
     """로컬 웹 UI (NiceGUI). WORKDIR 없이 실행하면 PDF 업로드 홈에서 시작.
 
     섹션 트리 리뷰 · 마크다운/수식 프리뷰 · PDF 대조 · 용어집 검토 · 번역.
@@ -353,13 +378,57 @@ def ui(workdir: Path | None, upload_dir: Path | None, port: int, no_show: bool) 
         wd = WorkDir(workdir)
         if not wd.sections_yaml.exists():
             raise click.ClickException(f"매니페스트 없음: {wd.sections_yaml}. 먼저 convert를 실행하세요.")
+    if native:
+        native = _native_available()  # 못 띄우면 브라우저로 — 아이콘이 '아무 반응 없음'이 되지 않게
     try:
         from md4paper.ui.app import run as run_ui
     except ImportError as e:
         raise click.ClickException("웹 UI 의존성 미설치 — `uv sync --extra ui` 실행하세요.") from e
     where = "업로드 홈" if wd is None else f"리뷰: {wd.root}"
     click.echo(f"UI 시작 ({where})…")  # 실제 주소는 run_ui가 출력 (포트 충돌 시 자동 대체)
-    run_ui(wd, upload_dir=upload_dir, port=port, show=not no_show)
+    run_ui(wd, upload_dir=upload_dir, port=port, show=not no_show, native=native)
+
+
+@cli.command("app")
+@click.option("--remove", "do_remove", is_flag=True, help="설치한 런처 제거")
+@click.option("--dir", "dest", type=click.Path(path_type=Path), default=None,
+              help="설치 위치 (기본: macOS ~/Applications, Linux ~/.local/share/applications)")
+@click.option("--desktop", "also_desktop", is_flag=True, help="윈도우: 바탕화면에도 바로가기 생성")
+def app_cmd(do_remove: bool, dest: Path | None, also_desktop: bool) -> None:
+    """더블클릭으로 여는 앱 아이콘 설치 (macOS .app · 윈도우 바로가기 · 리눅스 .desktop).
+
+    아이콘을 누르면 앱 창으로 md4paper가 열립니다(`md4paper ui --native`와 같은 화면).
+    """
+    from md4paper import launcher
+
+    if do_remove:
+        removed = launcher.remove(dest)
+        for path in removed:
+            click.echo(f"제거됨: {path}")
+        if not removed:
+            click.echo(f"설치된 런처가 없습니다: {dest or launcher.default_location()}")
+        return
+
+    try:
+        path = launcher.install(dest, also_desktop=also_desktop)
+    except (launcher.LauncherError, OSError) as e:
+        raise click.ClickException(str(e)) from e
+
+    click.echo(click.style(f"런처 설치됨: {path}", fg="green"))
+    if sys.platform == "darwin":
+        click.echo("  Launchpad·Spotlight에서 'md4paper'로 열거나 Finder에서 더블클릭하세요.")
+        click.echo("  실행 로그: ~/Library/Logs/md4paper.log")
+    click.echo(f"  실행 명령: {' '.join(launcher.launch_command())}")
+    if importlib.util.find_spec("webview") is None:
+        click.echo(click.style(
+            "  참고: pywebview가 없어 지금 누르면 앱 창 대신 브라우저가 열립니다 — "
+            "`uv sync --extra ui --extra native`", fg="yellow"))
+    env_only = [config.ENV_VARS[p] for p in config.ENV_VARS
+                if os.environ.get(config.ENV_VARS[p]) and not config.load_config().get("keys", {}).get(p)]
+    if env_only:
+        click.echo(click.style(
+            f"  참고: 아이콘으로 띄우면 셸 환경변수({', '.join(env_only)})는 상속되지 않습니다 — "
+            "홈 화면의 'AI 설정'에 키를 저장하세요.", fg="yellow"))
 
 
 @cli.command()
