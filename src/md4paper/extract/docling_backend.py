@@ -370,6 +370,134 @@ def _body_labels() -> set:
     return labels
 
 
+# --- 투고 원고(working draft) 여백의 줄 번호 gutter -----------------------------
+# 학회 투고본은 여백에 줄 번호(1, 2, 3 …)를 찍는다. Docling은 이걸 본문 'text' 아이템으로
+# 하나씩 뽑아 페이지마다 수십 개를 본문 앞에 쌓아 놓고, 그 자리에서 문단도 끊어 놓는다.
+# 판정: **한 세로줄로 정렬**된 맨숫자 아이템이 위→아래로 **증가**하고, 그 세로 띠가 그 페이지
+# 어떤 본문 블록과도 **가로로 겹치지 않으며**(= 여백/컬럼 사이), 문서에서 **두 쪽 이상** 그렇게
+# 나타날 때만. 표에서 떨어져 나온 숫자 열이나 진짜 본문 숫자는 이 조건을 다 만족하지 못한다.
+_LINE_NO_RE = re.compile(r"^\d{1,4}$")
+_GUTTER_ALIGN_TOL = 6.0   # 같은 세로줄로 볼 x 오차(pt) — 자릿수가 늘면 폭이 조금 달라진다
+_GUTTER_MIN_COUNT = 6     # 한 페이지에서 이만큼 이어져야 gutter로 인정
+_GUTTER_BODY_GAP = 2.0    # 본문과 이만큼 떨어져 있어야 '겹치지 않음'
+_BODY_MIN_WIDTH = 40.0    # 본문 블록으로 볼 최소 bbox 폭(pt) — 짧은 조각은 기준으로 안 씀
+# Docling이 gutter 번호를 옆 블록에 섞어 넣으면(참고문헌 목록에서 관찰) 그 블록 bbox가 여백까지
+# 늘어나 '겹침'으로 잡힌다. 그런 오염 블록 하나까지는 봐준다.
+_GUTTER_BODY_OVERLAP_MAX = 1
+# 그렇게 섞여 들어간 번호는 블록 텍스트 맨 앞에 남는다("729 730 [5] Brian Huot. 1990. …").
+# 참고문헌 항목 번호 인식을 깨뜨리므로 텍스트에서도 떼어낸다.
+_LEADING_NUM_RE = re.compile(r"^\s*(\d{1,4})\s+")
+
+
+def _align_groups(items: list, edge) -> list[list]:  # noqa: ANN001 — edge: item → x(pt)
+    """x 좌표가 _GUTTER_ALIGN_TOL 안에서 같은 아이템끼리 세로줄로 묶는다."""
+    groups: list[list] = []
+    for it in sorted(items, key=edge):
+        if groups and edge(it) - edge(groups[-1][0]) <= _GUTTER_ALIGN_TOL:
+            groups[-1].append(it)
+        else:
+            groups.append([it])
+    return groups
+
+
+def _bbox(it):  # noqa: ANN001,ANN201 — DocItem의 첫 prov bbox
+    prov = getattr(it, "prov", None)
+    return prov[0].bbox if prov else None
+
+
+def _increasing(cluster: list) -> bool:
+    """위에서 아래로 읽을 때 번호가 커지는지 (줄 번호의 필수 조건)."""
+    vals = [int(it.text.strip()) for it in sorted(cluster, key=lambda it: -_bbox(it).t)]
+    return all(a < b for a, b in zip(vals, vals[1:]))
+
+
+def _clear_of_body(cluster: list, bodies: list[tuple[float, float]]) -> bool:
+    """세로 띠가 본문 블록과 가로로 겹치지 않는지 (여백이거나 컬럼 사이인지)."""
+    left = min(min(_bbox(it).l, _bbox(it).r) for it in cluster) - _GUTTER_BODY_GAP
+    right = max(max(_bbox(it).l, _bbox(it).r) for it in cluster) + _GUTTER_BODY_GAP
+    hits = sum(1 for bl, br in bodies if left < br and bl < right)
+    return hits <= _GUTTER_BODY_OVERLAP_MAX
+
+
+def _page_gutters(cands: list, bodies: list[tuple[float, float]], min_count: int) -> list[list]:
+    """한 페이지에서 줄 번호 세로줄을 찾는다. 왼쪽 정렬·오른쪽 정렬 둘 다 시도."""
+    found: list[list] = []
+    seen: set[int] = set()
+    for edge in (lambda it: _bbox(it).l, lambda it: _bbox(it).r):
+        for group in _align_groups(cands, edge):
+            if len(group) < min_count or any(id(it) in seen for it in group):
+                continue
+            if _increasing(group) and _clear_of_body(group, bodies):
+                found.append(group)
+                seen.update(id(it) for it in group)
+    return found
+
+
+def _drop_line_numbers(document) -> int:  # noqa: ANN001 — DoclingDocument
+    """투고 원고 여백의 줄 번호를 본문에서 제거. 반환: 제거한 개수.
+
+    확실한 페이지(줄 번호가 _GUTTER_MIN_COUNT개 이상)로 먼저 gutter 위치를 확정하고,
+    그 위치에 맞는 낱개 번호를 나머지 페이지에서 마저 걷어낸다(본문이 짧은 마지막 쪽 등).
+    """
+    from collections import defaultdict
+
+    cands: dict[int, list] = defaultdict(list)
+    bodies: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    for it in getattr(document, "texts", []):
+        label = str(getattr(it, "label", "")).replace("DocItemLabel.", "").lower()
+        b = _bbox(it)
+        if b is None or label in _EXCLUDE_LABELS:
+            continue  # 러닝 헤더/푸터의 쪽 번호는 애초에 export에서 빠진다
+        page = int(it.prov[0].page_no)
+        if _LINE_NO_RE.match((getattr(it, "text", "") or "").strip()):
+            cands[page].append(it)
+        elif abs(b.r - b.l) >= _BODY_MIN_WIDTH:
+            bodies[page].append((min(b.l, b.r), max(b.l, b.r)))
+
+    gutters = {pg: _page_gutters(its, bodies[pg], _GUTTER_MIN_COUNT) for pg, its in cands.items()}
+    pages = [pg for pg, gs in gutters.items() if gs]
+    if len(pages) < 2:
+        return 0  # 한 쪽에서만 보이면 줄 번호가 아니라 그 페이지 사정(표 조각 등)
+
+    # 확정된 세로줄의 x 위치 — 홀/짝수 쪽 여백이 좌우로 갈리므로 여러 개가 나온다
+    bands = [min(_bbox(it).l for it in g) for gs in gutters.values() for g in gs]
+    remove: list = []
+    for pg, its in cands.items():
+        taken = {id(it) for g in gutters[pg] for it in g}
+        remove.extend(it for g in gutters[pg] for it in g)
+        rest = [it for it in its if id(it) not in taken]
+        for group in _align_groups(rest, lambda it: _bbox(it).l):
+            # 이미 문서 차원에서 확정된 gutter 위치에 놓인 번호 — 본문 겹침은 더 안 따진다
+            on_band = any(abs(_bbox(group[0]).l - x) <= _GUTTER_ALIGN_TOL for x in bands)
+            if on_band and _increasing(group):
+                remove.extend(group)
+
+    # 블록 안으로 섞여 들어간 번호 — bbox가 gutter에서 시작하는 본문 블록의 맨 앞 숫자를 뗀다
+    values = [int(it.text.strip()) for it in remove]
+    lo, hi = min(values), max(values)
+    dropped = {id(it) for it in remove}
+    stripped = 0
+    for it in getattr(document, "texts", []):
+        b = _bbox(it)
+        if b is None or id(it) in dropped:
+            continue
+        if not any(abs(b.l - x) <= _GUTTER_ALIGN_TOL for x in bands):
+            continue
+        text = getattr(it, "text", "") or ""
+        while (m := _LEADING_NUM_RE.match(text)) and lo <= int(m.group(1)) <= hi:
+            text = text[m.end():]
+            stripped += 1
+        if text != it.text:
+            it.text = text
+
+    for it in remove:
+        try:
+            document.delete_items(node_items=[it])
+        except Exception:  # noqa: BLE001 — 삭제 실패해도 치명적이지 않음
+            pass
+    return len(remove) + stripped
+
+
 # 로고/배지 판정 크기(pt) — 이보다 작은 그림은 CC 라이선스 배지·학회 로고 등으로 보고 제거
 _LOGO_MAX_W = 120
 _LOGO_MAX_H = 120
@@ -588,6 +716,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         raise ExtractError(f"docling 변환 실패: {e}") from e
 
     _save_heading_pages(result.document, wd)
+    line_numbers = _drop_line_numbers(result.document)  # 투고 원고 여백의 줄 번호 gutter
     footnotes, boilerplate = _relocate_footer_blocks(result.document)
     wd.extract.mkdir(parents=True, exist_ok=True)
     wd.frontmatter_txt.write_text("\n".join(boilerplate), encoding="utf-8")  # 서지(venue/연도) 추출용
@@ -634,4 +763,9 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
     md = _unheader_captions(md)  # 헤더로 오분류된 'Table N:/Figure N:' 캡션을 캡션 문단으로 (이미지 유무 무관)
     md = _delist_headers(md)  # 불릿으로 시작하는 잘못 승격된 헤더를 리스트 항목으로 (목록 일관성)
     wd.raw_md.write_text(md, encoding="utf-8")
-    return {"backend": "docling", "ocr": ocr, "images": len(mapping) // 2 if mapping else 0}
+    return {
+        "backend": "docling",
+        "ocr": ocr,
+        "images": len(mapping) // 2 if mapping else 0,
+        "line_numbers_dropped": line_numbers,
+    }

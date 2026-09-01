@@ -2,7 +2,11 @@
 
 import pytest
 
-from md4paper.extract.docling_backend import _join_broken_paragraphs, _split_author_block
+from md4paper.extract.docling_backend import (
+    _drop_line_numbers,
+    _join_broken_paragraphs,
+    _split_author_block,
+)
 
 
 def test_join_broken_paragraphs_merges_column_split_abstract():
@@ -429,3 +433,103 @@ def test_mojibake_repair_leaves_real_cjk_alone(tmp_path, monkeypatch):
     out, fixed, left = text_clean.repair_mojibake_from_pdf(md, tmp_path / "x.pdf")
     assert (out, fixed, left) == (md, 0, 0)
     assert not called  # 후보가 없으면 PDF를 읽지도 않는다
+
+
+# --- 투고 원고 여백의 줄 번호 gutter -------------------------------------------
+# DoclingDocument 대신 필요한 속성만 가진 스텁으로 판정 로직을 검증한다.
+
+class _Box:
+    def __init__(self, left, right, top, bottom):
+        self.l, self.r, self.t, self.b = left, right, top, bottom
+
+
+class _Prov:
+    def __init__(self, page, bbox):
+        self.page_no, self.bbox = page, bbox
+
+
+class _Item:
+    def __init__(self, text, page, left, right, top, label="text", height=8.0):
+        self.text, self.label = text, label
+        self.prov = [_Prov(page, _Box(left, right, top, top - height))]
+
+
+class _Doc:
+    def __init__(self, texts):
+        self.texts = list(texts)
+
+    def delete_items(self, node_items):
+        for it in node_items:
+            self.texts = [t for t in self.texts if t is not it]
+
+
+def _gutter(page, start, count, x, width=6.0, top=692.0, step=11.0):
+    """여백에 세로로 늘어선 줄 번호 아이템들."""
+    return [_Item(str(start + i), page, x, x + width, top - i * step) for i in range(count)]
+
+
+def _body(page, text, top, left=110.0, right=540.0):
+    return _Item(text, page, left, right, top)
+
+
+def _bodies(page, n=3, left=110.0):
+    return [_body(page, f"{page}쪽 본문 문단 {k}", 690.0 - k * 60, left=left) for k in range(n)]
+
+
+def test_drop_line_numbers_removes_margin_gutter():
+    """좌우 여백이 홀/짝수 쪽으로 갈리는 전형적인 투고본 — 번호만 사라지고 본문은 그대로."""
+    doc = _Doc(_gutter(1, 1, 52, 47.4) + _bodies(1, left=73.0)
+               + _gutter(2, 53, 52, 84.1) + _bodies(2))
+    assert _drop_line_numbers(doc) == 104
+    assert [it.text for it in doc.texts] == [b.text for b in _bodies(1) + _bodies(2)]
+
+
+def test_drop_line_numbers_needs_two_pages():
+    """한 쪽에서만 보이는 숫자 열은 줄 번호가 아니라 그 페이지 사정(표 조각 등)."""
+    doc = _Doc(_gutter(1, 1, 52, 47.4) + _bodies(1, left=73.0) + _bodies(2))
+    assert _drop_line_numbers(doc) == 0
+    assert len(doc.texts) == 58
+
+
+def test_drop_line_numbers_keeps_column_inside_body():
+    """본문과 가로로 겹치는 숫자 열(추출에 실패한 표의 한 열 등)은 건드리지 않는다."""
+    doc = _Doc(_gutter(1, 1, 20, 200.0) + _bodies(1) + _gutter(2, 1, 20, 200.0) + _bodies(2))
+    assert _drop_line_numbers(doc) == 0
+    assert len(doc.texts) == 46
+
+
+def test_drop_line_numbers_sweeps_short_page():
+    """gutter 위치가 확정되면, 번호가 몇 개뿐인 마지막 쪽도 마저 걷어낸다."""
+    doc = _Doc(_gutter(1, 1, 52, 47.4) + _bodies(1, left=73.0)
+               + _gutter(2, 53, 52, 84.1) + _bodies(2)
+               + _gutter(3, 105, 2, 47.4) + _bodies(3, n=1, left=73.0))
+    assert _drop_line_numbers(doc) == 106
+    assert not [it.text for it in doc.texts if it.text.isdigit()]
+
+
+def test_drop_line_numbers_strips_numbers_merged_into_block():
+    """Docling이 번호를 옆 블록에 섞어 넣은 경우 — 블록 맨 앞 숫자도 떼어낸다."""
+    merged = _Item("105 106 [5] Brian Huot. 1990. Reliability, Validity.", 3, 47.4, 502.0, 692.0)
+    doc = _Doc(_gutter(1, 1, 52, 47.4) + _bodies(1, left=73.0)
+               + _gutter(2, 53, 52, 84.1) + _bodies(2)
+               + _gutter(3, 107, 50, 47.4) + [merged])
+    assert _drop_line_numbers(doc) == 156  # 삭제 154 + 텍스트에서 뗀 2
+    assert merged.text == "[5] Brian Huot. 1990. Reliability, Validity."
+
+
+def test_drop_line_numbers_keeps_body_numbers_off_the_gutter():
+    """gutter 위치가 아닌 본문 블록의 앞 숫자는 그대로 둔다."""
+    body = _Item("53 participants completed the study.", 2, 110.0, 540.0, 400.0)
+    doc = _Doc(_gutter(1, 1, 52, 47.4) + _bodies(1, left=73.0)
+               + _gutter(2, 53, 52, 84.1) + _bodies(2) + [body])
+    assert _drop_line_numbers(doc) == 104
+    assert body.text == "53 participants completed the study."
+
+
+def test_drop_line_numbers_ignores_running_header_page_numbers():
+    """러닝 헤더의 쪽 번호(page_header)는 후보로도 보지 않는다 — export에서 이미 빠진다."""
+    hdr = _Item("2", 2, 110.2, 118.5, 720.1, label="page_header")
+    doc = _Doc(_gutter(1, 1, 52, 47.4) + _bodies(1, left=73.0)
+               + _gutter(2, 53, 52, 84.1) + _bodies(2) + [hdr])
+    assert _drop_line_numbers(doc) == 104
+    assert hdr in doc.texts
