@@ -110,7 +110,7 @@ _PREVIEW_CSS = """
 .md-preview pre code { background: none; color: inherit; padding: 0;
   white-space: pre-wrap; overflow-wrap: anywhere; }
 .md-preview blockquote { border-left: 3px solid #37352f; margin: 0.8em 0; padding: 0.1em 0 0.1em 0.9em; color: #5b5851; }
-.md-preview img { max-width: 100%; border-radius: 6px; margin: 0.6em 0; }
+.md-preview img { max-width: 100%; border-radius: 6px; margin: 0.6em 0; cursor: zoom-in; }
 .md-preview table { border-collapse: collapse; margin: 0.8em 0; display: block; overflow-x: auto; }
 .md-preview th, .md-preview td { border: 1px solid #e6e4e0; padding: 7px 12px; text-align: left; }
 .md-preview th { background: #f7f6f3; font-weight: 600; }
@@ -225,6 +225,30 @@ sup.md-fn a:hover { text-decoration: underline; }
 .sbs-md > *:first-child { margin-top: 0 !important; }
 /* 뷰어 툴바 토글 칩 */
 .vchip { cursor: pointer; }
+/* 그림 확대 뷰어(라이트박스) — 본문 그림을 클릭하면 화면 전체에 띄우고 휠·버튼으로 확대.
+   position:fixed + 높은 z-index(인용 툴팁 10000보다 위)라 스크롤 컨테이너 안에서도 잘리지 않는다. */
+#md-img-zoom { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10001; display: none;
+  align-items: center; justify-content: center; overflow: hidden; background: rgba(18,18,20,.93); }
+#md-img-zoom.open { display: flex; }
+/* 위 52px은 도구막대, 아래 52px은 캡션 자리 — 그림이 그 위로 올라타지 않게 비워 둔다 */
+#md-img-zoom img { max-width: calc(100vw - 64px); max-height: calc(100vh - 104px);
+  background: #fff; border-radius: 4px;
+  box-shadow: 0 12px 44px rgba(0,0,0,.55); transform-origin: center center; will-change: transform;
+  cursor: grab; user-select: none; -webkit-user-drag: none; }
+#md-img-zoom.dragging img { cursor: grabbing; }
+#md-img-zoom .mdz-bar { position: absolute; top: 14px; right: 16px; display: flex; align-items: center;
+  gap: 2px; padding: 3px 5px; border-radius: 10px; background: rgba(0,0,0,.55); }
+#md-img-zoom .mdz-bar button { display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 26px; border: none; background: none; color: #e8e8e8;
+  font-size: 15px; line-height: 1; border-radius: 7px; cursor: pointer; }
+#md-img-zoom .mdz-bar button:hover { background: rgba(255,255,255,.16); }
+#md-img-zoom .mdz-pct { min-width: 48px; text-align: center; color: #cfcfcf; font-size: 12px;
+  font-variant-numeric: tabular-nums; }
+/* 캡션(alt) + 조작 힌트 — 그림 아래 가운데 */
+#md-img-zoom .mdz-foot { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  max-width: 78vw; text-align: center; color: #c9c9c9; font-size: 12.5px; line-height: 1.5;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; }
+#md-img-zoom .mdz-hint { color: #8e8e8e; font-size: 11.5px; }
 @media (prefers-color-scheme: dark) {
   .md-preview { color: #d4d4d4; }
   .md-preview h6 { color: #9a9a9a; }  /* 다크에서 h6 옅은 색 대비 보정 */
@@ -384,6 +408,139 @@ _SEC_JUMP_HTML = """
       row.classList.remove('sectree-flash'); void row.offsetWidth; row.classList.add('sectree-flash');
       setTimeout(function(){ row.classList.remove('sectree-flash'); }, 1700);
     }, opening ? 360 : 0);
+  });
+})();
+</script>
+"""
+
+# 본문 그림 클릭 → 전체화면 확대 뷰어. 휠(트랙패드 핀치 포함)·버튼·더블클릭으로 확대,
+# 드래그로 이동, Esc·바깥 클릭으로 닫기. 순수 클라이언트 처리 — 이미 받아 둔 이미지를 그대로 쓴다.
+_IMG_ZOOM_HTML = """
+<div id="md-img-zoom">
+  <img alt="">
+  <div class="mdz-bar">
+    <button data-act="out" title="축소 (-)">&#8722;</button>
+    <span class="mdz-pct">100%</span>
+    <button data-act="in" title="확대 (+)">&#43;</button>
+    <button data-act="fit" title="화면에 맞추기 (0)">
+      <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+        <path d="M4 9V4h5v2H6v3H4zm11-5h5v5h-2V6h-3V4zM4 15h2v3h3v2H4v-5zm14 3v-3h2v5h-5v-2h3z"/>
+      </svg></button>
+    <button data-act="close" title="닫기 (Esc)">&#10005;</button>
+  </div>
+  <div class="mdz-foot"><div class="mdz-cap"></div>
+    <div class="mdz-hint">휠·더블클릭으로 확대 · 드래그로 이동 · Esc로 닫기</div></div>
+</div>
+<script>
+(function(){
+  if (window.__mdImgZoom) return; window.__mdImgZoom = true;
+  var box = document.getElementById('md-img-zoom');
+  if (!box) return;
+  var img = box.querySelector('img'), pct = box.querySelector('.mdz-pct'), cap = box.querySelector('.mdz-cap');
+  var s = 1, tx = 0, ty = 0, base = 1, drag = null, moved = false;
+  // base = 열었을 때의 배율(화면에 꽉 차게, 저해상도 그림을 너무 흐리게 늘리지 않도록 3배까지).
+  // 논문 그림은 원본이 작은 경우가 많아 1배로 열면 본문에서 보던 크기와 다를 게 없다.
+  function fitScale(){
+    var availW = box.clientWidth - 64, availH = box.clientHeight - 104;  // CSS max-*와 같은 여백
+    var w = img.offsetWidth, h = img.offsetHeight;   // CSS max-*로 이미 화면에 맞춰진 레이아웃 크기
+    if (!w || !h) return 1;
+    return Math.max(1, Math.min(availW / w, availH / h, 3));
+  }
+
+  function apply(){
+    img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + s + ')';
+    // 퍼센트는 원본 픽셀 대비 — 큰 그림을 줄여 연 상태가 100%로 보이지 않게
+    if (!img.offsetWidth || !img.naturalWidth) return;   // 아직 안 실린 그림: 표시 유지
+    pct.textContent = Math.round(img.offsetWidth * s / img.naturalWidth * 100) + '%';
+  }
+  function clampPan(){               // 확대한 그림이 화면 밖으로 완전히 빠지지 않도록
+    var r = box.getBoundingClientRect();
+    var mx = Math.max(0, (img.offsetWidth * s - r.width) / 2);
+    var my = Math.max(0, (img.offsetHeight * s - r.height) / 2);
+    tx = Math.min(mx, Math.max(-mx, tx));
+    ty = Math.min(my, Math.max(-my, ty));
+  }
+  function zoomAt(mx, my, ns){       // (mx,my) 아래에 있던 지점을 제자리에 두고 확대/축소
+    ns = Math.min(base * 8, Math.max(base, ns));    // 연 크기 아래로는 안 줄이고, 그 8배까지
+    var r = box.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    var px = (mx - cx - tx) / s, py = (my - cy - ty) / s;
+    tx = mx - cx - ns * px; ty = my - cy - ns * py; s = ns;
+    if (s <= base) { tx = 0; ty = 0; }
+    clampPan(); apply();
+  }
+  function zoomBy(f){
+    var r = box.getBoundingClientRect();
+    zoomAt(r.left + r.width / 2, r.top + r.height / 2, s * f);
+  }
+  function fit(){ base = fitScale(); s = base; tx = 0; ty = 0; apply(); }
+  function close(){ box.classList.remove('open'); }
+
+  document.addEventListener('click', function(ev){
+    var t = ev.target;
+    if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.md-preview')) return;
+    ev.preventDefault();             // 그림을 감싼 링크가 있어도 이동하지 않게
+    img.src = t.currentSrc || t.src;
+    var alt = t.getAttribute('alt') || t.getAttribute('title') || '';
+    cap.textContent = alt;
+    box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
+    if (img.complete) fit(); else img.onload = fit;
+  });
+  box.addEventListener('click', function(ev){
+    if (moved) { moved = false; return; }               // 드래그 끝의 클릭은 닫기가 아니다
+    if (ev.target === img || (ev.target.closest && ev.target.closest('.mdz-bar'))) return;
+    close();                                            // 배경 클릭 → 닫기
+  });
+  [].forEach.call(box.querySelectorAll('.mdz-bar button'), function(b){
+    b.addEventListener('click', function(){
+      var a = b.getAttribute('data-act');
+      if (a === 'in') zoomBy(1.25); else if (a === 'out') zoomBy(0.8);
+      else if (a === 'fit') fit(); else close();
+    });
+  });
+  box.addEventListener('wheel', function(ev){
+    ev.preventDefault();                                // 뒤 패널이 같이 스크롤되지 않게
+    var d = ev.deltaY * (ev.deltaMode === 1 ? 16 : 1);  // 줄 단위로 오는 브라우저 보정
+    var f = Math.exp(-d * (ev.ctrlKey ? 0.008 : 0.0015));  // ctrl+휠 = 트랙패드 핀치 (더 민감하게)
+    f = Math.min(1.35, Math.max(0.74, f));              // 관성 스크롤의 큰 델타로 한 번에 튀지 않게
+    zoomAt(ev.clientX, ev.clientY, s * f);
+  }, {passive: false});
+  img.addEventListener('dblclick', function(ev){
+    ev.preventDefault();
+    if (s > base * 1.01) fit(); else zoomAt(ev.clientX, ev.clientY, base * 2.5);
+  });
+  img.addEventListener('mousedown', function(ev){
+    ev.preventDefault();                                // 브라우저 기본 이미지 드래그 대신 패닝
+    drag = {x: ev.clientX, y: ev.clientY, tx: tx, ty: ty};
+    moved = false;
+    box.classList.add('dragging');
+  });
+  window.addEventListener('mousemove', function(ev){
+    if (!drag) return;
+    var dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+    tx = drag.tx + dx; ty = drag.ty + dy;
+    clampPan(); apply();
+  });
+  window.addEventListener('mouseup', function(){
+    if (!drag) return;
+    drag = null; box.classList.remove('dragging');
+  });
+  window.addEventListener('resize', function(){   // 창 크기가 바뀌면 기준 배율도 바뀐다
+    if (!box.classList.contains('open')) return;
+    var nb = fitScale();
+    s = s * (nb / base); base = nb;               // 보고 있던 확대 비율은 유지
+    clampPan(); apply();
+  });
+  document.addEventListener('keydown', function(ev){
+    if (!box.classList.contains('open')) return;
+    if (ev.key === 'Escape') close();
+    else if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA'
+                           || ev.target.isContentEditable)) return;   // 입력 중인 글자는 뺏지 않는다
+    else if (ev.key === '+' || ev.key === '=') zoomBy(1.25);
+    else if (ev.key === '-' || ev.key === '_') zoomBy(0.8);
+    else if (ev.key === '0') fit();
+    else return;
+    ev.preventDefault();
   });
 })();
 </script>
@@ -812,6 +969,7 @@ def build(ctrl: UIController) -> None:
     ui.add_body_html(f"<script>{fn_tips_js(ctrl.footnote_tooltips())}</script>")
     ui.add_body_html(_CITE_TIP_HTML)
     ui.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
+    ui.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
 
     def push_cite_tips() -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""

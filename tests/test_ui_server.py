@@ -78,6 +78,9 @@ def test_ui_server_renders(tmp_path):
     # 마크다운 헤더 ⚙ 점프 버튼 + 섹션 트리 행 id (마크다운→트리 이동 기능의 연결부)
     assert "md-sec-jump" in body
     assert "sectree-" in body
+    # 본문 그림 클릭 → 확대 뷰어 (오버레이 + 확대/닫기 도구막대)
+    assert "md-img-zoom" in body
+    assert "mdz-bar" in body
     # 레이아웃 자동 수정 — 변환 탭 버튼 + 모달(커스텀 프롬프트 입력창)
     assert "레이아웃 자동 수정" in body
     assert "추가 지시 (선택)" in body
