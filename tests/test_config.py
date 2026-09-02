@@ -50,3 +50,38 @@ def test_global_settings_defaults_when_unset():
     # 아무것도 저장 안 된 상태의 안전한 기본값
     config.set_section_value("output", "caption_style", "nonsense")  # 잘못된 값 → 기본으로 폴백
     assert config.resolve_caption_style() == "bold-italic"
+
+
+# --- 작업 폴더 못 박기 (실행 방식이 바뀌어도 같은 폴더를 보도록) ---
+
+
+def test_pin_workspace_records_default_once(tmp_path, monkeypatch):
+    """기본값은 실행 방식마다 다르다 — 처음 계산된 값을 적어 두어야 나중에 안 흔들린다."""
+    monkeypatch.setattr(config, "default_workspace", lambda: tmp_path / "repo-output")
+
+    assert config.pin_workspace() == tmp_path / "repo-output"
+    assert config.load_config()["output"]["workspace"] == str(tmp_path / "repo-output")
+
+    # 실행 방식이 바뀌어 기본값이 달라져도, 이미 적힌 폴더를 그대로 쓴다
+    monkeypatch.setattr(config, "default_workspace", lambda: tmp_path / "installed-output")
+    assert config.pin_workspace() == tmp_path / "repo-output"
+
+
+def test_pin_workspace_keeps_user_choice(tmp_path, monkeypatch):
+    """사용자가 고른 폴더는 건드리지 않는다."""
+    config.set_section_value("output", "workspace", str(tmp_path / "내가-고른-폴더"))
+    monkeypatch.setattr(config, "default_workspace", lambda: tmp_path / "기본값")
+
+    assert config.pin_workspace() == tmp_path / "내가-고른-폴더"
+    assert config.load_config()["output"]["workspace"] == str(tmp_path / "내가-고른-폴더")
+
+
+def test_pin_workspace_survives_unwritable_config(tmp_path, monkeypatch):
+    """설정을 못 써도(읽기 전용 홈 등) UI는 떠야 한다 — 경로는 그대로 돌려준다."""
+    monkeypatch.setattr(config, "default_workspace", lambda: tmp_path / "out")
+
+    def boom(*a, **k):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(config, "set_section_value", boom)
+    assert config.pin_workspace() == tmp_path / "out"

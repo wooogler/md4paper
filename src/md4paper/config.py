@@ -146,6 +146,23 @@ def resolve_workspace() -> Path:
     return Path(str(raw)).expanduser()
 
 
+def pin_workspace() -> Path:
+    """작업 폴더를 config.toml에 못 박고 반환 — 지정된 적이 없을 때만 지금 기본값을 적는다.
+
+    기본값은 **실행 방식에 따라 달라진다**(저장소에서 실행: `<저장소>/output`, 설치본: `~/md4paper/output`).
+    적어 두지 않으면 클론으로 몇 편 변환한 뒤 아이콘(설치본)으로 갈아탄 순간 빈 폴더를 보게 되어
+    변환해 둔 논문이 사라진 것처럼 보인다. 한 번 적히면 실행 방식이 바뀌어도 같은 폴더를 본다.
+    사용자가 이미 고른 폴더는 건드리지 않는다.
+    """
+    ws = resolve_workspace()
+    if not load_config().get("output", {}).get("workspace"):
+        try:
+            set_section_value("output", "workspace", str(ws))
+        except OSError:
+            pass  # 설정을 못 써도 UI는 떠야 한다 (읽기 전용 홈 등)
+    return ws
+
+
 # --- 라이브러리(결과물을 쌓아둘 폴더) — 영어·한국어 마크다운, 원본 PDF를 각각 따로 지정할 수 있다 ---
 LIBRARY_WHICH = ("en", "ko")  # 마크다운 언어
 LIBRARY_KINDS = ("en", "ko", "pdf")  # 저장 위치 폴더 종류 (마크다운 2 + 원본 PDF)

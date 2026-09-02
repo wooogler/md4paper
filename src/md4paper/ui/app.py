@@ -2652,6 +2652,12 @@ def build_home(state: dict) -> None:
         if not items:
             ui.label("검색 결과가 없습니다." if q else "아직 변환한 논문이 없습니다. 왼쪽에서 PDF를 올리세요.") \
                 .classes("text-xs text-gray-400")
+            if not q and not n_hidden:
+                # 다른 폴더에서 변환해 둔 논문이 안 보이는 것일 수 있다 — 실행 방식에 따라 작업 폴더
+                # 기본값이 달랐다. 어느 폴더를 보고 있는지와 바꾸는 길을 같이 알려 준다.
+                ui.label(f"보고 있는 작업 폴더: {ws()}").classes("text-xs text-gray-400 break-all")
+                ui.label("다른 폴더에서 변환했다면 왼쪽 '저장 위치 → 작업 폴더'에서 그 폴더를 고르세요.") \
+                    .classes("text-xs text-gray-400")
             return
         now = time.monotonic()
         new_roots = state.get("recent_new", {})
@@ -3066,7 +3072,9 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     # launch_wd: CLI로 특정 워크디렉토리를 지정한 경우. current_wd: 이미지 서빙용(리뷰 렌더 시 갱신).
     # queue/worker_running: 전역 변환 대기열 — 페이지 이동에도 유지되도록 서버 수명 state에 둔다.
     state: dict = {
-        "launch_wd": wd, "current_wd": wd, "upload_dir": upload_dir or config.resolve_workspace(),
+        # pin_workspace: 처음 뜰 때 작업 폴더를 config에 못 박는다 — 나중에 실행 방식(저장소/설치본)이
+        # 바뀌어도 같은 폴더를 보도록. --upload-dir로 준 값은 한 번짜리 지정이라 적지 않는다.
+        "launch_wd": wd, "current_wd": wd, "upload_dir": upload_dir or config.pin_workspace(),
         "queue": [], "worker_running": False, "recent_new": {},
         "wd_by_token": {},  # 토큰 → WorkDir (이미지·PDF 자산 서빙, 논문별 캐시 격리)
     }

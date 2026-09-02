@@ -110,3 +110,15 @@ def test_ui_home_upload_page(tmp_path):
     assert ".md4-upload .q-uploader__header { position: absolute; inset: 0;" in body
     assert ".q-uploader__header { display: none" not in body
     assert ".md4-upload .q-uploader__list { pointer-events: none; }" in body  # 목록이 클릭을 가로챈다
+
+
+def test_ui_home_empty_workspace_says_where_it_is_looking(tmp_path):
+    """논문이 하나도 안 보일 때 — 어느 폴더를 보고 있는지와 바꾸는 길을 같이 알려준다.
+
+    실행 방식(저장소에서 실행/설치본)에 따라 작업 폴더 기본값이 달라서, 다른 폴더에서 변환해 둔
+    논문이 안 보이는 걸 '논문이 사라졌다'로 오해하기 쉽다.
+    """
+    body = _serve_and_get(["--upload-dir", str(tmp_path)], _free_port())
+    assert "아직 변환한 논문이 없습니다" in body
+    assert "보고 있는 작업 폴더" in body and str(tmp_path) in body
+    assert "저장 위치 → 작업 폴더" in body
