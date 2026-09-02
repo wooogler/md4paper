@@ -148,6 +148,8 @@ def test_configure_sets_window_icon_and_downloads():
         desktop.configure()
         assert app.native.window_args["min_size"] == (960, 640)
         assert app.native.settings["ALLOW_DOWNLOADS"] is True  # 우리가 못 잡은 다운로드도 사라지지 않게
+        # pywebview 기본값(False)이면 body에 user-select:none이 주입돼 본문을 드래그로 못 고른다
+        assert app.native.window_args["text_select"] is True
         assert Path(app.native.start_args["icon"]).is_file()  # macOS Dock 아이콘
     finally:
         for cfg in (app.native.window_args, app.native.settings, app.native.start_args):

@@ -139,7 +139,7 @@ async def choose_folder(title: str, initial: str | None = None) -> str | None:
 
 
 def configure() -> None:
-    """`ui.run(native=True)` 전에 웹뷰 쪽 설정을 얹는다 (창 크기·아이콘·다운로드 허용).
+    """`ui.run(native=True)` 전에 웹뷰 쪽 설정을 얹는다 (창 크기·아이콘·다운로드·텍스트 선택).
 
     start_args/window_args/settings는 spawn으로 웹뷰 프로세스에 전달되므로 값은 전부 picklable해야
     한다(문자열·숫자·튜플만 넣는다).
@@ -147,6 +147,10 @@ def configure() -> None:
     from nicegui import app
 
     app.native.window_args["min_size"] = (960, 640)
+    # pywebview는 text_select 기본값이 False라 `body { user-select: none; cursor: default }`를
+    # 주입한다 → 앱 창에서는 마크다운 본문을 드래그로 선택·복사할 수 없다(브라우저 모드에선 됐다).
+    # 논문을 읽고 인용을 퍼 가는 도구라 선택은 기본 기능이다 → 켠다.
+    app.native.window_args["text_select"] = True
     # 웹뷰가 자체 저장 패널을 띄울 수 있게 — 우리가 처리하지 못한 다운로드가 조용히 사라지지 않도록.
     app.native.settings["ALLOW_DOWNLOADS"] = True
     if ICON.is_file():
