@@ -94,6 +94,80 @@ def test_llm_body_is_verbatim_slice():
     assert body == "\n\nWriting is fundamental and this is the real body.\n"
 
 
+# 2단 조판 첫 페이지에서 추출기가 좌우 단을 뒤집어 읽은 경우 — 오른쪽 단(초록 꼬리 + 본문 시작)이
+# 먼저 나오고 왼쪽 단의 "Abstract"가 Introduction 뒤로 밀린다 (NIRVANA 첫 페이지 실패 재현).
+SWAPPED = (
+    "## Paper Title Spanning Two Lines\n\n"                                  # 0 title
+    "## [Alice Kim](https://orcid.org/1)\n\n"                                # 1 author heading
+    "Virginia Tech Blacksburg, Virginia, USA alice@vt.edu\n\n"               # 2 affil
+    "Bob Park NAVER AI Lab Seongnam, South Korea bob@naver.com\n\n"          # 3 author + affil
+    "naturalistic writing interactions, and (4) a replay tool. Together, "   # 4 초록 꼬리(문장 중간 시작)
+    "these contributions enable future research.\n\n"
+    "## ACM Reference Format:\n\n"                                           # 5 junk heading
+    "Alice Kim and Bob Park. 2026. Paper Title. In . ACM.\n\n"               # 6 junk body
+    "## 1 Introduction\n\n"                                                  # 7 body start
+    "First intro paragraph carrying the real body text.\n\n"                 # 8 body
+    "Second intro paragraph continuing the argument.\n\n"                    # 9 body
+    "## Abstract\n\n"                                                        # 10 왼쪽 단 — 밀려남
+    "We introduce a dataset of student writing. This work contributes: "     # 11 왼쪽 단 — 밀려남
+    "(1) a publicly available dataset of\n\n"
+    "## 2 Related Work\n\n"                                                  # 12 body
+    "Related work body text.\n\n"                                            # 13 body
+    "Another related work paragraph.\n"                                      # 14 body
+)
+
+
+def test_llm_pulls_frontmatter_back_when_columns_are_swapped():
+    # 읽기 순서: Abstract 헤딩 → 초록 본문 → 초록 꼬리 조각 (본문 뒤로 밀린 10, 11을 앞으로)
+    layout = FrontMatterLayout(title=0, authors=[1, 2, 3], sections=[10, 11, 4], body_start=7)
+    out = fm.normalize_llm(_fake(layout), SWAPPED)
+    front, body = out.split("## 1 Introduction", 1)
+    assert "## Abstract" in front and "## Abstract" not in body   # 초록이 본문 앞으로
+    assert front.index("We introduce a dataset") < front.index("naturalistic writing interactions")
+    assert out.count("We introduce a dataset") == 1               # 본문 쪽에서는 제거(중복 없음)
+    # 본문은 순서·내용 그대로, 초록이 중간에 끼지 않는다
+    assert body.split("## 2 Related Work")[0].strip() == (
+        "First intro paragraph carrying the real body text.\n\n"
+        "Second intro paragraph continuing the argument.")
+    assert "ACM Reference Format" not in out                      # boilerplate는 계속 제거
+    assert out.rstrip().endswith("Another related work paragraph.")
+
+
+def test_llm_leaves_body_prose_in_place_when_mislabelled():
+    # LLM이 본문 문단(8, 9)까지 초록으로 잘못 지목해도, front matter 헤딩으로 시작하는 연속 구간이
+    # 아니므로 앞으로 끌려오지 않고 본문 제자리에 남는다.
+    layout = FrontMatterLayout(title=0, authors=[1, 2, 3], sections=[10, 11, 8, 9, 4], body_start=7)
+    out = fm.normalize_llm(_fake(layout), SWAPPED)
+    front, body = out.split("## 1 Introduction", 1)
+    assert "First intro paragraph" not in front and "Second intro paragraph" not in front
+    assert body.split("## 2 Related Work")[0].strip() == (
+        "First intro paragraph carrying the real body text.\n\n"
+        "Second intro paragraph continuing the argument.")
+    assert "## Abstract" in front                                 # 진짜 front matter는 그대로 복구
+
+
+def test_llm_rejects_layout_that_moves_body_prose():
+    # 본문 시작 블록 자체나 과도한 개수를 끌어올리는 라벨은 거부 → 규칙 폴백
+    for bad in (
+        FrontMatterLayout(title=0, authors=[1, 2], sections=[7], body_start=7),        # 본문 헤딩 이동
+        FrontMatterLayout(title=0, authors=[1, 2],                                # 상한 초과
+                          sections=[8, 9, 10, 11, 12, 13, 14, 4], body_start=7),
+    ):
+        assert fm.normalize_llm(_fake(bad), SWAPPED) is None
+
+
+def test_llm_window_reaches_past_estimated_body_start():
+    # 밀려난 Abstract를 지목하려면 프롬프트 창이 본문 시작 추정 지점 뒤까지 닿아야 한다
+    seen: dict[str, str] = {}
+
+    def capture(system, user, schema):
+        seen["user"] = user
+        return FrontMatterLayout(title=0, authors=[1, 2, 3], sections=[10, 11, 4], body_start=7)
+
+    fm.normalize_llm(FakeProvider(parse_fn=capture, model="fake"), SWAPPED)
+    assert "[10] ## Abstract" in seen["user"]
+
+
 def test_llm_invalid_layout_returns_none():
     for bad in (
         FrontMatterLayout(title=999, authors=[1], sections=[], body_start=13),   # 범위 밖
@@ -195,3 +269,52 @@ def test_render_authors_detail_format_and_parts():
     # 둘 다 끔 → 이름만
     name_only = fm._render_authors_detail(e, [])
     assert name_only == "**A B**"
+
+
+# --- 저자 주석(∗ …) 배치 + 각주 마커 결정성 -------------------------------
+NOTED = (
+    "## Paper With An Author Note\n\n"                                       # 0 title
+    "## [Sang Won Lee ∗](https://orcid.org/9)\n\n"                           # 1 author heading + 마커
+    "Virginia Tech Blacksburg, Virginia, USA sangwonlee@vt.edu\n\n"          # 2 affil
+    "Daniel Manesh Virginia Tech, USA danielmanesh@vt.edu "                  # 3 두 저자 평탄화
+    "Alice Jang Virginia Tech, USA ajjang@vt.edu\n\n"
+    '<a id="fn-author-1"></a>∗ Sang Won Lee conducted this work while at NAVER AI Lab.\n\n'  # 4 저자 주석
+    "## Abstract\n\n"                                                        # 5
+    "The abstract body is real content.\n\n"                                 # 6
+    "## 1 Introduction\n\n"                                                  # 7 body start
+    "Real body text here.\n"                                                 # 8
+)
+
+
+def test_author_note_sits_with_authors_not_at_document_end():
+    layout = FrontMatterLayout(title=0, authors=[1, 2, 3], sections=[5, 6], body_start=7)
+    out = fm.normalize_llm(_fake(layout), NOTED)
+    front = out.split("## Abstract")[0]
+    assert "conducted this work while at NAVER AI Lab" in front  # 저자 블록 뒤, 초록 앞
+    assert "**[Sang Won Lee](https://orcid.org/9)**" in front    # 이름의 ∗ 마커는 제거
+    assert "Sang Won Lee ∗" not in out
+    # 규칙 폴백에서도 저자 주석은 버려지지 않고 저자 뒤에 남는다
+    heur = fm.normalize_heuristic(NOTED)
+    assert "conducted this work while at NAVER AI Lab" in heur.split("## Abstract")[0]
+
+
+def test_author_marks_are_stripped_deterministically():
+    for raw, want in (
+        ("Sang Won Lee ∗", "Sang Won Lee"),
+        ("Young-Ho Kim†", "Young-Ho Kim"),
+        ("Alice Jang 1,2", "Alice Jang"),
+        ("Bob Park¹", "Bob Park"),
+        ("Jane Doe", "Jane Doe"),
+        ("∗", "∗"),                       # 이름이 통째로 마커면 원본 유지 (빈 이름 방지)
+    ):
+        assert fm.strip_author_mark(raw) == want
+
+
+def test_structured_author_names_lose_markers():
+    from md4paper.ir import AuthorEntry
+
+    src = "Sang Won Lee ∗\n\nVirginia Tech\n\nsangwonlee@vt.edu"
+    entries = [AuthorEntry(name="Sang Won Lee ∗", emails=["sangwonlee@vt.edu"],
+                           affiliations=["Virginia Tech"])]
+    got = fm._grounded_authors(entries, src)
+    assert got is not None and got[0].name == "Sang Won Lee"

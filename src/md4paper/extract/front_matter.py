@@ -19,6 +19,7 @@ from md4paper.extract.docling_backend import (
     _ADDR_HINT_RE,
     _AUTHOR_SEG_RE,
     _EMAIL_RE,
+    AUTHOR_NOTE_ANCHOR,
     _split_blocks,
 )
 from md4paper.ir import AuthorEntry, FrontMatterLayout
@@ -42,6 +43,10 @@ _VENUE_RE = re.compile(r"\b(CHI|UIST|CSCW|IEEE|Proceedings)\b.*\b(ACM|pages|\d{4
 _STAR_RE = re.compile(r"^\s*[\*∗]")
 _JUNK_HEADINGS = frozenset({"acm reference format", "acm reference format:"})
 _MAX_FRONT = 50  # 이 안에서 첫 본문 섹션을 못 찾으면 front matter 판단 불가 → 손대지 않음
+# 2단 조판 첫 페이지는 추출기가 좌우 단을 뒤집어 읽는 일이 있다 — Abstract 블록이 "1 Introduction"
+# 뒤로 밀려난다. 본문 시작 추정 지점보다 이만큼 더 보여줘야 LLM이 그 블록을 지목할 수 있다.
+_BODY_LOOKAHEAD = 8
+_MAX_PULLED = 6  # 본문 뒤에서 앞으로 끌어올릴 수 있는 블록 수 상한 — 오판했을 때 피해를 제한
 
 
 # --- 공통 판별 -------------------------------------------------------------
@@ -59,6 +64,26 @@ def _is_person(text: str) -> bool:
     disp, _ = _disp_url(text)
     disp = re.sub(r"[\*∗\d,]+$", "", disp).strip()  # 위첨자 소속번호·별표 제거
     return disp.lower().rstrip(":") not in _SECTION_WORDS and bool(_PERSON_RE.match(disp))
+
+
+# 저자 이름 끝의 각주/소속 마커 — 추출·LLM 판단에 따라 붙었다 떨어졌다 하므로 코드에서 항상 뗀다.
+# (표기 결정: 마커는 **버리고**, 그 마커가 가리키는 저자 주석 본문은 저자 블록 뒤에 그대로 보여준다.)
+_AUTHOR_MARK_RE = re.compile(r"[\s,]*(?:[*∗＊†‡§¶‖¹²³⁴⁵⁶⁷⁸⁹⁰\d]+[\s,]*)+$")
+
+
+def strip_author_mark(name: str) -> str:
+    """저자 이름 끝의 각주 마커(∗ * † ‡ § ¶, 위첨자·소속 번호)를 뗀다. 결과가 비면 원본 유지."""
+    stripped = _AUTHOR_MARK_RE.sub("", name).strip()
+    return stripped or name.strip()
+
+
+# 추출 단계가 저자 주석에 심어 둔 앵커 — 라벨이 없어도 이 블록만은 버리지 않고 저자 뒤에 붙인다.
+_AUTHOR_NOTE_RE = re.compile(rf'^\s*<a id="{AUTHOR_NOTE_ANCHOR}-\d+">')
+
+
+def _is_author_note(block: str) -> bool:
+    """추출 단계에서 저자 주석으로 분류돼 앵커가 붙은 블록인지."""
+    return bool(_AUTHOR_NOTE_RE.match(block.strip()))
 
 
 def _is_affiliation(block: str) -> bool:
@@ -93,6 +118,7 @@ def _find_body_start(blocks: list[str]) -> int | None:
 def _render_author(block: str) -> str:
     """저자 헤더 블록 렌더 — 굵게(더는 섹션 아님)."""
     disp, url = _disp_url(_heading(block)[1])
+    disp = strip_author_mark(disp)
     return f"**[{disp}]({url})**" if url else f"**{disp}**"
 
 
@@ -120,6 +146,7 @@ def normalize_heuristic(md: str) -> str:
         return md
 
     authors: list[str] = []
+    notes: list[str] = []  # 저자 주석 — 저자 블록 바로 뒤에 붙인다
     keep: list[str] = []
     n_head = n_affil = 0
     skip_body = False
@@ -140,7 +167,9 @@ def normalize_heuristic(md: str) -> str:
                 keep.append(b)
             i += 1
             continue
-        if _is_affiliation(b):
+        if _is_author_note(b):
+            notes.append(b)
+        elif _is_affiliation(b):
             for seg in (s.strip() for s in _AUTHOR_SEG_RE.findall(b) if s.strip()):
                 authors.append(seg)
                 n_affil += 1
@@ -155,6 +184,7 @@ def normalize_heuristic(md: str) -> str:
     out = [blocks[0]]
     if authors:
         out.append("\n\n".join(authors))
+    out.extend(notes)
     out.extend(keep)
     out.extend(blocks[end:])
     text = "\n\n".join(out)
@@ -172,8 +202,15 @@ You receive numbered blocks. Return, using ONLY the given indices:
   order (top-to-bottom, left-to-right of the original author grid). Include every author block, even ones
   that appear far down, interleaved with boilerplate.
 - sections: indices of LEGITIMATE front-matter section blocks to keep — Abstract, CCS Concepts, Keywords
-  and the body blocks that belong to them — in document order. Do NOT include copyright, venue, ISBN,
-  DOI, "ACM Reference Format", or the author-note footnote here.
+  and the body blocks that belong to them — listed in the order they should be READ. Do NOT include
+  copyright, venue, ISBN, DOI, "ACM Reference Format", or the author-note footnote here.
+  A two-column first page is often read column-out-of-order, so these blocks may be scrambled: the
+  "Abstract" heading and its text can land AFTER body_start, and a stray tail fragment of the abstract
+  (a block starting mid-sentence, before body_start) can land before it. List them anyway, and list them
+  in reading order — heading first, then its text, then any continuation fragment — even when that means
+  an index after body_start comes before one that precedes it. Blocks you list from after body_start must
+  be a CONTIGUOUS run starting at the section's own heading ("Abstract", "CCS Concepts", "Keywords"):
+  never list an Introduction paragraph, and never skip over one to reach a later block.
 - body_start: the index of the first MAIN body section (usually "Introduction" or "1 ...").
 - authors_detail: the SAME authors, re-grouped one entry per person, in reading order. For each author give
   name, their email(s), and their affiliation line(s). A multi-column grid interleaves people, so attach each
@@ -181,7 +218,8 @@ You receive numbered blocks. Return, using ONLY the given indices:
   or complete an email or affiliation. If you cannot tell whom an affiliation belongs to, omit authors_detail
   entirely (leave it empty); a partial or guessed grouping is worse than none.
 
-Everything before body_start that you did not list is treated as boilerplate and dropped. Never invent
+Everything before body_start that you did not list is treated as boilerplate and dropped; everything
+after body_start that you did not list stays where it is, untouched. Never invent
 indices. If unsure whether a block is an author or boilerplate, and it contains an email, treat it as an
 author."""
 
@@ -233,7 +271,7 @@ def _grounded_authors(entries: list[AuthorEntry], source: str) -> list[AuthorEnt
         affils = [a.strip() for a in e.affiliations if a.strip()]
         if any(_alnum(a) not in src_alnum for a in affils):
             return None
-        clean.append(AuthorEntry(name=name, emails=emails, affiliations=affils))
+        clean.append(AuthorEntry(name=strip_author_mark(name), emails=emails, affiliations=affils))
     return clean
 
 
@@ -267,9 +305,11 @@ def _valid(layout: FrontMatterLayout, n_front: int, n_blocks: int) -> bool:
         return False
     if not layout.authors or not all(ok(i) and i < layout.body_start for i in layout.authors):
         return False
-    if not all(ok(i) and i < layout.body_start for i in layout.sections):
+    # 섹션은 본문 시작 뒤에 있어도 된다(단 뒤집힘) — 단, LLM에 보여준 창(n_front) 안이어야 하고
+    # 본문 시작 블록 자체는 옮길 수 없으며, 끌어올리는 개수도 제한한다.
+    if not all(ok(i) and i < n_front and i != layout.body_start for i in layout.sections):
         return False
-    return True
+    return sum(1 for i in layout.sections if i > layout.body_start) <= _MAX_PULLED
 
 
 # front matter 안의 그림(teaser)·캡션 블록 — boilerplate가 아니라 콘텐츠라 버리면 안 된다.
@@ -283,6 +323,47 @@ def _is_figure_block(block: str) -> bool:
     return bool(_FM_IMG_RE.match(first) or _FM_CAP_RE.match(first))
 
 
+# 본문보다 앞에 올 수 있는 섹션 헤딩 — 뒤집힌 단을 되돌릴 때 "여기서부터 앞으로" 기준점이 된다.
+_FRONT_SECTION_RE = re.compile(
+    r"^(abstract|keywords?|author keywords|index terms|ccs concepts|ccs|general terms|"
+    r"categories and subject descriptors)\b", re.I)
+
+
+def _is_front_heading(block: str) -> bool:
+    h = _heading(block)
+    return bool(h and _FRONT_SECTION_RE.match(h[1].strip().lstrip("·* ")))
+
+
+def _pullable(blocks: list[str], sections: list[int], body_start: int) -> set[int]:
+    """본문 뒤에 놓인 섹션 블록 중 실제로 앞으로 되돌릴 것만 고른다.
+
+    단이 뒤집히면 왼쪽 단이 **한 덩어리로** 밀리므로 되돌릴 대상은 "Abstract 같은 front matter
+    헤딩 + 뒤따르는 연속 블록"이다. 그 모양이 아닌 지목(본문 문단을 초록으로 오인한 경우 등)은
+    무시하고 본문에 그대로 둔다 — 라벨이 조금 틀려도 본문 순서가 흐트러지지 않는다.
+    """
+    runs: list[list[int]] = []
+    for i in sorted({i for i in sections if i > body_start}):
+        if runs and i == runs[-1][-1] + 1 and not _is_front_heading(blocks[i]):
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    return {i for run in runs if _is_front_heading(blocks[run[0]]) for i in run}
+
+
+def _ordered_sections(sections: list[int], extra_fig: list[int]) -> list[int]:
+    """유지할 front matter 블록의 출력 순서 — LLM이 준 읽기 순서를 그대로 쓴다.
+
+    단이 뒤집힌 첫 페이지는 Abstract가 "1 Introduction" 뒤에 놓이므로 인덱스 정렬(sorted)로는
+    복구할 수 없다. 라벨이 없는 그림(teaser) 블록만 인덱스 위치에 맞춰 끼워 넣는다.
+    정상 논문(sections가 오름차순)에서는 결과가 종전과 같다.
+    """
+    out = list(dict.fromkeys(sections))
+    for i in sorted(set(extra_fig)):
+        pos = next((k for k, j in enumerate(out) if j > i), len(out))
+        out.insert(pos, i)
+    return out
+
+
 def _build_llm(provider: Provider, md: str, parts: list[str] | None) -> tuple[str, list[AuthorEntry]] | None:
     """LLM 라벨 → 코드 재조립. (정규화 md, 검증된 구조화 저자) 반환. 검증 실패 시 None."""
     blocks = _split_blocks(md)
@@ -293,7 +374,7 @@ def _build_llm(provider: Provider, md: str, parts: list[str] | None) -> tuple[st
         return None
     # LLM에 보낼 앞부분 범위 (본문 시작 추정 + 여유, 상한 캡)
     approx = _find_body_start(blocks) or _MAX_FRONT
-    n_front = min(len(blocks), max(approx + 3, 8), _MAX_FRONT + 3)
+    n_front = min(len(blocks), max(approx + _BODY_LOOKAHEAD, 8), _MAX_FRONT + _BODY_LOOKAHEAD)
     try:
         layout = _llm_layout(provider, blocks, n_front)
     except Exception:  # noqa: BLE001 — 실패 시 폴백
@@ -315,15 +396,24 @@ def _build_llm(provider: Provider, md: str, parts: list[str] | None) -> tuple[st
         if author_lines:
             out.append("\n\n".join(author_lines))
     seen = {layout.title, *layout.authors}
+    # 저자 주석(∗ …)은 라벨 유무와 무관하게 저자 바로 뒤에 붙인다 — 추출 단계가 앵커로 표시해 둔다.
+    for i in range(min(layout.body_start, len(blocks))):
+        if i not in seen and _is_author_note(blocks[i]):
+            out.append(blocks[i])
+            seen.add(i)
     # front matter의 그림(teaser)·캡션 블록은 라벨이 없어도 콘텐츠이므로 유지한다(유실 방지).
     # LLM이 sections에 안 넣은 첫 페이지 teaser가 boilerplate처럼 버려지던 문제를 막는다.
     extra_fig = [i for i in range(min(layout.body_start, len(blocks)))
                  if i not in seen and _is_figure_block(blocks[i])]
-    for i in sorted(set(layout.sections) | set(extra_fig)):  # 문서 순서 유지
-        if i not in seen:
+    pulled = _pullable(blocks, layout.sections, layout.body_start)
+    for i in _ordered_sections(layout.sections, extra_fig):
+        if i not in seen and (i < layout.body_start or i in pulled):
             out.append(blocks[i])
             seen.add(i)
-    out.extend(blocks[layout.body_start:])  # 본문은 원본 그대로 (슬라이스 → 손실 없음)
+    # 본문은 원본 순서 그대로. 단이 뒤집혀 본문 뒤로 밀려났던 front matter 블록(위에서 이미
+    # 앞으로 옮긴 것)만 제외한다 — 그대로 두면 Abstract가 Introduction 중간에 또 나온다.
+    out.extend(b for j, b in enumerate(blocks[layout.body_start:], layout.body_start)
+               if j not in pulled)
     text = "\n\n".join(out)
     return (text + "\n" if md.endswith("\n") else text), grounded
 

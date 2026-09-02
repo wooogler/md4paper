@@ -322,6 +322,64 @@ def _apply_footnotes(md: str, footnotes: list[str]) -> tuple[str, dict[str, str]
     return md, tips
 
 
+# --- 첫 페이지 각주 분류: 본문 각주 / 저자 주석 / 출판사 boilerplate ------------------
+# 첫 페이지 아래 컬럼에는 성격이 다른 세 가지가 같은 'footnote' 라벨로 섞여 나온다.
+# 번호가 붙은 것만 본문 각주이고, 나머지는 앞부분(저자 주석)이거나 서지 정보(허가문·ⓒ·ISBN·DOI)다.
+# 셋을 구분하지 않으면 저작권 문구가 문서 끝 '## Footnotes'에 본문처럼 실린다.
+_FN_PAGE_MAX = 1  # 이 쪽까지의 무번호 각주만 front matter로 본다 (본문 각주는 건드리지 않음)
+_AUTHOR_NOTE_MARK_RE = re.compile(r"^\s*[*∗＊†‡§¶‖]|^\s*(?:Corresponding author|Equal contribution)", re.I)
+# 출판사 boilerplate — 학회·출판사를 안 가리는 표지들(허가문·라이선스·저작권·ISBN·DOI 단독 줄).
+_FRONT_BOILERPLATE_RE = re.compile(
+    r"(Permission to make digital|This work is licensed|Creative Commons|"
+    r"Copyright held by|©|\(c\)\s*\d{4}|\bISBN\b|^\s*https?://doi\.org/|^\s*doi:)",
+    re.I,
+)
+
+
+def _page_of(item) -> int | None:  # noqa: ANN001 — DocItem
+    prov = getattr(item, "prov", None)
+    return int(prov[0].page_no) if prov else None
+
+
+def _classify_footnote(text: str, page: int | None) -> str:
+    """각주 텍스트를 'body'(번호 각주) / 'author'(저자 주석) / 'boilerplate'로 분류.
+
+    번호로 시작하면 본문 각주(마커 링크 대상). 첫 페이지의 무번호 각주만 앞부분 것으로 보고,
+    각주 기호(∗ † ‡ …)로 시작하면 저자 주석, 허가문·ⓒ·ISBN·DOI면 서지 boilerplate로 돌린다.
+    어느 쪽도 아니면 기존대로 본문 각주 목록에 남긴다(내용 유실 방지).
+    """
+    if _FN_PARSE_RE.match(text.strip()):
+        return "body"
+    if page is not None and page > _FN_PAGE_MAX:
+        return "body"
+    if _AUTHOR_NOTE_MARK_RE.match(text):
+        return "author"
+    return "boilerplate" if _FRONT_BOILERPLATE_RE.search(text) else "body"
+
+
+# 저자 주석 블록 표시 — 앞부분 정규화(front_matter)가 라벨 없이도 이 블록만은 지우지 않고
+# 저자 바로 뒤로 옮길 수 있게 하는 앵커. 렌더링에는 보이지 않는다.
+AUTHOR_NOTE_ANCHOR = "fn-author"
+_BODY_HDR_RE = re.compile(r"^#{1,6}\s+[·*\s]*(\d|Introduction\b)", re.I)
+
+
+def _place_author_notes(md: str, notes: list[str]) -> str:
+    """저자 주석을 앞부분 끝(첫 본문 섹션 직전)에 넣는다 — 문서 끝 각주 목록이 아니라.
+
+    front_matter 단계가 이 앵커를 보고 저자 블록 바로 뒤로 다시 옮긴다. 첫 본문 섹션을 못 찾으면
+    맨 앞(제목 다음)에 둔다 — 어느 경우든 본문 한가운데로는 가지 않는다.
+    """
+    if not notes:
+        return md
+    block = "\n\n".join(
+        f'<a id="{AUTHOR_NOTE_ANCHOR}-{i}"></a>{n.strip()}' for i, n in enumerate(notes, 1))
+    blocks = _split_blocks(md)
+    at = next((i for i, b in enumerate(blocks) if _BODY_HDR_RE.match(b.strip())), min(1, len(blocks)))
+    blocks.insert(at, block)
+    text = "\n\n".join(blocks)
+    return text + "\n" if md.endswith("\n") else text
+
+
 def _join_broken_paragraphs(md: str) -> str:
     """열·페이지 경계나 footer/저작권 블록 제거로 끊긴 문단을 재결합.
 
@@ -355,6 +413,83 @@ _BOILERPLATE_RE = re.compile(
     r"Creative Commons Attribution)",
     re.IGNORECASE,
 )
+
+
+# --- 러닝 헤더/푸터 — 라벨이 아니라 '쪽마다 되풀이되는 가장자리 텍스트'로 판정 -------------
+# page_header/page_footer 라벨은 _EXCLUDE_LABELS로 이미 빠지지만, Docling이 어떤 쪽에서만
+# 라벨을 놓치면(관찰: 좌우 러닝 헤더가 한 'text' 아이템으로 합쳐진 쪽) 그 한 줄이 본문에 샌다.
+# 그래서 라벨과 무관하게 "페이지 위/아래 띠 + 여러 쪽에 반복" 인 텍스트를 지운다.
+# 합쳐진 변형("<venue> <저자목록>")도 잡히도록, 알려진 반복 문구를 빼고 남는 잔여가 짧으면 제거한다.
+_RUNHEAD_BAND = 0.10       # 페이지 높이의 위/아래 이 비율 안 (좌표계 원점과 무관하게 가장자리 거리로)
+_RUNHEAD_MIN_PAGES = 2     # 서로 다른 쪽 이만큼에 나와야 러닝 헤더로 인정
+_RUNHEAD_MAX_CHARS = 200   # 이보다 길면 러닝 헤더가 아니라 본문 문단
+_RUNHEAD_MIN_CHARS = 8     # 쪽번호처럼 짧은 건 시그니처로 안 씀 (본문 오탐 위험)
+_RUNHEAD_RESIDUE = 0.4     # 반복 문구를 뺀 잔여가 원문의 이 비율 미만이면 러닝 헤더 줄로 본다
+_RUNHEAD_DIGITS_RE = re.compile(r"\d+")
+# 러닝 헤더로 볼 수 없는 라벨 — 페이지 위쪽에 오는 진짜 섹션 제목·캡션·표를 지우지 않기 위해 아예 제외.
+_RUNHEAD_KEEP_LABELS = frozenset({
+    "section_header", "title", "document_index", "caption", "table", "picture", "formula",
+    "code", "list_item", "reference",
+})
+
+
+def _runhead_sig(text: str) -> str:
+    """러닝 헤더 대조용 정규화 — 소문자·공백 축약·숫자 마스킹(쪽번호·연도 차이 무시)."""
+    return _RUNHEAD_DIGITS_RE.sub("#", " ".join(text.split()).lower())
+
+
+def _edge_items(document) -> list[tuple]:  # noqa: ANN001 — DoclingDocument
+    """페이지 위/아래 띠에 있는 (아이템, 쪽번호, 시그니처) 목록."""
+    out: list[tuple] = []
+    for it in getattr(document, "texts", []):
+        text = (getattr(it, "text", "") or "").strip()
+        prov = getattr(it, "prov", None)
+        label = str(getattr(it, "label", "")).replace("DocItemLabel.", "").lower()
+        if label in _RUNHEAD_KEEP_LABELS:
+            continue  # 섹션 제목·캡션은 페이지 맨 위에 와도 러닝 헤더가 아니다
+        if not prov or not (_RUNHEAD_MIN_CHARS <= len(text) <= _RUNHEAD_MAX_CHARS):
+            continue
+        page = int(prov[0].page_no)
+        size = getattr(getattr(document, "pages", {}).get(page, None), "size", None)
+        height = float(getattr(size, "height", 0) or 0)
+        b = prov[0].bbox
+        if not height:
+            continue
+        lo, hi = min(b.t, b.b), max(b.t, b.b)
+        if min(lo, height - hi) <= height * _RUNHEAD_BAND:  # 좌표 원점(상단/하단) 무관
+            out.append((it, page, _runhead_sig(text)))
+    return out
+
+
+def _drop_running_heads(document) -> int:  # noqa: ANN001 — DoclingDocument
+    """쪽마다 되풀이되는 러닝 헤더/푸터를 문서에서 제거. 제거한 아이템 수를 돌려준다.
+
+    홀/짝 변형(왼쪽=venue, 오른쪽=저자목록)은 각각 별도 시그니처로 잡히고, 둘이 한 아이템으로
+    합쳐진 쪽은 '알려진 시그니처를 빼면 잔여가 거의 없다'로 잡힌다.
+    """
+    from collections import defaultdict
+
+    edge = _edge_items(document)
+    pages_by_sig: dict[str, set[int]] = defaultdict(set)
+    for _, page, sig in edge:
+        pages_by_sig[sig].add(page)
+    repeated = {sig for sig, pages in pages_by_sig.items() if len(pages) >= _RUNHEAD_MIN_PAGES}
+    if not repeated:
+        return 0
+    ordered = sorted(repeated, key=len, reverse=True)  # 긴 것부터 빼야 부분 문구에 안 먹힌다
+    to_remove = []
+    for it, _, sig in edge:
+        residue = sig
+        for known in ordered:
+            residue = residue.replace(known, " ")
+        if len(" ".join(residue.split())) < len(sig) * _RUNHEAD_RESIDUE:
+            to_remove.append(it)
+    for it in to_remove:
+        try:
+            document.delete_items(node_items=[it])
+        except Exception:  # noqa: BLE001 — 삭제 실패해도 치명적이지 않음
+            pass
+    return len(to_remove)
 
 
 def _body_labels() -> set:
@@ -503,16 +638,18 @@ _LOGO_MAX_W = 120
 _LOGO_MAX_H = 120
 
 
-def _relocate_footer_blocks(document) -> tuple[list[str], list[str]]:  # noqa: ANN001 — DoclingDocument
-    """각주 수집 + 저작권 boilerplate/로고 배지를 본문에서 제거.
+def _relocate_footer_blocks(document) -> tuple[list[str], list[str], list[str]]:  # noqa: ANN001
+    """각주 분류 + 저작권 boilerplate/로고 배지를 본문에서 제거.
 
-    - footnote 라벨: 문서 끝으로 모으기 위해 텍스트만 수집.
+    - footnote 라벨: 번호 각주는 문서 끝 목록으로, 첫 페이지의 무번호 각주는 성격에 따라
+      저자 주석(∗ † … 마커) / 출판사 boilerplate(허가문·ⓒ·ISBN·DOI)로 나눈다.
     - 저작권/라이선스 boilerplate(text 라벨): 내용 기반으로 삭제(단, venue/연도가 들어 있어 서지용으로 보관).
     - 작은 그림(CC 배지·학회 로고): 크기 기준으로 삭제(진짜 figure는 크므로 보존).
-    반환: (문서 끝에 붙일 각주 목록, 서지 추출용 boilerplate 목록).
+    반환: (문서 끝에 붙일 각주 목록, 서지 추출용 boilerplate 목록, 앞부분에 붙일 저자 주석 목록).
     """
     footnotes: list[str] = []
     boilerplate: list[str] = []
+    author_notes: list[str] = []
     to_remove: list = []
     for it in getattr(document, "texts", []):
         label = str(getattr(it, "label", "")).replace("DocItemLabel.", "").lower()
@@ -520,7 +657,8 @@ def _relocate_footer_blocks(document) -> tuple[list[str], list[str]]:  # noqa: A
         if not text:
             continue
         if label == "footnote":
-            footnotes.append(text)
+            kind = _classify_footnote(text, _page_of(it))
+            {"body": footnotes, "author": author_notes, "boilerplate": boilerplate}[kind].append(text)
         elif label == "text" and _BOILERPLATE_RE.search(text) and len(text) < 400:
             boilerplate.append(text)  # venue/연도가 있을 수 있어 서지 추출용으로 남김
             to_remove.append(it)
@@ -568,7 +706,7 @@ def _relocate_footer_blocks(document) -> tuple[list[str], list[str]]:  # noqa: A
             document.delete_items(node_items=[it])
         except Exception:  # noqa: BLE001 — 삭제 실패해도 치명적이지 않음
             pass
-    return footnotes, boilerplate
+    return footnotes, boilerplate, author_notes
 
 
 # Docling export 아티팩트 파일명: image_000002_<hash>.png → 픽처 인덱스 2 (document.pictures[2])
@@ -717,7 +855,8 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
 
     _save_heading_pages(result.document, wd)
     line_numbers = _drop_line_numbers(result.document)  # 투고 원고 여백의 줄 번호 gutter
-    footnotes, boilerplate = _relocate_footer_blocks(result.document)
+    run_heads = _drop_running_heads(result.document)  # 쪽마다 되풀이되는 러닝 헤더/푸터
+    footnotes, boilerplate, author_notes = _relocate_footer_blocks(result.document)
     wd.extract.mkdir(parents=True, exist_ok=True)
     wd.frontmatter_txt.write_text("\n".join(boilerplate), encoding="utf-8")  # 서지(venue/연도) 추출용
     pictures = list(getattr(result.document, "pictures", []))  # 아티팩트 파일명 인덱스와 매핑
@@ -732,6 +871,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         md = _split_author_block(md)  # 2단 저자 블록(한 줄)을 저자별로 분리
         md = _strip_contact_footer(md)  # 본문에 흘러든 'Corresponding author' 연락처 블록 제거
         md = _join_broken_paragraphs(md)  # 컬럼/footer 제거로 끊긴 문단 재결합
+        md = _place_author_notes(md, author_notes)  # 저자 주석(∗ …)은 앞부분에 (문서 끝 각주 아님)
         # 각주: 본문 마커를 위첨자 링크로, 내용은 문서 끝 목록 + 구조화 저장(호버 툴팁용)
         if footnotes:
             import json as _json
@@ -768,4 +908,5 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         "ocr": ocr,
         "images": len(mapping) // 2 if mapping else 0,
         "line_numbers_dropped": line_numbers,
+        "running_heads_dropped": run_heads,
     }

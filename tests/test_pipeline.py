@@ -516,3 +516,143 @@ def test_manifest_without_author_parts_falls_back_to_config(tmp_path):
     wd.sections_yaml.write_text("title: T\ncitation_parts:\n- number\nsections: []\n", encoding="utf-8")
 
     assert manifest_io.load(wd).author_parts == ["email", "affiliation"]
+
+
+# --- 첫 페이지 각주 분류 · 러닝 헤더 제거 (docling 없이 순수 함수/가짜 문서로) ---------------
+class _FakeBBox:
+    def __init__(self, t, b, left=50.0, right=550.0):
+        self.t, self.b, self.l, self.r = t, b, left, right
+
+
+class _FakeProv:
+    def __init__(self, page, bbox):
+        self.page_no, self.bbox = page, bbox
+
+
+class _FakeItem:
+    def __init__(self, text, page, t, b, label="text", left=50.0, right=550.0):
+        self.text, self.label = text, label
+        self.prov = [_FakeProv(page, _FakeBBox(t, b, left, right))]
+
+
+class _FakeSize:
+    def __init__(self, height=792.0):
+        self.height, self.width = height, 612.0
+
+
+class _FakePage:
+    def __init__(self):
+        self.size = _FakeSize()
+
+
+class _FakeDoc:
+    """_drop_running_heads가 쓰는 최소 인터페이스 (texts / pages / delete_items)."""
+
+    def __init__(self, texts, n_pages=6):
+        self.texts = list(texts)
+        self.pages = {i: _FakePage() for i in range(1, n_pages + 1)}
+
+    def delete_items(self, node_items):
+        for it in node_items:
+            self.texts.remove(it)
+
+
+def test_classify_first_page_footnotes():
+    """번호 각주 / 저자 주석 / 출판사 boilerplate 를 라벨이 아니라 성격으로 가른다."""
+    from md4paper.extract.docling_backend import _classify_footnote as c
+
+    assert c("3 https://example.org/data", 1) == "body"          # 번호 각주 → 본문 각주
+    assert c("∗ Sang Won Lee conducted this work while visiting.", 1) == "author"
+    assert c("† These authors contributed equally.", 1) == "author"
+    assert c("Corresponding author: a@b.edu", 1) == "author"
+    for boiler in (
+        "Permission to make digital or hard copies of all or part of this work…",
+        "Conference'17, Washington, DC, USA © 2023 ACM.",
+        "ACM ISBN 978-x-xxxx-xxxx-x/YYYY/MM",
+        "https://doi.org/10.1145/nnnnnnn.nnnnnnn",
+        "This work is licensed under a Creative Commons Attribution license.",
+    ):
+        assert c(boiler, 1) == "boilerplate", boiler
+    # 본문 페이지의 무번호 각주는 손대지 않는다 (내용 유실 방지)
+    assert c("See the supplementary material for details.", 7) == "body"
+    assert c("© 2023 ACM.", 7) == "body"
+
+
+def test_place_author_notes_goes_to_front_matter():
+    from md4paper.extract.docling_backend import _place_author_notes
+
+    md = ("## Title\n\n**Alice**\n\n## Abstract\n\nAbstract body.\n\n"
+          "## 1 Introduction\n\nBody text.\n")
+    out = _place_author_notes(md, ["∗ Alice is a visiting scholar."])
+    front, body = out.split("## 1 Introduction", 1)
+    assert "Alice is a visiting scholar" in front and "visiting scholar" not in body
+    assert '<a id="fn-author-1">' in front       # front_matter가 저자 뒤로 옮길 앵커
+    assert out.rstrip().endswith("Body text.")
+    assert _place_author_notes(md, []) == md     # 주석 없으면 그대로
+
+
+def _runhead_doc():
+    """홀/짝 러닝 헤더 + 한 쪽만 두 헤더가 한 아이템으로 합쳐지고 라벨도 놓친 문서."""
+    texts = []
+    for page in range(2, 7):
+        if page % 2 == 0:
+            texts.append(_FakeItem("Conference'17, July 2017, Washington, DC, USA",
+                                   page, 729, 723, label="page_header", left=54, right=191))
+            texts.append(_FakeItem("Jelson, Manesh, Sangwook Lee", page, 729, 723,
+                                   label="page_header", left=427, right=558))
+        else:
+            texts.append(_FakeItem("A Comprehensive Dataset for Essay Writing", page, 729, 723,
+                                   label="page_header", left=54, right=357))
+            texts.append(_FakeItem("Conference'17, July 2017, Washington, DC, USA",
+                                   page, 729, 723, label="page_header", left=421, right=558))
+    # 라벨을 놓치고 좌우가 한 줄로 합쳐진 쪽 (이게 본문에 새던 케이스)
+    merged = _FakeItem("Conference'17, July 2017, Washington, DC, USA Jelson, Manesh, Sangwook Lee",
+                       7, 729, 723, label="text", left=54, right=558)
+    body = _FakeItem("AI writing assistants have been used for more than a decade to support "
+                     "various writing tasks in classrooms.", 7, 700, 400)
+    footer_pageno = _FakeItem("Conference'17, July 2017, Washington, DC, USA", 7, 60, 54,
+                              label="page_footer")
+    texts += [merged, body, footer_pageno]
+    return _FakeDoc(texts, n_pages=7), merged, body
+
+
+def test_drop_running_heads_catches_mislabelled_and_merged():
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    doc, merged, body = _runhead_doc()
+    n = _drop_running_heads(doc)
+    assert n >= 1
+    assert merged not in doc.texts          # 라벨 놓친 합쳐진 러닝 헤더 → 제거
+    assert body in doc.texts                # 본문은 그대로
+    assert not any("Conference'17" in t.text for t in doc.texts)  # 위·아래 띠 모두
+
+
+def test_drop_running_heads_keeps_unique_edge_text():
+    """한 쪽에만 있는 가장자리 텍스트(반복 아님)는 러닝 헤더가 아니다."""
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    only_once = _FakeItem("A one-off note printed at the top of a single page.", 3, 729, 723)
+    body = _FakeItem("Regular body paragraph in the middle of the page.", 3, 600, 500)
+    doc = _FakeDoc([only_once, body], n_pages=4)
+    assert _drop_running_heads(doc) == 0
+    assert only_once in doc.texts and body in doc.texts
+
+
+def test_runhead_signature_ignores_page_numbers():
+    from md4paper.extract.docling_backend import _runhead_sig
+
+    assert _runhead_sig("Proceedings of CHI 2026, page 12") == _runhead_sig(
+        "Proceedings   of CHI 2025, page 3")
+
+
+def test_drop_running_heads_spares_repeated_section_headings():
+    """페이지 맨 위에 반복해 오는 진짜 섹션 제목/캡션은 러닝 헤더로 지우지 않는다."""
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    heads = [_FakeItem("A.2 Survey Instrument (continued)", p, 729, 723, label="section_header")
+             for p in (3, 4, 5)]
+    caps = [_FakeItem("Table 3: Participant demographics", p, 729, 723, label="caption")
+            for p in (3, 4)]
+    doc = _FakeDoc([*heads, *caps], n_pages=6)
+    assert _drop_running_heads(doc) == 0
+    assert len(doc.texts) == 5
