@@ -14,7 +14,7 @@ from pathlib import Path
 
 from md4paper import config, library
 from md4paper.ir import Flavor, GlossaryEntry
-from md4paper.ui import annotations, desktop
+from md4paper.ui import annotations, chat_panel, desktop
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir
 
@@ -1669,6 +1669,9 @@ def build(ctrl: UIController) -> None:
     ui.add_css(_ANNO_CSS)
     ui.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
     ui.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
+    ui.add_css(chat_panel.CSS)  # 뷰어 챗봇 서랍 — 질문 → 정렬 문단 근거 답변
+    ui.add_body_html(f"<script>{chat_panel.init_js(tok, *chat_panel.readiness())}</script>")
+    ui.add_body_html(chat_panel.HTML)
 
     def push_cite_tips() -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""
@@ -2051,6 +2054,9 @@ def build(ctrl: UIController) -> None:
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
                 .tooltip("하이라이트 · 메모 목록 — 본문을 드래그하면 그 문장이 원문·번역 양쪽에 표시됩니다")
+            ui.button(icon="forum", on_click=lambda: ui.run_javascript(
+                "window.__mdChatTogglePanel && window.__mdChatTogglePanel()")).props(
+                "flat dense round color=grey-7").tooltip("논문에 질문하기 — 답의 근거 문단을 원문·번역으로 확인")
             ui.space()
             export_fmt_review()
             library_button()
@@ -3843,6 +3849,8 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
             raise HTTPException(status_code=404)
         saved = annotations.save(cur, body.get("items"))
         return {"ok": True, "count": len(saved)}
+
+    chat_panel.register_routes(fastapi_app, _wd_for)  # 뷰어 챗봇 — /chat/{token}
 
     @ui.page("/")
     def index() -> None:

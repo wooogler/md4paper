@@ -157,6 +157,11 @@ class WorkDir:
         """뷰어에서 그은 하이라이트 · 메모 (읽는 사람의 것이라 파이프라인이 덮어쓰지 않는다)."""
         return self.root / "annotations.json"
 
+    @property
+    def chat_json(self) -> Path:
+        """뷰어 챗봇 대화 기록 (읽는 사람의 것이라 파이프라인이 덮어쓰지 않는다)."""
+        return self.root / "chat.json"
+
     # --- 생성 ---
     def ensure(self) -> None:
         for d in (self.extract, self.structure, self.cite, self.translate, self.out, self.logs):
