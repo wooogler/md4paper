@@ -233,6 +233,13 @@ cleanup).
 
 - Search **Converted papers** on the right by title, author, or venue, and click a card to pick up
   where you left off.
+- Hit **📌 pin** on a card and it moves up to a chip row above the list. However many papers pile
+  up, the handful you are actually working on stay one click away — no scrolling, no searching.
+  A pinned paper **stays in the list even when it falls outside the 20 most recent**, and it also
+  shows up as a **paper tab** in the review header (see
+  [Several papers at once](#several-papers-at-once--header-tabs-and-new-windows)). Click the × on
+  the chip, or 📌 on the card, to unpin.
+- **⧉** on a card opens that paper in a **new window** — for reading two papers side by side.
 - Paste your API key into **AI settings** on the left and hit "test connection" to verify it right
   away (only needed for translation and citations).
 - **Default conversion and translation settings** on the left are the defaults applied to papers
@@ -245,6 +252,56 @@ cleanup).
   **show N hidden papers** above the list. Deleting files removes the whole paper folder — original
   PDF, extraction cache, images — and also cleans up the copies in your library folders (uncheck the
   box in the dialog to keep those; the dialog shows you exactly which folder paths will go).
+
+### Several papers at once — header tabs and new windows
+
+You rarely read one paper at a time. There are two ways to move between them.
+
+- **Header tabs** — across the top of the review screen, your **pinned papers sit as tabs**. The
+  paper you are looking at is the white tab (it meets the page below it); clicking another tab jumps
+  straight there without going back home. The × that appears when you hover a tab **unpins** it (the
+  paper and its files are untouched), and the **📌** at the end of the tab row pins or unpins the
+  current paper on the spot. With many pins the tab row scrolls sideways.
+- The header is **a single 44px row**. The steps (1 · convert / 2 · translate / 3 · viewer) moved to a
+  small segmented control on the right — it has to look different from the paper tabs so it reads as
+  "tabs = papers, segments = views within that paper", and the page gains the height the old
+  two-line icon tabs used up.
+- **New window** — the **⧉** next to the tabs opens the paper in **its own window**. In app-window
+  mode you get a second app window (pointing at the same server, so an edit on one side shows up on
+  the other); in browser mode you get a new tab. Use it when you want two papers genuinely
+  **side by side**. Closing the main window shuts the server down and its extra windows with it.
+  - **The same paper won't open in two windows.** Highlights and notes are saved by rewriting the
+    whole file, so editing one paper from two windows means the later save wins. If it's already
+    open, you're told so instead.
+  - **While several windows are open, saving a zip skips the location dialog** — the file lands in
+    your Downloads folder and the file manager opens on it. An app-window save dialog belongs to one
+    specific window, and a save pressed in a sibling window appearing as a sheet on the main window
+    looks exactly like nothing happening, which is worse.
+
+### It comes back to where you were — remembered step and scroll
+
+- Move to another paper via the header tabs and back, and it opens on **the step you last had for
+  that paper** (convert / translate / viewer). Only a paper you open for the first time follows the
+  old rule (viewer if a translation exists, convert otherwise).
+- **Scroll positions come back too**, remembered per paper, per step, and per panel — so the viewer's
+  original and translation columns, the table of contents, the PDF, and the convert tab's Markdown
+  each return to their own spot. The paper list on the home screen does the same.
+- The memory lives **inside that window's session**: side-by-side windows don't mix, and closing the
+  app forgets. If you scroll yourself right after a restore, your position wins.
+
+### Cmd/Ctrl+F works on every screen
+
+The app window has no browser find bar, so Cmd+F used to do nothing at all. Now **the same find bar
+appears in the app window and in the browser** — top right, counting every match (`3 / 26`), marking
+them all in yellow and the current one in orange.
+
+- **Enter** (next), **Shift+Enter** (previous), **Esc** (close); on macOS **Cmd+G / Cmd+Shift+G** too.
+- It searches **whatever text is on screen**: the Markdown preview, the viewer's original and
+  translation columns, the section tree, the table of contents. If a match sits inside a scroll box,
+  that box scrolls to bring it to the middle.
+- Highlighting **does not touch the document.** Instead of injecting find markers into the text, it
+  asks the browser to paint the ranges — so your own highlights and notes never shift because of a
+  search.
 
 ### 2. Convert — cleaning up the source-language Markdown
 
@@ -321,14 +378,20 @@ you can follow by eye which sentence is which. Equal sentence counts are matched
 the translation split one sentence into two, length ratios match them up to 1:2 and 2:1. Sentences
 that couldn't be paired are shown in grey instead of blue, so "no match found here" isn't hidden.
 
-**Drag over the body text and a color bar appears** for highlighting, with `Add note` to attach a
-note. The unit is the **sentence**, so dragging a few characters selects the whole sentence and
-**marks it in the same color in both the original and the translation** — the note is shared too.
+There are two ways to mark something up.
+
+- **Drag** — the highlight lands on **exactly what you dragged**. A color bar appears; pick a color,
+  or `Add note` to attach a note. Use this to pin down a single term or a fragment of an equation.
+- **Double-click** — takes **the whole sentence** you were hovering over and marks it **in both the
+  original and the translation in the same color**, opening the note box right away. It reuses the
+  color you picked last.
+
 Click a highlight again and a card shows both the original and translated sentence, where you can
 change the color, edit the note, or delete it; the note icon in the toolbar opens the full list and
-jumps to each spot. Annotations are saved to `annotations.json` in the work folder, so they're
-still there next time you open the paper, and the **Notes md** button exports the quoted original,
-the translation, and your notes as a single Markdown file.
+jumps to each spot. Like the chatbot drawer, that list takes up the right-hand side rather than
+covering the text, and the two open one at a time. Annotations are saved to `annotations.json` in
+the work folder, so they're still there next time you open the paper, and the **Notes md** button
+exports the quoted original, the translation, and your notes as a single Markdown file.
 
 If reassembly or re-translation shifts the body text, highlights relocate themselves by matching the
 phrase. The ones that genuinely can't be found aren't deleted — they stay in the list marked
