@@ -2804,7 +2804,7 @@ def build(ctrl: UIController) -> None:
     # ===== 단계 패널 (탭 컨트롤은 헤더에) =====
     # 번역까지 끝난 논문은 뷰어를, 아니면 변환 탭을 기본으로 연다.
     _start_tab = step_sbs if ctrl.ko_markdown() else step_convert
-    with ui.tab_panels(steps, value=_start_tab).classes("w-full").props("keep-alive"):
+    with ui.tab_panels(steps, value=_start_tab).classes("w-full md4-steps").props("keep-alive"):  # md4-steps: 챗봇이 열리면 이 폭이 줄어 본문이 덮이지 않는다
         # ---------- 1단계: 변환 ----------
         with ui.tab_panel(step_convert).classes("p-0"):
             with ui.splitter(value=46).classes("w-full").style("height: calc(100vh - 108px)") as sp1:

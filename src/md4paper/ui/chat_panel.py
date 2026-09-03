@@ -14,11 +14,22 @@ from md4paper import config
 from md4paper.ui import annotations, chat
 
 CSS = """
-/* 오른쪽 챗봇 서랍 — 메모 서랍과 같은 자리·같은 시각 언어 (동시에 열리지 않는다) */
-#md-chat-panel { position: fixed; top: 50px; right: 0; bottom: 0; width: 380px; z-index: 9000;
+/* 오른쪽 챗봇 컬럼 — 메모 서랍과 같은 자리·같은 시각 언어 (동시에 열리지 않는다).
+   본문을 덮지 않고 **오른쪽을 차지한다**: 열리면 단계 패널이 그만큼 좁아져(body.mc-open)
+   PDF 패널처럼 나란히 놓인다. 위치는 fixed로 두는데, 서랍이 body에 붙어 있어야 뷰어가
+   다시 그려져도 대화 상태가 살아남기 때문이다 — 자리는 padding으로 비운다. */
+:root { --mc-w: 380px; }
+#md-chat-panel { position: fixed; top: 50px; right: 0; bottom: 0; width: var(--mc-w); z-index: 9000;
   display: none; flex-direction: column; background: #fff; border-left: 1px solid #e6e4e0;
-  color: #37352f; box-shadow: -10px 0 30px rgba(0,0,0,.10); }
+  color: #37352f; }
 #md-chat-panel.open { display: flex; }
+body.mc-open .md4-steps { padding-right: var(--mc-w); }
+/* 너비 드래그 핸들 — 목차·컬럼 핸들과 같은 감각 */
+.mc-handle { position: absolute; left: 0; top: 0; bottom: 0; width: 9px; margin-left: -4px;
+  cursor: col-resize; z-index: 1; }
+.mc-handle::after { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px;
+  background: transparent; }
+.mc-handle:hover::after { background: #2383e2; width: 2px; }
 .mc-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px;
   border-bottom: 1px solid #ecebe8; font-size: 13px; }
 .mc-model { font-size: 10.5px; padding: 1px 7px; border-radius: 9px; background: #f0efec;
@@ -145,6 +156,7 @@ a.chat-cite-note.on { background: #e0b53c; color: #2f2500; }
 # 서랍 마크업 + 클라이언트 로직. 서랍은 body에 고정돼 있어 뷰어가 다시 그려져도 상태가 유지된다.
 HTML = """
 <div id="md-chat-panel">
+  <div class="mc-handle" title="드래그해서 너비 조절"></div>
   <div class="mc-head"><b>논문에 질문</b><span class="mc-model"></span>
     <span class="mc-sp"></span>
     <label class="mc-tog" title="내 하이라이트·메모도 검색과 답변 근거에 넣습니다">
@@ -501,6 +513,33 @@ HTML = """
   }
 
   // ---- 열기/닫기 (메모 서랍과 배타) ----
+  // 'open'은 여러 경로에서 붙었다 뗀다(버튼·✕·Esc·메모 서랍). 한 곳에서 관찰해 body 클래스를
+  // 맞춰야 본문 자리 비우기가 어느 경로로 닫아도 따라온다.
+  function syncBody(){ document.body.classList.toggle('mc-open', panel.classList.contains('open')); }
+  if (window.MutationObserver)
+    new MutationObserver(syncBody).observe(panel, {attributes: true, attributeFilter: ['class']});
+  syncBody();
+
+  // 너비 드래그 — 브라우저에 기억시킨다 (--mc-w를 패널 너비와 본문 padding이 같이 읽는다)
+  var MC_MIN = 300, MC_MAX = 720;
+  function setWidth(px){
+    px = Math.max(MC_MIN, Math.min(MC_MAX, Math.round(px)));
+    document.documentElement.style.setProperty('--mc-w', px + 'px');
+    try { localStorage.setItem('md4chat.w', String(px)); } catch (e) {}
+  }
+  try { var w0 = parseInt(localStorage.getItem('md4chat.w'), 10);
+        if (w0) setWidth(w0); } catch (e) {}
+  var mcDrag = false;
+  panel.querySelector('.mc-handle').addEventListener('mousedown', function(ev){
+    mcDrag = true; ev.preventDefault(); document.body.style.userSelect = 'none';
+  });
+  window.addEventListener('mousemove', function(ev){
+    if (mcDrag) setWidth(window.innerWidth - ev.clientX);
+  });
+  window.addEventListener('mouseup', function(){
+    if (mcDrag){ mcDrag = false; document.body.style.userSelect = ''; }
+  });
+
   function annoPanel(){ return document.getElementById('md-anno-panel'); }
   window.__mdChatTogglePanel = function(){
     var opening = !panel.classList.contains('open');
