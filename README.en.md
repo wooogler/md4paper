@@ -273,6 +273,10 @@ This is the **1 · Convert** tab at the top. Editing on the left, results on the
 - **Conversion settings** — citation style (numeric / author-year / short-name combinations),
   reference links, image handling, and so on.
 - Toggle **Edit Markdown** at the top right to hand-edit the resulting Markdown.
+- **Click a figure to blow it up full screen** — scaled down to the panel width, a chart's axis and
+  legend text is unreadable. Zoom with the wheel, a trackpad pinch, or `+`/`-` (the point under the
+  cursor stays put), drag to pan while zoomed, double-click or `0` to fit, `Esc` or a background
+  click to close. It works on the figures in the viewer tab's original and translation panes too.
 - Everything you change is **saved automatically** and reflected in the preview immediately. There
   is no "save" button.
 
@@ -329,6 +333,32 @@ the translation, and your notes as a single Markdown file.
 If reassembly or re-translation shifts the body text, highlights relocate themselves by matching the
 phrase. The ones that genuinely can't be found aren't deleted — they stay in the list marked
 `position not found`.
+
+### 6. Ask the paper — every answer points at the paragraph it came from (LLM key required)
+
+Questions that come up while reading go in via the **speech-bubble icon** in the viewer toolbar. Like
+the PDF pane, it **takes a column on the right** rather than covering the text (the content narrows
+to make room), and it answers about this one paper only. Drag its left edge to resize; the width is
+remembered.
+
+- **Click a citation number in the answer and it jumps to the paragraph behind it.** The point is to
+  show you where the answer came from instead of asking you to trust it — a `to the text` button
+  scrolls the viewer to that paragraph.
+- **Ask in Korean and it still searches the English original.** Retrieval is BM25 (pure Python, no
+  embeddings), splitting English into words and Korean into character bigrams. When the vocabulary
+  doesn't line up, the LLM expands the question into synonym keywords and it searches again. The
+  answer comes back **in the language you asked in**.
+- **Your own highlights and notes are searched alongside the paper** — "what did I say where I marked
+  that?" is answered in the same window as a question about the text. Since a note is **your writing**
+  and not the paper, the answer says so explicitly and cites it separately. The **include notes**
+  toggle in the header turns it off.
+- **It says when it doesn't know.** It is instructed not to invent anything absent from the retrieved
+  paragraphs, and citations pointing at paragraphs that were never in the prompt are stripped before
+  the answer is drawn.
+- The conversation is kept in `chat.json` in the work folder, so it's still there next time, and
+  **the actual cost is shown on every turn** (two LLM calls per question — one to expand the search
+  terms, one to answer). `Clear` in the header wipes the history.
+- With no LLM key, the panel tells you why. Only this feature is unavailable; everything else works.
 
 ---
 
@@ -484,7 +514,7 @@ models still work fine).
 ## Cost — what does one paper run you?
 
 **PDF → Markdown extraction costs $0.** Extraction is entirely local. The only things that cost
-money are reference parsing, glossary generation, and translation.
+money are reference parsing, glossary generation, translation, and questions to the viewer chatbot.
 
 **Measured**: *Attention Is All You Need* (15 pages, 49k characters of body text), the paper used
 for this README's screenshots, with **automatic glossary generation + full translation** on the
@@ -499,6 +529,10 @@ is close to linear in body length, so:
 
 Add reference parsing (citation links) on top and it's another $0.01–0.02 per paper.
 
+**The viewer chatbot** sends eight retrieved paragraphs and a few recent turns per question, not the
+whole paper, so it is far smaller than a translation — the exact figure is printed with each answer,
+so watch that for the first few.
+
 > An OpenAI price cut on 2026-07-30 took `gpt-5.6-luna` from $1/$6 to $0.2/$1.2 (per 1M tokens),
 > making the figures above one fifth of what they were. The measured row applies the new prices to
 > the same measured token usage. That cut made the default model the cheapest across all three
@@ -511,6 +545,7 @@ Guards against runaway spending:
 - **Translation cache** — chunks whose content hasn't changed are not re-translated when you fix the
   structure and run again.
 - **Scope selection** — translate only the sections you need.
+- **The chatbot prints its cost on every turn** — a long conversation stays visible as it adds up.
 
 > The measured figures are computed from the price table in [base.py](src/md4paper/llm/base.py) as of
 > 2026-07. Vendor pricing changes, so run a short paper first and check the actual cost it prints.
