@@ -1616,14 +1616,17 @@ _CHROME_CSS = """
 .md4-tabstrip { max-width: 52vw; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .md4-tabstrip::-webkit-scrollbar { height: 0; }
 .md4-tabtools { padding-bottom: 5px; opacity: .9; }
-/* 단계 전환 — 밑줄 탭이 아니라 눌린 알약 안의 세그먼트. 아이콘 없이 글자만이라 얇다. */
-.md4-seg { min-height: 28px; margin-bottom: 7px; border-radius: 9px; padding: 2px;
-  background: rgba(0,0,0,.14); flex: 0 0 auto; }
-.md4-seg .q-tabs__content { min-height: 0; }
-.md4-seg .q-tab { min-height: 24px; padding: 0 11px; border-radius: 7px; opacity: .82;
-  font-size: 12px; font-weight: 500; }
-.md4-seg .q-tab--active { background: rgba(255,255,255,.96); color: #37352f; opacity: 1; font-weight: 600; }
-.md4-seg .q-tab__indicator, .md4-seg .q-tabs__arrow { display: none; }
+/* 단계 전환도 아래 물린 탭 — 다만 논문 탭보다 한 급 작고(26px), 활성 글자는 파랑이다.
+   "왼쪽 탭 = 어느 논문, 오른쪽 탭 = 그 논문의 어느 화면"으로 층이 갈리게. */
+.md4-steptabs { min-height: 0; flex: 0 0 auto; align-self: flex-end; }
+.md4-steptabs .q-tabs__content { min-height: 0; gap: 2px; }
+.md4-steptabs .q-tab { min-height: 26px; height: 26px; padding: 0 11px; border-radius: 7px 7px 0 0;
+  font-size: 11.5px; font-weight: 500; color: rgba(255,255,255,.86);
+  background: rgba(255,255,255,.13); transition: background .12s ease, color .12s ease; }
+.md4-steptabs .q-tab__content { min-height: 0; padding: 0; }
+.md4-steptabs .q-tab:hover { background: rgba(255,255,255,.24); color: #fff; }
+.md4-steptabs .q-tab--active { background: #fff; color: #2383e2; font-weight: 600; }
+.md4-steptabs .q-tab__indicator, .md4-steptabs .q-tabs__arrow { display: none; }
 /* 탭 하나 — 위만 둥근 사각형. 비활성은 헤더에 잠긴 색, 활성은 본문과 같은 흰 바닥. */
 .md4-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
   max-width: 250px; min-width: 0; border-radius: 8px 8px 0 0; cursor: pointer;
@@ -1795,7 +1798,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             .tooltip("다른 논문 — 업로드 / 최근 작업으로")
         paper_tabs()
         ui.space()
-        with ui.tabs().props("dense no-caps indicator-color=transparent").classes("md4-seg") as steps:
+        with ui.tabs().props("dense no-caps indicator-color=transparent").classes("md4-steptabs") as steps:
             step_convert = ui.tab(_STEP_NAMES[0])
             step_translate = ui.tab(_STEP_NAMES[1])
             step_sbs = ui.tab(_STEP_NAMES[2])
@@ -3171,7 +3174,10 @@ _HOME_CSS = """
 @keyframes md4spin { to { transform: rotate(360deg); } }
 .md4-recent-new { box-shadow: inset 4px 0 0 #21ba45; }
 .md4-new-dot { width: 8px; height: 8px; border-radius: 50%; background: #2383e2; flex: 0 0 8px; }
-.md4-pinchip { margin: 2px 0 !important; font-size: 12.5px; max-width: 100%; }
+/* 고정한 논문은 목록 맨 위 한 구역으로 — 카드 자체를 올린다(칩 줄을 따로 두지 않는다) */
+.md4-pincard { box-shadow: inset 3px 0 0 #2383e2 !important; }
+.md4-listcap { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; color: #9a968e;
+  display: flex; align-items: center; gap: 4px; padding: 2px 2px 0; }
 @media (prefers-color-scheme: dark) {
   .md4-hint { border-color: #464646; }
   .md4-dropwrap:hover .md4-hint { background: rgba(35,131,226,.14); }
@@ -3519,35 +3525,11 @@ def build_home(state: dict) -> None:
         await desktop.deliver(name, data)
 
     def toggle_pin(item: dict) -> None:
-        """목록 위 '고정한 논문' 줄 + 리뷰 헤더 탭에 올리기/내리기 (status.json에만 표시)."""
+        """목록 맨 위로 올리기/내리기 + 리뷰 헤더 탭에 올리기/내리기 (status.json에만 표시)."""
         if not set_pinned(item["root"], not item["pinned"]):
             ui.notify("고정 처리 실패 (경로 확인).", type="negative")
             return
-        pinned_strip.refresh()
         recent_list.refresh()
-
-    def unpin_root(root: Path) -> None:
-        set_pinned(root, False)
-        pinned_strip.refresh()
-        recent_list.refresh()
-
-    @ui.refreshable
-    def pinned_strip() -> None:
-        """고정한 논문을 목록 맨 위 칩 한 줄로 — 논문이 쌓여도 자주 보는 건 한 번에 열린다."""
-        pins = pinned_workdirs(ws())
-        if not pins:
-            return
-        with ui.row().classes("items-center gap-1 w-full q-pb-xs").style("flex-wrap:wrap"):
-            ui.icon("push_pin", size="15px").classes("text-primary")
-            for pin in pins:
-                title = pin["title"]
-                short = title if len(title) <= 34 else title[:33] + "…"
-                chip = ui.chip(short, icon="article", color="primary", text_color="white",
-                               removable=True,
-                               on_value_change=lambda e, r=pin["root"]: None if e.value else unpin_root(r))
-                chip.props("dense clickable").classes("md4-pinchip") \
-                    .tooltip(f"{title}\n클릭하면 열기 · ×로 고정 해제")
-                chip.on("click", lambda _, r=pin["root"]: open_wd(r))
 
     def hide_paper(item: dict, hidden: bool = True) -> None:
         """목록 표시만 끄기/되돌리기 (파일은 그대로 — status.json에 표시)."""
@@ -3555,10 +3537,9 @@ def build_home(state: dict) -> None:
             ui.notify("처리 실패 (경로 확인).", type="negative")
             return
         if hidden:
-            set_pinned(item["root"], False)  # 숨긴 논문이 고정 칩·헤더 탭에 남아 있으면 앞뒤가 안 맞는다
+            set_pinned(item["root"], False)  # 숨긴 논문이 고정 구역·헤더 탭에 남아 있으면 앞뒤가 안 맞는다
         selected.discard(str(item["root"]))  # 숨기면 일괄 다운로드 선택에서도 빠진다
         sel_bar.refresh()
-        pinned_strip.refresh()
         recent_list.refresh()
         ui.notify("목록에서 숨겼습니다 — 파일은 그대로입니다." if hidden else "목록에 다시 표시합니다.",
                   type="positive")
@@ -3587,7 +3568,6 @@ def build_home(state: dict) -> None:
                 if ok:
                     selected.discard(str(item["root"]))
                     sel_bar.refresh()
-                    pinned_strip.refresh()
                     recent_list.refresh()
                     ui.notify("삭제됨", type="positive")
                 else:
@@ -3694,6 +3674,11 @@ def build_home(state: dict) -> None:
             items.sort(key=lambda r: (not r["has_ko"], -r["mtime"]))
         else:
             items.sort(key=lambda r: -r["mtime"])
+        # 고정한 논문은 고른 정렬과 무관하게 맨 위 한 구역으로, 그 안에서는 고정한 순서로.
+        # (정렬을 바꿔도 자주 보는 논문의 자리가 움직이지 않는 게 고정의 요점이다.)
+        pinned = sorted((r for r in items if r["pinned"]), key=lambda r: r["pinned_at"])
+        rest = [r for r in items if not r["pinned"]]
+        items = pinned + rest
         if n_hidden:  # 되돌릴 길이 항상 보이도록 (숨김이 '영영 사라짐'이 되지 않게)
             ui.button(f"숨긴 논문 {n_hidden}편 " + ("접기" if show_hidden else "보기"),
                       icon="visibility" if show_hidden else "visibility_off",
@@ -3710,11 +3695,20 @@ def build_home(state: dict) -> None:
             return
         now = time.monotonic()
         new_roots = state.get("recent_new", {})
-        for r in items:
+        for idx, r in enumerate(items):
+            # 고정 구역과 그 아래 목록을 작은 머리글로 갈라 준다 (구역이 있을 때만)
+            if pinned and idx == 0:
+                with ui.element("div").classes("md4-listcap"):
+                    ui.icon("push_pin", size="12px").classes("text-primary")
+                    ui.label(f"고정한 논문 {len(pinned)}편")
+            if pinned and idx == len(pinned):
+                with ui.element("div").classes("md4-listcap q-mt-sm"):
+                    ui.label("모든 논문")
             is_new = (now - new_roots.get(str(r["root"]), 0)) < 10  # 방금 완료 → 하이라이트
             unopened = not r.get("opened")  # 한 번도 리뷰를 안 연 논문
             bib = _bib_line(r)
-            with ui.card().classes("w-full q-pa-sm" + (" md4-recent-new" if is_new else "")):
+            with ui.card().classes("w-full q-pa-sm" + (" md4-recent-new" if is_new else "")
+                                   + (" md4-pincard" if r["pinned"] else "")):
                 with ui.row().classes("items-center w-full no-wrap gap-2"):
                     ui.checkbox(value=str(r["root"]) in selected,
                                 on_change=lambda e, root=str(r["root"]): toggle_sel(root, e.value)) \
@@ -3740,8 +3734,6 @@ def build_home(state: dict) -> None:
                                 ui.badge("영어 변환", color="blue").props("outline")
                             if unopened:
                                 ui.badge("NEW", color="primary")
-                            if r["pinned"]:
-                                ui.badge("고정", color="primary").props("outline")
                             if r["hidden"]:
                                 ui.badge("숨김", color="grey").props("outline")
                             ui.label(_relative_time(r["mtime"])).classes("text-xs text-gray-400")
@@ -4045,7 +4037,7 @@ def build_home(state: dict) -> None:
 
             # 저장 위치 — 변환한 논문(영어·한국어 마크다운)이 쌓일 폴더 + 작업 폴더
             build_location_settings(
-                state, lambda: (dropzone_caption.refresh(), pinned_strip.refresh(), recent_list.refresh()))
+                state, lambda: (dropzone_caption.refresh(), recent_list.refresh()))
 
             if not backend_ready:
                 ui.label("⚠ 추출 엔진(docling)이 설치되지 않았습니다. `uv sync`로 설치하세요 — "
@@ -4085,7 +4077,6 @@ def build_home(state: dict) -> None:
                     recent_list.refresh()
                 ui.select({"recent": "최근순", "name": "제목순", "year": "연도순", "translated": "번역됨 먼저"},
                           value="recent", on_change=on_sort).props("dense outlined").classes("w-32")
-            pinned_strip()  # 고정한 논문 — 검색·정렬과 무관하게 항상 맨 위
             sel_bar()  # 다중 선택 시 일괄 다운로드 툴바
             recent_list()
 

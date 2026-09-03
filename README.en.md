@@ -233,12 +233,11 @@ cleanup).
 
 - Search **Converted papers** on the right by title, author, or venue, and click a card to pick up
   where you left off.
-- Hit **📌 pin** on a card and it moves up to a chip row above the list. However many papers pile
-  up, the handful you are actually working on stay one click away — no scrolling, no searching.
-  A pinned paper **stays in the list even when it falls outside the 20 most recent**, and it also
-  shows up as a **paper tab** in the review header (see
-  [Several papers at once](#several-papers-at-once--header-tabs-and-new-windows)). Click the × on
-  the chip, or 📌 on the card, to unpin.
+- Hit **📌 pin** on a card and that paper moves up into a **Pinned** group at the top of the list
+  (marked with a blue edge). Switching the sort to most-recent or by-title doesn't move a pinned
+  paper, and it **stays in the list even when it falls outside the 20 most recent**. The same paper
+  also shows up as a **paper tab** in the review header (see
+  [Several papers at once](#several-papers-at-once--header-tabs-and-new-windows)). Press 📌 again to unpin.
 - **⧉** on a card opens that paper in a **new window** — for reading two papers side by side.
 - Paste your API key into **AI settings** on the left and hit "test connection" to verify it right
   away (only needed for translation and citations).
@@ -262,10 +261,10 @@ You rarely read one paper at a time. There are two ways to move between them.
   straight there without going back home. The × that appears when you hover a tab **unpins** it (the
   paper and its files are untouched), and the **📌** at the end of the tab row pins or unpins the
   current paper on the spot. With many pins the tab row scrolls sideways.
-- The header is **a single 44px row**. The steps (1 · convert / 2 · translate / 3 · viewer) moved to a
-  small segmented control on the right — it has to look different from the paper tabs so it reads as
-  "tabs = papers, segments = views within that paper", and the page gains the height the old
-  two-line icon tabs used up.
+- The header is **a single 44px row**. The steps (1 · convert / 2 · translate / 3 · viewer) are tabs
+  meeting the page the same way at the right end, but one size smaller (26px) with a blue active
+  label — so the layers stay legible: **left tabs = which paper, right tabs = which view of it**.
+  The page gained the whole 44px the old two-line icon tabs used up.
 - **New window** — the **⧉** next to the tabs opens the paper in **its own window**. In app-window
   mode you get a second app window (pointing at the same server, so an edit on one side shows up on
   the other); in browser mode you get a new tab. Use it when you want two papers genuinely
