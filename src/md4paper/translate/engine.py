@@ -66,8 +66,14 @@ def build_system_prompt(
 def translate_chunk(
     provider: Provider, system_prompt: str, source: str, *, max_tokens: int = 8192,
     protect_headings: bool = False, context_tail: str = "",
-) -> str:
-    """한 청크 번역: 보호 → 호출 → 복원. context_tail=직전 섹션 원문 끝(참고용, 번역 안 함)."""
+) -> tuple[str, list[str]]:
+    """한 청크 번역: 보호 → 호출 → 복원. context_tail=직전 섹션 원문 끝(참고용, 번역 안 함).
+
+    반환: (복원된 번역문, **모델이 흘린 센티넬 키 목록**). restore는 str.replace라 모델이
+    ⟦MD4_n⟧을 빠뜨리면 그 링크·이미지·수식은 영영 복원되지 않는데, 잔존 검사는 *남은* 센티넬만
+    보므로 사라진 것은 못 잡는다. 그때 검증에는 "링크 수" 같은 엉뚱한 이름으로만 나타나
+    재시도 메시지가 모델을 헛짚게 한다 — 그래서 여기서 직접 세어 돌려준다.
+    """
     protected, store = chunker.protect(source, protect_headings=protect_headings)
     if context_tail.strip():
         user = (
@@ -79,7 +85,8 @@ def translate_chunk(
     else:
         user = protected
     out = provider.complete(system_prompt, user, max_tokens=max_tokens)
-    return chunker.restore(out, store)
+    missing = [k for k in store if k not in out]
+    return chunker.restore(out, store), missing
 
 
 def translate_with_retry(
@@ -94,10 +101,12 @@ def translate_with_retry(
     sys_prompt = system_prompt
     problems: list[str] = []
     for attempt in range(max_retries + 1):
-        translated = translate_chunk(
+        translated, missing = translate_chunk(
             provider, sys_prompt, source, protect_headings=protect_headings, context_tail=context_tail
         )
         problems = validate(source, translated)
+        if missing:  # 진짜 원인을 앞에 세운다 — 재시도 메시지가 이걸 먼저 읽어야 한다
+            problems.insert(0, f"플레이스홀더 유실(⟦MD4_n⟧ {len(missing)}개를 빠뜨림)")
         if not problems:
             return translated, ("ok" if attempt == 0 else "retried"), []
         sys_prompt = (
@@ -107,4 +116,7 @@ def translate_with_retry(
             + ". 이번엔 마크다운 구조를 정확히 보존하라."
         )
     # 두 번 실패 → 영어 원문 통과 (구조는 확실히 보존). 위반 목록도 함께 돌려준다.
-    return "<!-- md4paper: untranslated (구조 검증 실패) -->\n" + source, "passthrough", problems
+    # 위반 항목을 주석에 적어 둔다 — 이유를 문서 자체가 들고 있어야 나중에 왜 실패했는지 알 수 있다
+    # (status.json에도 남기지만, ko.md만 손에 든 사람도 바로 보이도록).
+    why = f"구조 검증 실패: {', '.join(problems)}" if problems else "구조 검증 실패"
+    return f"<!-- md4paper: untranslated ({why}) -->\n" + source, "passthrough", problems

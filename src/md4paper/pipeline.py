@@ -152,7 +152,10 @@ def run_translate(wd, provider, korean_style=None, on_progress=None, force: bool
     manifest = manifest_io.load(wd)
     style = korean_style or manifest.korean_style
     summary = _apply(wd, provider, style, on_progress=on_progress)
-    wd.mark_done("translate", hash_text(f"{style}:{provider.model}"), style=style)
+    # 실패 이유를 status.json에 남긴다 — 안 남기면 세션이 끝나는 순간 "왜 영어로 남았는지"를
+    # 알 방법이 사라진다(실패 청크는 캐시에도 안 들어가므로 사후 재구성이 불가능하다).
+    wd.mark_done("translate", hash_text(f"{style}:{provider.model}"), style=style,
+                 passthrough=summary.get("passthrough", 0), failures=summary.get("failures", {}))
     return summary
 
 

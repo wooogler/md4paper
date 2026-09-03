@@ -150,8 +150,60 @@ def test_validate_catches_placeholder_leftover():
 
 def test_validate_catches_math_count():
     src = "$a$ and $b$"
-    tr = "$a$ 만"  # $ 4개 → 2개
+    tr = "$a$ 만"  # 짝 맞던 수식 스팬 2개 → 1개 (유실)
     assert any("수식" in p for p in validate(src, tr))
+
+
+# --- 구조가 멀쩡한 번역을 잡던 회귀 (실측 2건) ---------------------------------
+def test_validate_allows_currency_dollar_dropped_in_korean():
+    """통화 기호는 수식 구분자가 아니다.
+
+    실측: CoAuthor 4.2.3~4.3.2 절이 "We paid them $2.50" → "2.50달러를 지급했다"로
+    `$`가 1→0이 되어 구조 파손 판정을 받았다. 재시도 메시지가 "수식 구분자($) 수"라고
+    알려 주자 모델이 `$2.50$`로 고쳐 1→2가 되어 두 번째도 실패, 그 절이 영어로 남았다.
+    """
+    src = "We paid them $2.50 for each writing session."
+    assert validate(src, "각 글쓰기 세션마다 2.50달러를 지급했다.") == []
+
+
+def test_validate_allows_inline_code_added_by_translator():
+    """원문에 없던 짝 맞는 인라인 코드를 붙이는 것은 구조 파손이 아니다.
+
+    실측: GPT Instructor 3.5절이 "the polr function in R" → "R의 `polr` 함수"로
+    백틱이 0→2가 되어 첫 시도가 반려됐다(두 번째 시도는 통과).
+    """
+    src = "we ran an ordinal logistic regression using the polr function in R."
+    assert validate(src, "R의 `polr` 함수를 사용하여 순서형 로지스틱 회귀를 실시했다.") == []
+
+
+def test_validate_still_catches_lost_and_unbalanced_delimiters():
+    """느슨해진 것은 '추가'뿐 — 유실과 짝 없는 구분자는 그대로 잡는다."""
+    assert any("코드" in p for p in validate("Use the `polr` function.", "polr 함수를 쓴다."))
+    assert any("$" in p for p in validate("No math here.", "여기엔 $ 수식이 없다."))
+    assert any("백틱" in p for p in validate("No code here.", "여기엔 ` 코드가 없다."))
+
+
+def test_translate_chunk_reports_dropped_sentinel():
+    """모델이 ⟦MD4_n⟧을 흘리면 그 사실 자체를 돌려준다.
+
+    restore는 str.replace라 흘린 센티넬은 영영 복원되지 않는데, 잔존 검사는 *남은* 것만
+    보므로 못 잡는다. 검증에는 "링크 수"로만 나타나 재시도 메시지가 모델을 헛짚게 된다.
+    """
+    src = "See [a](http://x) and [b](http://y)."
+    prov = engine_fake_dropping_one_sentinel()
+    out, missing = engine.translate_chunk(prov, "sys", src)
+    assert len(missing) == 1
+    assert any("링크" in p for p in validate(src, out))  # 겉으로는 링크 수로 보이고
+    assert missing  # 진짜 이유는 센티넬 유실이다
+
+
+def engine_fake_dropping_one_sentinel():
+    from md4paper.llm.base import FakeProvider
+
+    return FakeProvider(  # 두 번째 센티넬을 흘리는 모델
+        complete_fn=lambda system, user: user.replace("⟦MD4_1⟧", "", 1),
+        model="fake-model",
+    )
 
 
 def test_style_instruction():
@@ -170,3 +222,19 @@ def test_build_system_prompt_injects_context():
     assert "attention → 어텐션" in sp  # 용어집 주입
     assert "한다" in sp  # 문체
     assert "⟦MD4_n⟧" in sp  # 플레이스홀더 보존 지시
+
+
+def test_validate_does_not_pair_two_currency_sigils_as_math():
+    """한 줄의 통화 기호 둘을 '수식 스팬'으로 묶지 않는다.
+
+    실측 코퍼스에서 인라인 수식 매칭 10개 중 4개가 이런 가짜였다("US$100 and C$50",
+    "$1.25/MTok output) and Claude 3.5 Sonnet ($"). 가짜로 묶이면 그 기호를 자연스럽게 옮긴
+    번역이 '수식 스팬 유실'로 반려된다 — 고치려던 바로 그 오탐이 되돌아온다.
+    """
+    assert validate("We paid US$100 and C$50.", "미화 100달러와 캐나다화 50달러를 지급했다.") == []
+    assert validate("Cost ($) | Output ($)", "비용 ($) | 출력 ($)") == []
+    # 진짜 수식은 형태를 가리지 않고 그대로 지킨다
+    for src, broken in (("$\\alpha=0.5$ holds", "알파는 0.5다"),
+                        ("- $\\theta_j$ = threshold", "- 임계값"),
+                        ("complexity $O(n \\log n)$", "복잡도는 n log n")):
+        assert any("수식" in p for p in validate(src, broken)), src

@@ -523,6 +523,9 @@ def translate(
     )
     if summary["passthrough"]:
         click.echo(click.style(f"  경고: {summary['passthrough']}개 청크는 구조 검증 실패로 영어 원문 유지.", fg="yellow"))
+        # 개수만 알려 주면 원인을 못 좁힌다 — 어느 섹션이 어떤 불변식을 어겼는지까지 적는다.
+        for sid, reason in (summary.get("failures") or {}).items():
+            click.echo(click.style(f"    · {sid} — {reason}", fg="yellow"))
     click.echo(f"비용 ≈ ${summary.get('cost_usd', 0):.4f} → {wd.ko_md}")
 
 
