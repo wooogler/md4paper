@@ -13,6 +13,13 @@ from typing import Callable
 from md4paper import config
 from md4paper.ui import annotations, chat
 
+# '읽던 자리로' 되돌리기 알약 — 아래 CSS/HTML 문자열과 이 상수가 한 짝이다(테스트가 대조한다).
+JUMP_BACK_ID = "md-jump-back"    # body 직속 오버레이 id — 서랍 밖이라 서랍을 닫아도 남는다
+JUMP_BACK_Z = 8500               # 본문 위, 서랍(9000)·메모 카드(10003)·찾기 바 아래
+JUMP_BACK_API = "__mdJumpBack"   # 다른 점프(목차·섹션 트리)가 나중에 재사용할 전역 이름
+JUMP_EDGE_PX = 6                 # 기준선 = 컨테이너 위끝 + 6px. app.py PDF 싱크(top+6)와 같은 정의라
+                                 # "화면 맨 위가 읽던 자리"가 뷰어 전체에서 한 뜻이 된다
+
 CSS = """
 /* 오른쪽 챗봇 컬럼 — 메모 서랍과 같은 자리·같은 시각 언어 (동시에 열리지 않는다).
    본문을 덮지 않고 **오른쪽을 차지한다**: 열리면 단계 패널이 그만큼 좁아져(body.mc-open)
@@ -123,6 +130,37 @@ a.chat-cite-note.on { background: #e0b53c; color: #2f2500; }
 @keyframes mdChatFlash { 0%, 55% { outline: 2px solid #2383e2; outline-offset: 2px; }
   100% { outline-color: transparent; } }
 
+/* '읽던 자리로' 되돌리기 알약 — 인용 칩 점프로 잃은 자리를 되돌린다.
+   서랍 밖 body 직속이라 서랍을 닫아도 남고, 뷰어가 다시 그려져도 살아 있다.
+   right/bottom/max-width는 JS가 본문 스크롤 컨테이너를 재서 넣는다 — CSS는 모양만 정한다
+   (CSS로 right: calc(var(--mc-w) + …)를 쓰면 PDF를 켠 순간 PDF 위에 얹힌다). */
+:root { --mjb-ring: #8a8780; }
+#md-jump-back { position: fixed; z-index: 8500; right: 24px; bottom: 24px; display: none;
+  align-items: center; max-width: 300px; background: #fff; color: #37352f;
+  border: 1px solid #e6e4e0; border-radius: 999px; box-shadow: 0 6px 20px rgba(0,0,0,.16);
+  font-size: 12px; overflow: hidden; }
+#md-jump-back.on { display: inline-flex; animation: mdJumpIn .14s ease-out; }
+#md-jump-back button { border: none; background: none; color: inherit; font: inherit;
+  cursor: pointer; padding: 6px 12px; line-height: 1.45; white-space: nowrap; }
+#md-jump-back .mjb-go { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+#md-jump-back .mjb-go:hover { background: #f7f6f3; }
+#md-jump-back .mjb-i { color: #2383e2; font-weight: 600; }   /* 인용 칩과 같은 파랑 — 그 점프의 되돌림 */
+#md-jump-back .mjb-w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #97948d; }
+#md-jump-back .mjb-x { color: #97948d; font-size: 11px; padding: 6px 10px 6px 8px;
+  border-left: 1px solid #ecebe8; }
+#md-jump-back .mjb-x:hover { background: #f0efec; color: #6b6862; }
+#md-jump-back button:focus-visible { outline: 2px solid #2383e2; outline-offset: -2px; }
+@keyframes mdJumpIn { from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); } }
+/* 도착 표시 — 근거 문단의 파란 chat-cite-flash와 다른 무채색 테두리.
+   "여기가 근거다"와 "여기로 돌아왔다"는 다른 말이다. flash()가 1400ms에 클래스를 떼므로 1.3s. */
+.mjb-flash { animation: mdJumpFlash 1.3s ease-out; }
+@keyframes mdJumpFlash { 0%, 55% { outline: 2px solid var(--mjb-ring, #8a8780);
+    outline-offset: 2px; }
+  100% { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { #md-jump-back.on { animation: none; } }
+
 @media (prefers-color-scheme: dark) {
   #md-chat-panel { background: #1f1f1f; border-color: #3a3a3a; color: #d4d4d4; }
   .mc-head, .mc-foot { border-color: #2c2c2c; }
@@ -136,6 +174,13 @@ a.chat-cite-note.on { background: #e0b53c; color: #2f2500; }
   .mc-input { background: #262626; border-color: #3a3a3a; }
   .mc-input:disabled { background: #232323; color: #7d7d7d; }
   .mc-turn + .mc-turn { border-color: #2c2c2c; }
+  :root { --mjb-ring: #a9a69f; }
+  #md-jump-back { background: #262626; border-color: #3a3a3a; color: #d4d4d4;
+    box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+  #md-jump-back .mjb-go:hover, #md-jump-back .mjb-x:hover { background: #2c2c2c; }
+  #md-jump-back .mjb-i { color: #5a96e6; }
+  #md-jump-back .mjb-w, #md-jump-back .mjb-x { color: #8f8f8f; }
+  #md-jump-back .mjb-x { border-left-color: #333; }
 }
 """
 
@@ -155,6 +200,15 @@ HTML = """
       placeholder="이 논문에 대해 물어보세요 — Enter 전송 · Shift+Enter 줄바꿈"></textarea>
     <button class="mc-send" title="전송 (Enter)">&#10148;</button>
   </div>
+</div>
+<!-- 서랍 **밖**이다: 서랍 안에 두면 서랍을 닫는 순간 함께 사라지는데, 서랍을 접고 본문만
+     읽는 사람에게도 읽던 자리로 돌아갈 길은 있어야 한다. -->
+<div id="md-jump-back" role="status" aria-live="polite">
+  <button type="button" class="mjb-go" aria-label="읽던 자리로 돌아가기"
+    title="칩을 누르기 전 읽던 자리로 돌아갑니다"><span class="mjb-i"
+    aria-hidden="true">&#8617;</span><span>읽던 자리로</span><span class="mjb-w"></span></button>
+  <button type="button" class="mjb-x" aria-label="되돌아가기 버튼 닫기"
+    title="닫기 (Esc)">&#10005;</button>
 </div>
 <script>
 (function(){
@@ -259,6 +313,7 @@ HTML = """
   function gotoRow(row){
     var els = cellsOf(row);
     if (!els.length) return false;
+    jbMark(els[0]);        // 스크롤을 시작하기 **전에** 읽던 자리를 집는다(중간값을 집으면 밀린다)
     els[0].scrollIntoView({behavior: 'smooth', block: 'center'});
     flash(els, 'chat-cite-flash');
     return true;
@@ -274,6 +329,7 @@ HTML = """
   function gotoNote(id, row){
     var ms = marksOf(id);
     if (!ms.length) return gotoRow(row);      // 아직 안 칠해졌거나 위치를 못 찾은 메모
+    jbMark(ms[0]);                            // gotoRow로 빠진 경우엔 거기서 무장한다(이중 무장 없음)
     ms[0].scrollIntoView({behavior: 'smooth', block: 'center'});
     flash(ms, 'md-anno-flash');
     return true;
@@ -299,6 +355,243 @@ HTML = """
     }
     return '';
   }
+
+  // ---- '읽던 자리로' 되돌리기 (칩 점프가 읽던 자리를 잃지 않게) ----
+  // 칩을 누르면 본문이 근거 문단으로 날아가 버려 읽던 자리를 잃는다. 점프 직전의 화면을
+  // 구조(행 → 쪽 → 블록 → 블록 안 비율)로 집어 두고, 알약을 눌렀을 때 그 화면을 재현한다.
+  var JB_EDGE = 6;            // 기준선 = 컨테이너 위끝 + 6 (app.py PDF 싱크 top+6과 같은 정의)
+  var JB_ARM = 0.30, JB_ARM_MIN = 120;   // 이만큼 움직일 점프에만 알약을 띄운다
+  var JB_HOME = 0.22, JB_HOME_MIN = 80;  // 이만큼 가까워지면 알약은 할 일이 없다 (무장 임계보다
+                                         //  작다 = 히스테리시스. 뜨자마자 사라지지 않는다)
+  var JB_GRACE = 700;         // 나가는 점프가 멎을 때까지 자동 해제를 미룬다
+  var JB_BLOCKS = 'p,li,h1,h2,h3,h4,h5,h6,pre,blockquote,table,figure,img';
+  var jbEl = document.getElementById('md-jump-back');
+  var pin = null, jbG = null, jbRaf = 0, jbFrames = 0, jbKey = '', jbJumpAt = 0;
+
+  function jbScroller(from){
+    if (from && from.closest){
+      var c = from.closest('.sbs-grid, .vpane');     // 실측: computed overflow 조상 탐색과 동일
+      if (c){ jbG = c; return c; }
+    }
+    if (jbG && jbG.isConnected && jbG.clientHeight > 0) return jbG;  // 재렌더까지는 그대로 쓴다
+    jbG = null;
+    var all = document.querySelectorAll('.sbs-grid, .vpane');
+    for (var i = 0; i < all.length; i++){
+      var r = all[i].getBoundingClientRect();
+      if (r.width < 40 || r.height < 40) continue;
+      // [data-row]가 뷰어 그리드를 가려낸다 — 번역 탭 결과 그리드(같은 클래스, data-row 없음)를
+      // 잡지 않게. 실측으로 숨은 탭은 DOM에서 아예 빠지지만 app.py가 바뀌어도 버티게 남긴다.
+      if (all[i].matches('[data-row]') || all[i].querySelector('[data-row]')){
+        jbG = all[i]; break;
+      }
+    }
+    return jbG;
+  }
+  function jbNorm(s){ return (s || '').replace(/\\s+/g, ' ').trim(); }
+  function jbCells(g, row){
+    var sel = '[data-row="' + row + '"]';
+    var self = (g.matches && g.matches(sel)) ? [g] : [];   // .vpane은 g.querySelector로 안 잡힌다
+    return self.concat([].slice.call(g.querySelectorAll(sel)));
+  }
+  // 지금 화면 맨 위에 걸린 자리를 구조로 집는다. 참조(노드)는 담지 않는다 — 뷰어는 패널을 토글할
+  // 때마다 그리드를 통째로 다시 만들므로, 붙들어 둔 노드는 조용히 죽은 노드가 된다.
+  function jbCapture(g){
+    var edge = g.getBoundingClientRect().top + JB_EDGE;
+    var max = Math.max(0, g.scrollHeight - g.clientHeight);
+    var els = (g.matches && g.matches('[data-row]') ? [g] : [])
+      .concat([].slice.call(g.querySelectorAll('[data-row]')));
+    var band = null, i, r;
+    for (i = 0; i < els.length; i++){
+      r = els[i].getBoundingClientRect();
+      if (r.top > edge) break;                  // 아직 기준선 아래 — 문서 순서라 여기서 끝
+      var key = els[i].getAttribute('data-row');
+      // 한 행의 두 셀은 같은 grid row라 top이 같고 DOM에서도 붙어 있다 → 연속 묶음이면 한 밴드
+      if (!band || band.row !== key) band = {row: key, cs: [], t: r.top, b: r.bottom};
+      band.cs.push(els[i]);
+      band.t = Math.min(band.t, r.top); band.b = Math.max(band.b, r.bottom);
+    }
+    if (!band) return null;
+    // 쪽 고르기: 기준선 아래로 내용이 이어지는 셀만, 그중 원문(en) 우선. 짧은 쪽 셀을 잡아
+    // 비율이 늘 1이 되는 사고를 막고, 재번역에도 원문 텍스트가 더 잘 버틴다.
+    var live = [];
+    for (i = 0; i < band.cs.length; i++)
+      if (band.cs[i].getBoundingClientRect().bottom > edge) live.push(band.cs[i]);
+    var pool = live.length ? live : band.cs, cell = pool[0];
+    for (i = 0; i < pool.length; i++)
+      if (pool[i].getAttribute('data-side') === 'en'){ cell = pool[i]; break; }
+    // 블록 하위 앵커 — 실측으로 한 셀이 2440px·17블록까지 간다. 행 단위로만 집으면 최대 3화면
+    // 어긋난다. 폭이 바뀌어 줄바꿈이 전부 달라져도 블록 안 비율은 버틴다.
+    var bs = [].slice.call(cell.querySelectorAll(JB_BLOCKS));
+    var bi = 0, bf = 0, head = '';
+    for (i = 0; i < bs.length; i++)
+      if (bs[i].getBoundingClientRect().top <= edge) bi = i;
+    if (bs.length){
+      var br = bs[bi].getBoundingClientRect();
+      bf = br.height > 0 ? Math.max(0, Math.min(1, (edge - br.top) / br.height)) : 0;
+      head = jbNorm(bs[bi].textContent).slice(0, 72);
+    }
+    var span = band.b - band.t;
+    var rf = span > 0 ? Math.max(0, Math.min(1, (edge - band.t) / span)) : 0;
+    var row = parseInt(band.row, 10) || 0;
+    var pv = document.querySelector('.vpdf');
+    return {row: row, side: cell.getAttribute('data-side') || '', bi: bi, bf: bf, rf: rf,
+            ratio: max > 0 ? g.scrollTop / max : 0,   // app.py 복원과 같은 통화 (최후 폴백)
+            head: head, sec: headingOf(row), at: Date.now(),
+            dest: g.scrollTop, destFixed: 0,
+            pdf: pv ? pv.scrollTop : null, pdfH: pv ? pv.scrollHeight : null};
+  }
+  function jbNeed(g, el){        // scrollIntoView({block:'center'})가 만들 이동량 (범위 클램프)
+    var gr = g.getBoundingClientRect(), er = el.getBoundingClientRect();
+    var want = (er.top - gr.top) - Math.max(0, (g.clientHeight - er.height) / 2);
+    var lo = -g.scrollTop, hi = (g.scrollHeight - g.clientHeight) - g.scrollTop;
+    return Math.max(lo, Math.min(hi, want));
+  }
+  function jbMark(target){
+    if (!jbEl || !target) return false;
+    var g = jbScroller(target);
+    if (!g) return false;
+    var need = jbNeed(g, target);
+    // 이미 화면에 있는 문단으로 가는 칩엔 알약을 띄우지 않는다 — 자리를 잃지 않았으니 소음이다
+    if (Math.abs(need) < Math.max(JB_ARM_MIN, g.clientHeight * JB_ARM)) return false;
+    if (pin){
+      // 연달아 칩을 눌러도 '처음 읽던 자리'를 지킨다(히스토리 스택이 아니라 집 하나다).
+      // 예외: 지난 점프가 놓아둔 자리에서 1.2화면 이상 옮겨가 정착했으면 거기가 새 '읽던 자리'다.
+      if (Math.abs(g.scrollTop - (pin.dest || 0)) > g.clientHeight * 1.2) pin = jbCapture(g);
+    } else pin = jbCapture(g);
+    if (!pin) return false;
+    pin.dest = g.scrollTop + need;      // 점프가 끝나면 여기 있을 것 (아래 tick이 실측으로 고친다)
+    pin.destFixed = 0;
+    jbJumpAt = Date.now();
+    var go = jbEl.querySelector('.mjb-go');
+    jbEl.querySelector('.mjb-w').textContent = pin.sec ? ' · ' + pin.sec.slice(0, 26) : '';
+    go.title = '칩을 누르기 전 읽던 자리로 돌아갑니다' + (pin.sec ? ' — ' + pin.sec : '')
+      + (pin.head ? ' \\u201C' + pin.head.slice(0, 50) + '\\u201D' : '');
+    go.setAttribute('aria-label', '읽던 자리로 돌아가기' + (pin.sec ? ' — ' + pin.sec : ''));
+    jbKey = '';                          // 다음 프레임에 좌표를 새로 쓰게
+    if (!jbRaf) jbRaf = requestAnimationFrame(jbTick);
+    return true;
+  }
+  function jbTarget(g, p){
+    var cs = jbCells(g, p.row), cell = null, i;
+    for (i = 0; i < cs.length; i++) if (cs[i].getAttribute('data-side') === p.side) cell = cs[i];
+    cell = cell || cs[0] || null;
+    if (cell){
+      var bs = [].slice.call(cell.querySelectorAll(JB_BLOCKS));
+      if (bs.length){
+        var el = bs[Math.min(p.bi, bs.length - 1)];
+        var same = cell.getAttribute('data-side') === p.side;
+        // 같은 쪽이면 텍스트로 검증한다 — 재번역으로 행 인덱스가 밀렸을 때 조용히 틀린 자리로
+        // 가는 것이 비율 폴백보다 더 나쁘다(티가 안 난다). 다른 쪽 셀이면 검증하지 않는다:
+        // 그 짝은 같은 문장의 번역이라 텍스트가 당연히 다르다.
+        if (!same || !p.head || jbNorm(el.textContent).slice(0, 40) === p.head.slice(0, 40))
+          return {el: el, f: p.bf};
+      }
+    }
+    if (p.head){                       // 행 인덱스가 밀렸다 → 텍스트로 다시 찾는다
+      var pre = p.head.slice(0, 40), hit = null;
+      var all = g.querySelectorAll(JB_BLOCKS);
+      for (i = 0; i < all.length; i++){
+        if (jbNorm(all[i].textContent).indexOf(pre) === 0){ hit = all[i]; break; }
+      }
+      if (hit) return {el: hit, f: p.bf};
+    }
+    if (cell && cell !== g) return {el: cell, f: p.rf};   // 빈 셀·표만 있는 셀 → 행 밴드 비율
+    return null;                                          // → 호출자가 p.ratio로 떨어진다
+  }
+  // 앵커의 위끝이 edge - f*height에 오면 그 화면 한 장이 재현된다. offsetTop은 쓰지 않는다 —
+  // 셀은 grid item이고 마크다운은 래퍼 한 겹 안이라 offset 부모 사슬이 렌더마다 같지 않다.
+  function jbTop(g, p, t){
+    var max = Math.max(0, g.scrollHeight - g.clientHeight);
+    t = t || jbTarget(g, p);
+    if (!t) return max > 0 ? p.ratio * max : 0;
+    var er = t.el.getBoundingClientRect();
+    var y = g.scrollTop + (er.top - g.getBoundingClientRect().top) - JB_EDGE + t.f * er.height;
+    return Math.max(0, Math.min(max, y));
+  }
+  function jbPlace(){
+    var g = jbScroller(null), r = g && g.getBoundingClientRect();
+    if (!g || !r || r.width < 160 || r.height < 120){ jbEl.classList.remove('on'); return null; }
+    // 컨테이너 rect를 재기 때문에 서랍 폭(--mc-w)·본문 padding·목차 너비·텍스트|PDF 분할을
+    // 하나도 몰라도 언제나 '지금 읽는 영역' 안에 온다. +24는 세로 스크롤바 여유.
+    var right = Math.max(12, window.innerWidth - r.right + 24);
+    var bottom = Math.max(14, window.innerHeight - r.bottom + 18);
+    var mw = Math.max(180, Math.min(300, r.width - 28));
+    var key = Math.round(right) + '|' + Math.round(bottom) + '|' + Math.round(mw);
+    if (key !== jbKey){                 // 값이 바뀔 때만 써서 레이아웃을 흔들지 않는다
+      jbKey = key;
+      jbEl.style.right = right + 'px'; jbEl.style.bottom = bottom + 'px';
+      jbEl.style.maxWidth = mw + 'px';
+    }
+    jbEl.classList.add('on');
+    return g;
+  }
+  // rAF 하나가 배치와 해제를 다 맡는다 — 재렌더·splitter·서랍 폭·목차·리사이즈·탭 이동을 전부
+  // 흡수하고, 탭이 숨으면 저절로 멈춘다. resize/scroll 리스너나 MutationObserver를 늘리지 않는다.
+  function jbTick(){
+    jbRaf = 0;
+    if (!pin) return;
+    var g = jbPlace();
+    // 프레임마다 rect 1~2회. 무거운 일(앵커 재해석)은 12프레임(≈200ms)마다 한 번.
+    if (g && (++jbFrames % 12 === 0) && Date.now() - jbJumpAt > JB_GRACE){
+      if (!pin.destFixed){ pin.dest = g.scrollTop; pin.destFixed = 1; }  // 점프가 놓아둔 실제 자리
+      // 스스로 그 자리로 돌아왔으면 알약은 할 일이 없다 ("읽던 자리로"가 거짓말이 된다)
+      if (Math.abs(g.scrollTop - jbTop(g, pin)) < Math.max(JB_HOME_MIN, g.clientHeight * JB_HOME))
+        return jbDismiss();
+    }
+    jbRaf = requestAnimationFrame(jbTick);
+  }
+  function jbAfter(g, p){
+    g.dispatchEvent(new Event('scroll'));   // PDF 싱크 프라이밍 (app.py의 복원과 같은 손짓)
+    var pv = document.querySelector('.vpdf');
+    if (!pv || p.pdf == null || pv.scrollHeight !== p.pdfH) return;   // lazy 이미지로 좌표계가 변했다
+    // 싱크는 페이지 위끝까지만 맞춘다 — 페이지 안에서 보던 위치까지 되돌린다.
+    // 싱크의 rAF 콜백이 지난 뒤에 써야 덮이지 않는다.
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){ pv.scrollTop = p.pdf; });
+    });
+  }
+  function jbBack(){
+    var p = pin, g = jbScroller(null);
+    if (!p) return;
+    if (!g) return;                    // 본문이 없다(다른 탭·PDF 전용) → 아무것도 하지 않고 핀을 지킨다
+    var t = jbTarget(g, p), y = jbTop(g, p, t);
+    var far = Math.abs(y - g.scrollTop) > g.clientHeight * 4;
+    var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var soft = !far && !reduce;        // 먼 거리 smooth는 느리고 멀미난다
+    g.scrollTo({top: y, behavior: soft ? 'smooth' : 'auto'});
+    if (t && t.el !== g && t.el.classList) flash([t.el], 'mjb-flash');
+    var n = 0, last = -1;
+    setTimeout(function nudge(){       // 늦게 뜬 그림·KaTeX가 위쪽을 밀면 좌표가 달라진다
+      if (last >= 0 && Math.abs(g.scrollTop - last) > 24) return jbAfter(g, p);  // 사용자가 굴렸다
+      var y2 = jbTop(g, p);
+      if (Math.abs(g.scrollTop - y2) > 4) g.scrollTop = y2;
+      last = g.scrollTop;
+      if (++n < 3) setTimeout(nudge, 180); else jbAfter(g, p);
+    }, soft ? 420 : 60);
+    jbDismiss();                       // 돌아왔으면 그 버튼은 할 일이 없다
+  }
+  function jbDismiss(){
+    pin = null; jbKey = ''; jbFrames = 0;
+    if (jbEl) jbEl.classList.remove('on');
+    if (jbRaf){ cancelAnimationFrame(jbRaf); jbRaf = 0; }
+  }
+  if (jbEl){
+    jbEl.querySelector('.mjb-go').addEventListener('click', jbBack);
+    jbEl.querySelector('.mjb-x').addEventListener('click', jbDismiss);
+    // fixed 알약 위에서 굴리면 밑의 그리드가 안 움직인다(가장 가까운 스크롤 조상이 body다).
+    // 넘겨주지 않으면 "읽다가 알약 위에서 휠이 먹통"이라는 새 짜증을 만든다.
+    jbEl.addEventListener('wheel', function(ev){
+      var g = jbScroller(null);
+      if (!g) return;
+      var unit = ev.deltaMode === 1 ? 16 : (ev.deltaMode === 2 ? g.clientHeight : 1);
+      g.scrollTop += ev.deltaY * unit;
+      ev.preventDefault();
+    }, {passive: false});
+  }
+  // 다른 점프(목차·섹션 트리 등)도 나중에 이걸 재사용할 수 있게 이름 하나만 내놓는다.
+  // mark(el)은 **프로그래매틱 스크롤을 시작하기 직전**에 부른다. 반환값 = 알약을 띄웠나.
+  window.__mdJumpBack = {mark: jbMark, back: jbBack, dismiss: jbDismiss,
+                         state: function(){ return pin; }};
 
   // ---- 렌더 ----
   var SWATCH = {yellow: '#ffe08a', green: '#b5e7b8', blue: '#a9d8f5', pink: '#f9bcd4',
@@ -542,7 +835,14 @@ HTML = """
     if (ev.key === 'Enter' && !ev.shiftKey){ ev.preventDefault(); ask(); }
   });
   document.addEventListener('keydown', function(ev){
-    if (ev.key === 'Escape' && panel.classList.contains('open')) panel.classList.remove('open');
+    if (ev.key !== 'Escape') return;
+    // 알약이 있으면 알약만 닫는다 — Esc 한 번에 알약과 서랍이 동시에 사라지지 않게.
+    // 단 그림 확대·메모 카드·찾기 바가 열려 있으면 Esc의 주인은 그쪽이라 비켜선다.
+    if (pin && !document.querySelector('#md-img-zoom.open, #md-anno-pop.open, #md4-find.on')){
+      jbDismiss();
+      return;
+    }
+    if (panel.classList.contains('open')) panel.classList.remove('open');
   });
   render();
 })();

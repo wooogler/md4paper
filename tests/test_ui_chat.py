@@ -599,3 +599,175 @@ def test_route_put_model_rejects_unknown_provider(client):
 def test_route_put_model_unknown_token_is_404(client):
     c, _wd, _state = client
     assert c.put("/chat/nope/model", json={"provider": "openai"}).status_code == 404
+
+
+# --- '읽던 자리로' 오버레이 (문자열 계약) -------------------------------
+# 이 기능은 순수 클라이언트라 파이썬 로직이 없다. 그래서 검증 표면은 (1) 마크업이 서랍 밖에
+# 있다는 구조, (2) 파이썬 상수와 CSS/JS 문자열이 한 값을 가리킨다는 단일 출처, (3) 순서가
+# 곧 동작인 몇 줄(무장은 스크롤 전에, 유예는 자동 해제 앞에)이다.
+
+
+def _js_block(src: str, head: str) -> str:
+    """`function foo(`부터 다음 함수 선언까지 — 한 함수 안의 줄 순서를 보려고 자른다."""
+    i = src.index(head)
+    return src[i:src.index("\n  function ", i + 1)]
+
+
+def test_jump_back_markup_sits_outside_the_drawer():
+    """서랍 안에 두면 서랍을 닫는 순간 함께 사라진다 — 접고 본문만 읽는 사람에게도 복귀는 필요하다."""
+    from md4paper.ui import chat_panel
+
+    html = chat_panel.HTML
+    assert html.index('class="mc-foot"') < html.index('id="md-jump-back"') < html.index("<script>")
+    # 서랍 시작 → 알약 시작 사이의 div가 균형 잡혀 있다 = 서랍이 먼저 닫힌다(중첩이 아니다)
+    seg = html[html.index('<div id="md-chat-panel"'):html.index('<div id="md-jump-back"')]
+    assert seg.count("<div") == seg.count("</div>")
+
+
+def test_chat_panel_body_html_divs_balance():
+    """마크업을 잘못 닫으면 서랍이 알약을 삼킨다 — 브라우저는 조용히 고쳐서 티가 안 난다."""
+    from md4paper.ui import chat_panel
+
+    body = chat_panel.HTML.split("<script>")[0]
+    assert body.count("<div") == body.count("</div>")
+
+
+def test_jump_back_constants_are_single_sourced():
+    """파이썬 상수와 문자열 안 리터럴이 갈라지면 CSS가 붙지 않거나 전역 이름이 어긋난다."""
+    from md4paper.ui import chat_panel
+
+    css, html = chat_panel.CSS, chat_panel.HTML
+    assert f'id="{chat_panel.JUMP_BACK_ID}"' in html
+    assert f"#{chat_panel.JUMP_BACK_ID}" in css
+    assert f"z-index: {chat_panel.JUMP_BACK_Z}" in css
+    assert html.count(f"window.{chat_panel.JUMP_BACK_API} =") == 1
+    assert f"JB_EDGE = {chat_panel.JUMP_EDGE_PX}" in html
+
+
+def test_jump_back_z_index_between_find_bar_and_drawers():
+    """알약은 본문 층(app.py의 핸들·스티키는 1~5) 위, 서랍·찾기 바 아래여야 한다.
+
+    서랍보다 위로 올리면 서랍 옆에 붙은 알약이 서랍을 뚫고 나오고, 찾기 바보다 위로 올리면
+    Esc의 주인이 찾기 바일 때(아래 Esc 게이트) 알약이 그 위를 덮어 순서가 어긋난다.
+    """
+    import re
+
+    from md4paper.ui import chat_panel, find_bar
+
+    panel_rule = chat_panel.CSS.split("#md-chat-panel {", 1)[1].split("}", 1)[0]
+    panel_z = int(re.search(r"z-index:\s*(\d+)", panel_rule).group(1))
+    find_z = max(int(v) for v in re.findall(r"z-index:\s*(\d+)", find_bar.CSS))
+    assert 100 < chat_panel.JUMP_BACK_Z < min(panel_z, find_z)
+
+
+def test_jump_back_has_dark_mode_override():
+    """안 덮으면 흰 알약이 다크 본문 위에서 눈을 때린다."""
+    from md4paper.ui import chat_panel
+
+    dark = chat_panel.CSS.split("@media (prefers-color-scheme: dark)")[1]
+    assert "#md-jump-back" in dark
+    assert "background: #262626" in dark
+    assert "--mjb-ring" in dark
+
+
+def test_jump_back_marks_before_every_programmatic_scroll():
+    """무장이 스크롤 뒤로 가면 애니메이션 중간값을 집어 앵커가 목적지 쪽으로 끌려간다."""
+    from md4paper.ui import chat_panel
+
+    for head in ("function gotoRow(", "function gotoNote("):
+        piece = _js_block(chat_panel.HTML, head)
+        assert piece.index("jbMark(") < piece.index("scrollIntoView(")
+
+
+def test_jump_back_container_lookup_is_gated():
+    """단독 `.sbs-grid`는 번역 탭 결과 그리드까지 잡는다 — [data-row]로 뷰어 것만 가려낸다."""
+    from md4paper.ui import chat_panel
+
+    html = chat_panel.HTML
+    assert "querySelector('.sbs-grid')" not in html
+    assert "'.sbs-grid, .vpane'" in html
+    assert "matches('[data-row]')" in html
+
+
+def test_jump_back_buttons_are_real_and_labelled():
+    """진짜 button 두 개라 Tab·Enter가 그냥 되고, 숨을 때 탭 순서에서 알아서 빠진다."""
+    from md4paper.ui import chat_panel
+
+    html = chat_panel.HTML
+    seg = html[html.index('<div id="md-jump-back"'):html.index("<script>")]
+    assert seg.count('type="button"') == 2
+    assert 'class="mjb-go"' in seg and 'class="mjb-x"' in seg
+    assert seg.count("aria-label=") == 2
+    assert seg.count('aria-hidden="true"') == 1
+    assert 'role="status"' in seg
+
+
+def test_jump_back_thresholds_have_hysteresis():
+    """해제 임계가 무장 임계보다 커지면 알약이 뜨자마자 스스로 사라진다."""
+    import re
+
+    from md4paper.ui import chat_panel
+
+    html = chat_panel.HTML
+    arm = float(re.search(r"JB_ARM = ([\d.]+)", html).group(1))
+    home = float(re.search(r"JB_HOME = ([\d.]+)", html).group(1))
+    arm_min = int(re.search(r"JB_ARM_MIN = (\d+)", html).group(1))
+    home_min = int(re.search(r"JB_HOME_MIN = (\d+)", html).group(1))
+    assert arm > home and arm_min > home_min
+
+
+def test_jump_back_has_settle_grace_before_auto_dismiss():
+    """유예가 빠지면 무장 직후엔 아직 핀 자리라 첫 무거운 틱이 곧바로 해제한다 — 나가는 점프
+    도중에 알약이 사라진다."""
+    import re
+
+    from md4paper.ui import chat_panel
+
+    html = chat_panel.HTML
+    grace = int(re.search(r"JB_GRACE = (\d+)", html).group(1))
+    assert grace >= 500                      # smooth scrollIntoView(대개 300~500ms)보다 넉넉히
+    assert "Date.now() - jbJumpAt > JB_GRACE" in html
+
+
+def test_jump_back_flash_is_not_the_citation_flash():
+    """"여기가 근거다"(파랑)와 "여기로 돌아왔다"(무채색)는 다른 말이다 — 회귀로 기존 둘도 본다."""
+    from md4paper.ui import chat_panel
+
+    css, html = chat_panel.CSS, chat_panel.HTML
+    assert ".mjb-flash" in css and "@keyframes mdJumpFlash" in css
+    assert "'mjb-flash'" in html
+    assert ".chat-cite-flash" in css
+    assert "'chat-cite-flash'" in html and "'md-anno-flash'" in html
+
+
+def test_jump_back_wheel_handler_can_prevent_default():
+    """passive 리스너는 preventDefault를 못 한다 — 알약 위에서 휠이 먹통이 된다."""
+    from md4paper.ui import chat_panel
+
+    assert "'wheel'" in chat_panel.HTML
+    assert "{passive: false}" in chat_panel.HTML
+
+
+def test_jump_pin_is_not_persisted():
+    """핀은 메모리에만 산다 — 리로드하면 뷰어는 맨 위에서 다시 시작하므로 지난 생애의 핀은
+    도움보다 혼란이다(서랍 폭·'메모 포함'과 성격이 다르다)."""
+    import re
+
+    from md4paper.ui import chat_panel
+
+    keys = set(re.findall(r"localStorage\.(?:get|set)Item\('([^']+)'", chat_panel.HTML))
+    assert keys == {"md4chat.notes", "md4chat.w"}
+
+
+def test_escape_still_closes_drawer_without_pin():
+    """Esc는 핀이 없으면 오늘과 똑같이 서랍을 닫고, 다른 오버레이가 열려 있으면 비켜선다."""
+    from md4paper.ui import chat_panel
+
+    html = chat_panel.HTML
+    seg = html[html.index("document.addEventListener('keydown'"):]
+    assert "#md-img-zoom.open" in seg and "#md-anno-pop.open" in seg and "#md4-find.on" in seg
+    assert "jbDismiss()" in seg
+    assert "panel.classList.remove('open')" in seg
+    # 회귀 — 서랍의 나머지 배선을 건드리지 않았다
+    assert "window.__mdChatTogglePanel" in html
+    assert "a.chat-cite" in html and ".mc-list" in html
