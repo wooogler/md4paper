@@ -9,6 +9,8 @@
 - 열쇠는 `논문 토큰 → 단계 → 스크롤 상자`다. 상자는 클래스 셀렉터 + 같은 셀렉터 안 순번으로
   가리킨다(뷰어의 목차·본문·PDF는 각자 다른 상자다).
 - 우리가 되돌리는 동안의 scroll 이벤트는 저장하지 않는다 — 복원값이 0을 덮어써 버리지 않게.
+- 되돌리는 시점은 **상자가 DOM에 붙는 그 순간**이다(MutationObserver). 타이머로 뒤늦게 옮기면
+  본문이 맨 위로 한 번 그려진 뒤 튀어서, 그 튐이 탭을 옮길 때마다 '반짝'으로 보인다.
 """
 
 from __future__ import annotations
@@ -30,7 +32,8 @@ _JS = """
   if (window.__mdScrollMem) return; window.__mdScrollMem = true;
   var PAPER = %s, SELS = %s;
   var PREFIX = 'md4:pos:' + PAPER + ':';
-  var quiet = 0, timer = null, tries = 0, moved = false;
+  var quiet = 0, timer = null, moved = false;
+  var pending = null, done = {}, watcher = null, raf = 0, stopAt = 0, lastTry = 0;
 
   function stepKey(){                        // 지금 단계 탭 (없으면 홈처럼 단계가 없는 화면)
     var t = document.querySelector('.q-tab--active');
@@ -50,36 +53,55 @@ _JS = """
     boxes().forEach(function(b){ if (b.el.scrollTop > 0) pos[b.key] = b.el.scrollTop; });
     try { sessionStorage.setItem(PREFIX + stepKey(), JSON.stringify(pos)); } catch (e) {}
   }
-  function restore(){
+  // 되돌리기는 **상자가 화면에 붙는 그 순간** 해야 한다. 일정 시간마다 두드리면 본문이 맨 위로
+  // 한 번 그려진 뒤 뒤늦게 튀어서, 그 튐이 '반짝'으로 보인다. 그래서 DOM 변화를 지켜보다가
+  // 되돌릴 수 있게 된 상자를 즉시(같은 프레임에) 제자리로 옮긴다. 타이머는 백스톱으로만 남긴다
+  // (그림이 늦게 실려 높이가 나중에 커지는 경우).
+  function tryRestore(){
+    if (!pending || moved) return stopWatch();
+    quiet = Date.now() + 400;                // 내가 옮긴 스크롤을 '사용자가 움직였다'로 저장하지 않게
+    boxes().forEach(function(b){
+      var want = pending[b.key];
+      if (!want || done[b.key]) return;
+      var max = b.el.scrollHeight - b.el.clientHeight;
+      if (max <= 0) return;                  // 아직 내용이 안 실렸다 → 다음 변화 때
+      b.el.scrollTop = Math.min(want, max);
+      done[b.key] = 1;
+    });
+    if (pending.w) window.scrollTo(0, pending.w);
+    var missing = 0;
+    for (var k in pending) if (k !== 'w' && !done[k]) missing++;
+    if (!missing || Date.now() > stopAt) stopWatch();
+  }
+  function stopWatch(){
+    if (watcher){ watcher.disconnect(); watcher = null; }
+  }
+  function restoreSoon(){
+    moved = false; done = {}; pending = null;
     var raw = null;
     try { raw = sessionStorage.getItem(PREFIX + stepKey()); } catch (e) {}
-    if (!raw) return false;
-    var pos; try { pos = JSON.parse(raw); } catch (e) { return false; }
-    var hit = false;
-    quiet = Date.now() + 500;
-    boxes().forEach(function(b){
-      var want = pos[b.key];
-      if (!want) return;
-      var max = b.el.scrollHeight - b.el.clientHeight;
-      if (max <= 0) return;                  // 아직 내용이 안 실렸다 → 다음 시도에
-      b.el.scrollTop = Math.min(want, max);
-      hit = true;
-    });
-    if (pos.w) window.scrollTo(0, pos.w);
-    return hit;
-  }
-  function restoreSoon(){                    // 렌더·이미지 로딩으로 높이가 커지므로 몇 번 더 두드린다
-    tries = 0; moved = false;
-    (function attempt(){
-      if (moved) return;                     // 사용자가 이미 움직였다 → 그 자리를 존중한다
-      restore();
-      if (++tries < 6) setTimeout(attempt, 120 * tries);
-    })();
+    if (!raw) return;
+    try { pending = JSON.parse(raw); } catch (e) { return; }
+    stopAt = Date.now() + 3000;
+    tryRestore();
+    if (!watcher){
+      watcher = new MutationObserver(function(){
+        // 상자가 붙은 **그 작업 안에서** 옮긴다 — 프레임을 넘기면 맨 위 상태로 한 번 그려진다.
+        // 다만 렌더 중에는 변화가 쏟아지므로 8ms에 한 번만 재고(레이아웃 강제 계산 비용),
+        // 그 사이의 변화는 다음 프레임에 한 번 몰아 처리한다.
+        var now = Date.now();
+        if (now - lastTry >= 8){ lastTry = now; tryRestore(); return; }
+        if (raf) return;
+        raf = requestAnimationFrame(function(){ raf = 0; lastTry = Date.now(); tryRestore(); });
+      });
+    }
+    watcher.observe(document.body, {childList: true, subtree: true});
+    [80, 300, 800, 1600, 2600].forEach(function(ms){ setTimeout(tryRestore, ms); });
   }
 
   // 사용자가 직접 움직이면 복원 재시도를 멈추고 저장도 막지 않는다 (자기가 고른 자리가 이긴다)
   ['wheel', 'touchmove', 'keydown', 'mousedown'].forEach(function(ev){
-    window.addEventListener(ev, function(){ moved = true; quiet = 0; }, true);
+    window.addEventListener(ev, function(){ moved = true; quiet = 0; stopWatch(); }, true);
   });
   window.addEventListener('scroll', function(){
     clearTimeout(timer); timer = setTimeout(save, 300);
@@ -90,8 +112,8 @@ _JS = """
   document.addEventListener('click', function(ev){
     if (ev.target.closest && ev.target.closest('.q-tab')) { save(); setTimeout(restoreSoon, 60); }
   }, true);
-  if (document.readyState === 'complete') restoreSoon();
-  else window.addEventListener('load', restoreSoon);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreSoon);
+  else restoreSoon();
 })();
 """
 

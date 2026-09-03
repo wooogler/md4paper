@@ -1609,6 +1609,36 @@ def _review_url(root: Path) -> str:
 # 단계 탭 이름 — 이름으로 '마지막에 보던 단계'를 되찾으므로 한 곳에서만 정한다.
 _STEP_NAMES = ("1 · 변환", "2 · 번역", "3 · 뷰어")
 
+# 논문 탭을 누르면 페이지가 새로 열린다(탭 = 페이지 이동). 그 사이 새 문서의 첫 페인트는
+# 아무것도 없는 흰 화면이라 '반짝'하고 지나간다. 그래서 **Vue가 뜨기 전에** 헤더 자리를
+# 같은 색으로 칠해 둔다 — 첫 페인트부터 헤더가 있던 자리에 헤더 색이 있으니 깜빡임이 사라진다.
+# 색은 지난 페이지에서 실제로 재 둔 값(sessionStorage)을 쓰고, 없으면 기본값으로 시작한다
+# (다크 모드·테마 변경에도 어긋나지 않게 — 상수로 박아 두면 언젠가 색이 갈린다).
+_PREPAINT_HTML = """
+<style>
+  html { background: #fff; }
+  body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; height: 44px;
+    background: var(--md4-prepaint, #5898d4); z-index: 0; }
+</style>
+<script>
+(function(){
+  try {
+    var c = sessionStorage.getItem('md4:headerbg');
+    if (c) document.documentElement.style.setProperty('--md4-prepaint', c);
+  } catch (e) {}
+  // 실제 헤더 색을 재서 다음 페이지의 미리칠하기에 물려 준다
+  window.addEventListener('load', function(){
+    setTimeout(function(){
+      var h = document.querySelector('.q-header');
+      if (!h) return;
+      var bg = getComputedStyle(h).backgroundColor;
+      try { if (bg && bg !== 'rgba(0, 0, 0, 0)') sessionStorage.setItem('md4:headerbg', bg); } catch (e) {}
+    }, 300);
+  });
+})();
+</script>
+"""
+
 _CHROME_CSS = """
 /* 헤더 한 줄 — 논문 탭은 아래 끝에 물리고, 그림자를 없애야 활성 탭이 본문으로 이어져 보인다. */
 .md4-header { min-height: 44px; padding: 0 8px 0 2px !important; box-shadow: none !important; gap: 4px; }
@@ -1727,6 +1757,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     _title = m.title or ctrl.wd.root.name
 
     ui.add_css(_CHROME_CSS)
+    ui.add_head_html(_PREPAINT_HTML)  # 탭으로 넘어올 때 흰 화면이 반짝하지 않게 (헤더 자리 미리 칠하기)
     find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 — 앱 창에는 브라우저 찾기 바가 없다
     scroll_memory.install(tok)  # 읽던 자리(단계별 스크롤) 기억 — 탭으로 오가도 그 자리로
 
