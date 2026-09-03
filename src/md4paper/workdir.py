@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -174,7 +176,20 @@ class WorkDir:
         return {}
 
     def save_status(self, status: dict) -> None:
-        self.status_json.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+        """status.json 쓰기 — 임시 파일에 쓰고 갈아끼운다.
+
+        앱 창을 여러 개 띄울 수 있게 되면서 같은 논문의 status.json을 두 프로세스가 쓸 수 있다.
+        제자리에서 잘라 쓰면 도중에 끊길 때 **반쯤 쓴 JSON**이 남아 그 논문이 목록에서 사라진다.
+        os.replace는 원자적이라 최악의 경우도 '한쪽 갱신이 다른 쪽에 덮이는' 정도로 끝난다.
+        """
+        text = json.dumps(status, ensure_ascii=False, indent=2)
+        tmp = self.status_json.with_suffix(f".json.tmp{os.getpid()}")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, self.status_json)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
 
     def mark_done(self, stage: str, input_hash: str, **extra) -> None:
         status = self.load_status()
@@ -322,29 +337,109 @@ def set_hidden(root: Path, hidden: bool = True) -> bool:
     return True
 
 
+def set_pinned(root: Path, pinned: bool = True) -> bool:
+    """논문을 목록 위에 고정하거나 해제한다 (status.json의 pinned_at).
+
+    고정한 논문은 홈 목록 맨 위의 칩으로, 리뷰 화면 헤더의 탭으로 나온다 — 자주 오가는
+    논문을 최근순 목록에서 매번 찾지 않도록. 고정 시각을 적어 두는 이유는 **탭 순서를
+    고정한 순서로** 안정시키기 위해서다(제목·수정시각이 바뀌어도 자리가 튀지 않는다).
+    """
+    wd = WorkDir(Path(root))
+    if not wd.root.is_dir():
+        return False
+    try:
+        before = wd.root.stat()
+        status = wd.load_status()
+        if pinned:
+            status.setdefault("pinned_at", time.time())  # 이미 고정돼 있으면 순서를 유지
+        else:
+            status.pop("pinned_at", None)
+        wd.save_status(status)
+        try:  # 고정은 '작업'이 아니다 → 폴더 수정시각을 되돌려 최근순 목록을 흔들지 않는다
+            os.utime(wd.root, (before.st_atime, before.st_mtime))
+        except OSError:
+            pass
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def is_pinned(root: Path) -> bool:
+    """이 논문이 고정돼 있는지 — 그 논문의 status.json만 본다.
+
+    작업 폴더 목록을 훑지 않는 이유: `md4paper ui <경로>`로 작업 폴더 **밖**의 논문을 열 수도 있어서,
+    목록에 없다고 '고정 안 됨'으로 보여 주면 눌러도 상태가 안 바뀌는 단추가 된다.
+    """
+    try:
+        return bool(WorkDir(Path(root)).load_status().get("pinned_at"))
+    except (OSError, ValueError):
+        return False
+
+
+def pinned_workdirs(workspace: Path) -> list[dict]:
+    """고정한 논문만 고정한 순서로 — [{root, title, pinned_at}].
+
+    리뷰 화면 헤더의 탭이 페이지마다 쓰는 목록이라 `recent_workdirs`처럼 전체 서지를 읽지 않고
+    status.json(작다)을 먼저 보고 고정된 것만 제목을 읽는다.
+    """
+    if not Path(workspace).is_dir():
+        return []
+    out: list[dict] = []
+    for md4 in Path(workspace).rglob("*.md4"):
+        if not md4.is_dir() or not (md4 / "structure" / "sections.yaml").exists():
+            continue
+        try:
+            st = json.loads((md4 / "status.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        try:
+            at = float(st.get("pinned_at") or 0.0)
+        except (TypeError, ValueError):  # 손으로 고친 status.json도 목록을 깨뜨리지 않게
+            continue
+        if not at or st.get("hidden"):  # 숨긴 논문은 탭·칩에 올리지 않는다 (목록에서 뺐다는 뜻이므로)
+            continue
+        out.append({"root": md4, "title": _title_of(md4), "pinned_at": at})
+    out.sort(key=lambda d: d["pinned_at"])
+    return out
+
+
+def _title_of(md4: Path) -> str:
+    """논문 제목 — paper_meta.json(LLM 추출) > sections.yaml의 title > 폴더 이름."""
+    import re
+
+    title = md4.stem
+    try:
+        m = re.search(r"^title:\s*(.+)$", (md4 / "structure" / "sections.yaml").read_text(encoding="utf-8"), re.M)
+        if m:
+            title = m.group(1).strip().strip("'\"") or title
+    except OSError:
+        pass
+    pm_path = md4 / "paper_meta.json"
+    if pm_path.exists():
+        try:
+            title = json.loads(pm_path.read_text(encoding="utf-8")).get("title") or title
+        except (OSError, ValueError):
+            pass
+    return title
+
+
 def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = False) -> list[dict]:
     """작업 폴더에서 유효한 .md4 작업 디렉토리를 최근 수정순으로.
 
-    반환 항목: {name, root(Path), title, authors, year, venue, has_ko, opened, hidden, mtime}
+    반환 항목: {name, root(Path), title, authors, year, venue, has_ko, opened, hidden, pinned, mtime}
     서지(authors/year/venue)는 paper_meta.json(LLM 추출)이 있으면 채우고, 없으면 빈 값.
     사용자가 숨긴 논문(status.json의 hidden)은 include_hidden일 때만 포함한다.
+    고정한 논문(pinned)은 최근 limit 편 밖으로 밀려나도 목록에 남는다 — 고정의 뜻이 그것이다.
     """
     if not workspace.is_dir():
         return []
     import json
-    import re
 
     found: list[dict] = []
     for md4 in workspace.rglob("*.md4"):
         if not md4.is_dir() or not (md4 / "structure" / "sections.yaml").exists():
             continue
-        title = md4.stem
-        try:
-            m = re.search(r"^title:\s*(.+)$", (md4 / "structure" / "sections.yaml").read_text(encoding="utf-8"), re.M)
-            if m:
-                title = m.group(1).strip().strip("'\"") or title
-        except OSError:
-            pass
+        title = _title_of(md4)
         authors: list[str] = []
         year = None
         venue = ""
@@ -352,19 +447,20 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
         if pm_path.exists():
             try:
                 pm = json.loads(pm_path.read_text(encoding="utf-8"))
-                title = pm.get("title") or title
                 authors = pm.get("authors") or []
                 year = pm.get("year")
                 venue = pm.get("venue") or ""
             except (OSError, ValueError):
                 pass
         opened = hidden = False
+        pinned_at = 0.0
         st_path = md4 / "status.json"
         if st_path.exists():
             try:
                 st = json.loads(st_path.read_text(encoding="utf-8"))
                 opened, hidden = bool(st.get("opened_at")), bool(st.get("hidden"))
-            except (OSError, ValueError):
+                pinned_at = float(st.get("pinned_at") or 0.0)
+            except (OSError, ValueError, TypeError):
                 pass
         if hidden and not include_hidden:
             continue
@@ -378,7 +474,11 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
             "has_ko": (md4 / "out" / "paper.ko.md").exists(),
             "opened": opened,  # 리뷰 화면을 한 번이라도 연 적 있는지 (미열람 표시용)
             "hidden": hidden,  # 사용자가 목록에서 감춘 논문 (파일은 그대로)
+            "pinned": bool(pinned_at),  # 사용자가 위에 고정한 논문
+            "pinned_at": pinned_at,     # 고정한 순서 (탭·칩 정렬용)
             "mtime": md4.stat().st_mtime,
         })
     found.sort(key=lambda d: d["mtime"], reverse=True)
-    return found[:limit]
+    head = found[:limit]
+    # 오래된 논문을 고정해 뒀는데 최근 목록에서 밀려 사라지면 고정이 무의미하다 → 뒤에 붙인다.
+    return head + [r for r in found[limit:] if r["pinned"]]

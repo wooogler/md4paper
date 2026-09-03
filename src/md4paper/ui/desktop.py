@@ -64,6 +64,22 @@ def _first_path(picked: object) -> str | None:
     return str(items[0]) if items else None
 
 
+def extra_windows_open() -> bool:
+    """형제 앱 창(§ui/window.py)이 떠 있는지 — 저장·폴더 대화상자를 어디에 띄울지 갈린다.
+
+    pywebview 대화상자는 **창에 붙는다**. NiceGUI 네이티브 모드는 본 창 하나만 중계하므로
+    (§nicegui/native/native_mode.py) 형제 창에서 누른 다운로드도 본 창에 시트를 띄우게 되고,
+    사용자가 보고 있는 창에서는 '아무 일도 안 일어남'이 된다. 그래서 창이 여러 개인 동안에는
+    대화상자를 쓰지 않고 다운로드 폴더로 떨어뜨린 뒤 그 자리를 열어 준다.
+    """
+    try:
+        from md4paper.ui import window  # 지연 import — window 모듈이 이 모듈을 쓴다(순환 방지)
+
+        return window.any_open()
+    except ImportError:
+        return False
+
+
 def reveal(path: Path) -> None:
     """파일 탐색기에서 그 파일이 있는 자리를 연다. 실패해도 조용히 넘어간다(부가 기능)."""
     try:
@@ -89,12 +105,15 @@ async def deliver(name: str, data: bytes, media_type: str = "application/zip") -
         ui.download.content(data, name, media_type=media_type)
         return
 
-    fallback = False
-    try:
-        picked = await win.create_file_dialog(
-            dialog_type=SAVE_DIALOG, directory=str(downloads_dir()), save_filename=name)
-    except Exception:  # noqa: BLE001 — 대화상자를 못 띄우는 백엔드: 다운로드 폴더로 떨어뜨린다
-        picked, fallback = None, True
+    # 창이 여러 개면 대화상자가 엉뚱한 창에 붙는다 → 위치를 묻지 않고 다운로드 폴더로.
+    fallback = extra_windows_open()
+    picked = None
+    if not fallback:
+        try:
+            picked = await win.create_file_dialog(
+                dialog_type=SAVE_DIALOG, directory=str(downloads_dir()), save_filename=name)
+        except Exception:  # noqa: BLE001 — 대화상자를 못 띄우는 백엔드: 다운로드 폴더로 떨어뜨린다
+            picked, fallback = None, True
 
     if fallback:
         target = unique_path(downloads_dir() / name)
@@ -127,7 +146,9 @@ async def choose_folder(title: str, initial: str | None = None) -> str | None:
     from md4paper.ui import folder_dialog
 
     win = window()
-    if win is None:
+    # 형제 창이 있으면 본 창에 붙는 대화상자를 피한다 — 단, OS 대화상자를 띄울 수 있을 때만.
+    # (리눅스에 zenity/kdialog가 없는 환경에서 우회하면 '고를 방법이 아예 없음'이 된다.)
+    if win is None or (extra_windows_open() and folder_dialog.available()):
         return await run.io_bound(folder_dialog.choose_folder, title, initial)
     try:
         picked = await win.create_file_dialog(

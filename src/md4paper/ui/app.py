@@ -14,9 +14,9 @@ from pathlib import Path
 
 from md4paper import config, library
 from md4paper.ir import Flavor, GlossaryEntry
-from md4paper.ui import annotations, chat_panel, desktop
+from md4paper.ui import annotations, chat_panel, desktop, find_bar, scroll_memory
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
-from md4paper.workdir import WorkDir
+from md4paper.workdir import WorkDir, is_pinned, pinned_workdirs, set_pinned
 
 # 설명이 붙은 옵션 (값 → 사람이 이해하기 쉬운 라벨)
 _KSTYLE = {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)", "해요체": "해요체 (~해요 · 부드럽게)"}
@@ -321,11 +321,14 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
   background: #fff; color: inherit; outline: none; }
 #md-anno-pop textarea:focus { border-color: #2383e2; }
 
-/* 오른쪽 목록 서랍 */
-#md-anno-panel { position: fixed; top: 50px; right: 0; bottom: 0; width: 320px; z-index: 9000;
+/* 오른쪽 목록 서랍 — 챗봇 서랍과 같은 규칙: 본문을 덮지 않고 오른쪽을 차지한다.
+   (--ma-top은 헤더를 실제로 재서 넣는다. 헤더 높이가 고정이 아니라 상수로 두면 탭 라벨을 가린다.) */
+:root { --ma-w: 320px; --ma-top: 50px; }
+#md-anno-panel { position: fixed; top: var(--ma-top); right: 0; bottom: 0; width: var(--ma-w); z-index: 9000;
   display: none; flex-direction: column; background: #fff; border-left: 1px solid #e6e4e0;
-  color: #37352f; box-shadow: -10px 0 30px rgba(0,0,0,.10); }
+  color: #37352f; }
 #md-anno-panel.open { display: flex; }
+body.ma-open .md4-steps { padding-right: var(--ma-w); }
 .ap-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px;
   border-bottom: 1px solid #ecebe8; font-size: 13px; }
 .ap-count { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #f0efec; color: #6b6862; }
@@ -386,7 +389,7 @@ _ANNO_HTML = """
   <div class="ap-head"><b>하이라이트 · 메모</b><span class="ap-count">0</span>
     <span class="apop-sp"></span><button class="ap-x" title="닫기 (Esc)">&#10005;</button></div>
   <div class="ap-list"></div>
-  <div class="ap-foot">본문을 드래그하면 그 <b>문장</b>이 원문·번역 양쪽에 표시됩니다 · 눌러서 메모</div>
+  <div class="ap-foot">드래그 = 끌어 둔 그 자리에 · 더블클릭 = 그 <b>문장</b> 통째로 (원문·번역 함께)</div>
 </div>
 <script>
 (function(){
@@ -401,6 +404,10 @@ _ANNO_HTML = """
   var panel = document.getElementById('md-anno-panel');
   if (!bar || !pop || !panel) return;
   var pending = null, editing = null, timer = null;
+  var lastColor = ORDER[0];   // 더블클릭은 색을 안 고르므로 마지막에 쓴 색을 이어 쓴다
+  var dblGuard = false;       // 더블클릭 직후 브라우저가 고른 단어를 드래그로 오해하지 않게
+  var dblTimer = null;        // 세 번째 클릭이 오면 취소할 수 있게 (세 번 클릭 = 문단 선택)
+  var scrollLock = false;     // 우리가 일으킨 스크롤 동안은 닫기 리스너를 쉬게 한다
 
   function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
   function uid(){ return 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -529,15 +536,40 @@ _ANNO_HTML = """
         }
       }
     }
-    for (j = 0; j < items.length; j++){   // 행이 밀렸으면 같은 쪽의 다른 셀에서 문구로 다시 찾는다
+    // 행이 밀렸으면 같은 쪽의 다른 셀에서 다시 찾는다. 다만 **틀린 자리에 눌러앉지 않게** —
+    //  · 앞뒤 문맥까지 맞는 자리가 있으면 그것. 확실하므로 좌표를 고쳐 저장한다.
+    //  · 문구만 맞는 자리가 하나뿐이어도 저장한다.
+    //  · 여럿이면 원래 행에 가장 가까운 곳에 **표시만** 하고 저장하지 않는다 — 짐작으로
+    //    원래 좌표를 덮어쓰면 되돌릴 길이 없다. 정렬이 깨진 폴백 패널(문서 전체가 한 셀)에도
+    //    같은 이유로 저장하지 않는다.
+    for (j = 0; j < items.length; j++){
       for (k = 0; k < items[j].anchors.length; k++){
         var b = items[j].anchors[k]; if (done(b)) continue;
+        var probe = (b.prefix || '') + b.quote + (b.suffix || '');
+        var hits = [], sure = null;
         for (i = 0; i < sc.length; i++){
           if (sc[i].getAttribute('data-side') !== b.side) continue;
-          var p = sc[i].textContent.indexOf(b.quote); if (p < 0) continue;
-          placed.push({it: items[j], an: b, sc: sc[i], s: p, e: p + b.quote.length});
-          b.row = +sc[i].getAttribute('data-row'); b.start = p; b.end = p + b.quote.length;
-          repaired = true; break;
+          var txt = sc[i].textContent, q = txt.indexOf(b.quote);
+          if (q < 0) continue;
+          var row = +sc[i].getAttribute('data-row');
+          if (!sure && probe !== b.quote){
+            var c0 = txt.indexOf(probe);
+            if (c0 >= 0) sure = {sc: sc[i], s: c0 + (b.prefix || '').length, row: row};
+          }
+          hits.push({sc: sc[i], s: q, row: row});
+        }
+        var pick = sure, firm = !!sure;
+        if (!pick && hits.length === 1){ pick = hits[0]; firm = true; }
+        else if (!pick && hits.length > 1){
+          pick = hits[0];
+          for (i = 1; i < hits.length; i++)
+            if (Math.abs(hits[i].row - b.row) < Math.abs(pick.row - b.row)) pick = hits[i];
+        }
+        if (!pick) continue;
+        placed.push({it: items[j], an: b, sc: pick.sc, s: pick.s, e: pick.s + b.quote.length});
+        if (firm && pick.sc.classList.contains('sbs-cell')){
+          b.row = pick.row; b.start = pick.s; b.end = pick.s + b.quote.length;
+          repaired = true;
         }
       }
     }
@@ -559,7 +591,15 @@ _ANNO_HTML = """
     renderPanel();
     if (repaired) save();
   }
-  window.__mdAnnoApply = function(){ setTimeout(applyAll, 0); };
+  window.__mdAnnoApply = function(){
+    // 탭 패널이 keep-alive라, 뷰어 탭이 활성화되기 전에는 .anno-scope가 DOM에 아예 없다.
+    // 한 번만 시도하면 탭을 열었을 때 하이라이트가 안 그려진 채로 남는다 → 잠깐 더 두드린다.
+    var tries = 0;
+    (function attempt(){
+      applyAll();
+      if (!document.querySelector('.anno-scope') && ++tries < 6) setTimeout(attempt, 120 * tries);
+    })();
+  };
 
   // ---- 드래그 → 색 고르기 막대 ----
   function place(el, rect){
@@ -578,6 +618,7 @@ _ANNO_HTML = """
   }
   function clearSel(){ pending = null; bar.classList.remove('open'); }
   function onSelect(){
+    if (dblGuard){ clearSel(); return; }   // 더블클릭이 고른 단어 — 드래그로 치지 않는다
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.rangeCount){ clearSel(); return; }
     var r = sel.getRangeAt(0), sc = scopeOf(r.startContainer);
@@ -595,9 +636,9 @@ _ANNO_HTML = """
     place(bar, r.getBoundingClientRect());
   }
 
-  // 표시는 **문장 단위**다 — 걸친 문장을 통째로 잡고, 짝이 있으면 반대쪽 문장까지 함께.
-  // 그래서 원문에 단 메모가 번역에도 같이 붙는다. 문장을 못 가려내면(표 칸·캡션 등)
-  // 드래그한 범위를 그대로 쓴다 — 표시를 못 하게 만드는 것보다 낫다.
+  // 표시를 만드는 길은 둘이다 —
+  //   드래그   : 끌어 둔 **그 자리**에 (한쪽 컬럼, 글자 단위). 용어 하나만 짚고 싶을 때.
+  //   더블클릭 : 호버로 짝지어 보여 주던 **그 문장 통째로** (원문·번역 양쪽에 같은 색·같은 메모).
   function anchorOf(cell, s, e){
     var txt = cell.textContent;
     return {side: cell.getAttribute('data-side'), row: +cell.getAttribute('data-row'),
@@ -605,44 +646,41 @@ _ANNO_HTML = """
       prefix: txt.slice(Math.max(0, s - CTX), s), suffix: txt.slice(e, e + CTX)};
   }
   function span(list, idx){          // 문장 인덱스 묶음 → 이어진 한 구간
-    if (!idx.length) return null;
+    if (!idx || !idx.length) return null;
     var s = list[idx[0]].s, e = list[idx[0]].e;
     for (var i = 1; i < idx.length; i++){ s = Math.min(s, list[idx[i]].s); e = Math.max(e, list[idx[i]].e); }
     return [s, e];
   }
-  function touched(list, s, e){      // 선택이 걸친 문장 인덱스
-    var out = [], weak = [];
-    for (var i = 0; i < list.length; i++){
-      var ov = Math.min(list[i].e, e) - Math.max(list[i].s, s);
-      if (ov <= 0) continue;
-      // 앞 문장의 마침표 하나만 스친 건 그 문장을 잡은 게 아니다 (드래그 시작점이 흔히 그렇다).
-      // 다만 스친 것밖에 없으면 그거라도 쓴다 — 아무것도 안 잡히는 것보다 낫다.
-      (ov >= 2 ? out : weak).push(i);
-    }
-    return out.length ? out : weak;
+  function at(list, off){            // 그 오프셋을 품은 문장 인덱스
+    for (var i = 0; i < list.length; i++) if (list[i].s <= off && list[i].e > off) return [i];
+    return null;
   }
-  function anchorsFor(scope, s, e){
+  function pairAnchors(scope, pi){   // 짝 인덱스 → 원문·번역 두 앵커
     var P = scope.__pairing;
-    if (P){
-      var isEn = scope === P.enCell, mine = isEn ? P.en : P.ko;
-      var hit = touched(mine, s, e), eIdx = [], kIdx = [], i, j;
-      for (i = 0; i < P.pairs.length; i++){
-        var own = isEn ? P.pairs[i][0] : P.pairs[i][1], on = false;
-        for (j = 0; j < own.length; j++) if (hit.indexOf(own[j]) >= 0) on = true;
-        if (on){ eIdx = eIdx.concat(P.pairs[i][0]); kIdx = kIdx.concat(P.pairs[i][1]); }
-      }
-      var re = span(P.en, eIdx), rk = span(P.ko, kIdx), out = [];
-      if (re) out.push(anchorOf(P.enCell, re[0], re[1]));
-      if (rk) out.push(anchorOf(P.koCell, rk[0], rk[1]));
-      if (out.length) return out;
-    }
-    var solo = sentsOf(scope), h = touched(solo, s, e), r = span(solo, h);   // 한 컬럼만 보일 때
-    return [anchorOf(scope, r ? r[0] : s, r ? r[1] : e)];
+    if (!P || !P.pairs[pi]) return null;
+    var re = span(P.en, P.pairs[pi][0]), rk = span(P.ko, P.pairs[pi][1]), out = [];
+    if (re) out.push(anchorOf(P.enCell, re[0], re[1]));
+    if (rk) out.push(anchorOf(P.koCell, rk[0], rk[1]));
+    return out.length ? out : null;
   }
-  function create(color, withNote){
-    if (!pending) return;
-    var a = {id: uid(), color: color, note: '', created: Date.now() / 1000,
-      anchors: anchorsFor(pending.scope, pending.start, pending.end)};
+  function caretOffset(scope, x, y){  // 화면 좌표 → 셀 평문 오프셋
+    var r = null;
+    if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(x, y);
+    else if (document.caretPositionFromPoint){
+      var p = document.caretPositionFromPoint(x, y);
+      if (p){ r = document.createRange(); r.setStart(p.offsetNode, p.offset); }
+    }
+    return r ? absOffset(scope, r.startContainer, r.startOffset) : -1;
+  }
+  function soloSentence(scope, off){  // 짝을 못 지은 행·한 컬럼만 볼 때 — 그 셀의 문장 하나
+    if (off < 0) return null;
+    var list = sentsOf(scope), r = span(list, at(list, off));
+    return r ? [anchorOf(scope, r[0], r[1])] : null;
+  }
+  function create(color, withNote, anchors){
+    if (!anchors || !anchors.length) return;
+    lastColor = color;
+    var a = {id: uid(), color: color, note: '', created: Date.now() / 1000, anchors: anchors};
     items.push(a);
     var sel = window.getSelection(); if (sel) sel.removeAllRanges();
     clearSel(); applyAll(); flush();
@@ -650,9 +688,35 @@ _ANNO_HTML = """
   }
   bar.addEventListener('mousedown', function(e){ e.preventDefault(); });
   bar.addEventListener('click', function(e){
+    if (!pending) return;
+    var an = [anchorOf(pending.scope, pending.start, pending.end)];   // 드래그 = 끌어 둔 그 자리
     var d = e.target.closest('.ab-dot');
-    if (d){ create(d.getAttribute('data-color'), false); return; }
-    if (e.target.closest('[data-act="note"]')) create('yellow', true);
+    if (d){ create(d.getAttribute('data-color'), false, an); return; }
+    if (e.target.closest('[data-act="note"]')) create(lastColor, true, an);
+  });
+
+  // 더블클릭 = 그 문장에 바로 메모 (호버로 보고 있던 그 짝 그대로)
+  document.addEventListener('dblclick', function(e){
+    if (!e.target.closest) return;
+    var sc = scopeOf(e.target); if (!sc) return;
+    dblGuard = true; setTimeout(function(){ dblGuard = false; }, 400);
+    var sel = window.getSelection(); if (sel) sel.removeAllRanges();   // 더블클릭이 고른 단어는 버린다
+    clearSel();
+    var m = e.target.closest('mark.md-anno');
+    if (m){   // 이미 표시된 곳 — 새로 만들지 않고 그 메모를 연다
+      var ids = (m.getAttribute('data-ids') || '').split(' ').filter(Boolean);
+      if (ids.length) openPop(ids[ids.length - 1], m.getBoundingClientRect());
+      return;
+    }
+    var sp = e.target.closest('[data-pair]');
+    var an = sp ? pairAnchors(sc, +sp.getAttribute('data-pi')) : null;
+    if (!an) an = soloSentence(sc, caretOffset(sc, e.clientX, e.clientY));
+    // 곧바로 만들지 않고 아주 잠깐 기다린다 — 세 번째 클릭(문단 선택)이나 더블클릭-드래그가
+    // 이어지면 물러야 하기 때문. 메모 칸이 열리는 체감에는 차이가 없다.
+    if (an) dblTimer = setTimeout(function(){ dblTimer = null; create(lastColor, true, an); }, 240);
+  });
+  document.addEventListener('mousemove', function(e){   // 더블클릭 후 드래그로 범위를 늘리는 중
+    if (dblTimer && e.buttons){ clearTimeout(dblTimer); dblTimer = null; dblGuard = false; }
   });
 
   // ---- 하이라이트 클릭 → 메모 카드 ----
@@ -692,7 +756,7 @@ _ANNO_HTML = """
   pop.addEventListener('click', function(e){
     var a = find(editing); if (!a) return;
     var d = e.target.closest('.ab-dot');
-    if (d){ a.color = d.getAttribute('data-color'); applyAll(); flush(); openPop(a.id); return; }
+    if (d){ a.color = lastColor = d.getAttribute('data-color'); applyAll(); flush(); openPop(a.id); return; }
     if (e.target.closest('.apop-del')){ closePop(); remove(a.id); }
   });
   pop.addEventListener('input', function(e){
@@ -746,15 +810,24 @@ _ANNO_HTML = """
     for (var i = 0; i < ms.length; i++){
       ms[i].classList.remove('md-anno-flash'); void ms[i].offsetWidth; ms[i].classList.add('md-anno-flash');
     }
-    setTimeout(function(){ openPop(id); }, 420);
+    afterScroll(function(){ openPop(id); });
   });
+  // 'open'은 여러 경로에서 붙었다 뗀다(버튼·✕·Esc·챗봇 서랍이 열릴 때). 한 곳에서 관찰해
+  // body 클래스를 맞춰야 본문 자리 비우기가 어느 경로로 닫아도 따라온다.
+  function syncBody(){ document.body.classList.toggle('ma-open', panel.classList.contains('open')); }
+  function syncTop(){
+    var h = document.querySelector('.q-header');
+    document.documentElement.style.setProperty(
+      '--ma-top', (h ? Math.max(0, h.getBoundingClientRect().bottom) : 0) + 'px');
+  }
+  window.addEventListener('resize', syncTop);
+  syncTop();
+  if (window.MutationObserver)
+    new MutationObserver(syncBody).observe(panel, {attributes: true, attributeFilter: ['class']});
+  syncBody();
   window.__mdAnnoTogglePanel = function(){
     panel.classList.toggle('open');
-    if (panel.classList.contains('open')){
-      var h = document.querySelector('.q-header');
-      panel.style.top = (h ? Math.max(0, h.getBoundingClientRect().bottom) : 0) + 'px';
-      renderPanel();
-    }
+    if (panel.classList.contains('open')){ syncTop(); renderPanel(); }
   };
 
   // ---- 닫기·정리 ----
@@ -768,13 +841,20 @@ _ANNO_HTML = """
     if (pop.classList.contains('open')) closePop();
   }, true);
   document.addEventListener('click', function(e){
+    if (e.detail >= 3 && dblTimer){          // 세 번 클릭 = 문단 선택. 더블클릭이 예약한 표시를 물린다
+      clearTimeout(dblTimer); dblTimer = null; dblGuard = false;
+      setTimeout(onSelect, 0);               // 그 선택은 드래그로 인정 — 색 막대를 띄운다
+      return;
+    }
+    var sel = window.getSelection();          // 하이라이트 안을 드래그한 직후라면 색 막대에 양보한다
+    if (sel && !sel.isCollapsed && scopeOf(sel.anchorNode)) return;
     var m = e.target.closest ? e.target.closest('mark.md-anno') : null;
     if (!m || e.target.closest('a')) return;   // 인용 링크 클릭은 원래 동작 그대로
     var ids = (m.getAttribute('data-ids') || '').split(' ').filter(Boolean);
     if (ids.length) openPop(ids[ids.length - 1], m.getBoundingClientRect());
   });
   document.addEventListener('scroll', function(e){
-    if (pop.contains(e.target) || panel.contains(e.target)) return;
+    if (scrollLock || pop.contains(e.target) || panel.contains(e.target)) return;
     clearSel(); if (pop.classList.contains('open')) closePop();
   }, true);
   document.addEventListener('keydown', function(e){
@@ -805,20 +885,34 @@ _ANNO_HTML = """
 
   // 문장 끝처럼 보이지만 아닌 것들: et al. · e.g. · 0.5 · 3.1 · 이니셜(A. Jelson) ·
   // 괄호 안(인용 덩어리 [3, Adams et al., 2022]) · 마침표 뒤가 소문자로 이어지는 경우.
-  var ABBR = /(?:e\\.g|i\\.e|cf|vs|etc|al|Fig|Figs|Eq|Eqs|Sec|Secs|Tab|No|Dr|Mr|Mrs|Ms|Prof|St|approx|resp|Ref|Refs|pp|Vol|Ch|Inc|Ltd|Univ)\\.$/i;
+  // ABBR 앞의 "줄머리 또는 공백·여는괄호" 조건은 꼭 필요하다 — 없으면 "critical." "systems." 처럼
+  // al·ch·ms로 끝나는 흔한 낱말이 죄다 약어로 잡혀 문장이 안 잘린다.
+  var ABBR = /(?:^|[\\s(\\[\\u201c"'])(?:e\\.g|i\\.e|cf|vs|etc|al|Fig|Figs|Eq|Eqs|Sec|Secs|Tab|No|Dr|Mr|Mrs|Ms|Prof|St|approx|resp|Ref|Refs|pp|Vol|Ch|Inc|Ltd|Univ)\\.$/i;
   var CLOSERS = '.!?\\u2026"\\u2019\\u201d\\')]';
   function trimRange(txt, s, e){
     while (s < e && /\\s/.test(txt.charAt(s))) s++;
     while (e > s && /\\s/.test(txt.charAt(e - 1))) e--;
     return e > s ? {s: s, e: e} : null;
   }
-  function sentences(txt, s0, e0){
-    var out = [], start = s0, depth = 0, i, r;
+  // 짝이 맞는 괄호 안쪽만 표시한다. 짝 없이 열린 괄호 하나가 남은 문단(추출이 흔히 그렇다)에서
+  // 그 뒤 전체가 "괄호 안"이 돼 한 문장으로 뭉치던 것을 막는다.
+  function bracketMask(txt, s0, e0){
+    var n = e0 - s0, delta = [], stack = [], mask = [], run = 0, i;
+    for (i = 0; i <= n; i++) delta[i] = 0;
     for (i = s0; i < e0; i++){
       var c = txt.charAt(i);
-      if (c === '(' || c === '[' || c === '{'){ depth++; continue; }
-      if (c === ')' || c === ']' || c === '}'){ depth = Math.max(0, depth - 1); continue; }
-      if (depth > 0 || '.!?\\u2026'.indexOf(c) < 0) continue;
+      if (c === '(' || c === '[' || c === '{') stack.push(i);
+      else if (c === ')' || c === ']' || c === '}'){
+        if (stack.length){ var o = stack.pop(); delta[o - s0]++; delta[i - s0 + 1]--; }
+      }
+    }
+    for (i = 0; i < n; i++){ run += delta[i]; mask[i] = run > 0; }
+    return mask;
+  }
+  function sentences(txt, s0, e0){
+    var out = [], start = s0, i, r, inBracket = bracketMask(txt, s0, e0);
+    for (i = s0; i < e0; i++){
+      if (inBracket[i - s0] || '.!?\\u2026'.indexOf(txt.charAt(i)) < 0) continue;
       var j = i + 1;
       while (j < e0 && CLOSERS.indexOf(txt.charAt(j)) >= 0) j++;   // 닫는 따옴표·괄호까지 문장에 포함
       if (j < e0 && !/\\s/.test(txt.charAt(j))) continue;          // 0.5 · 3.1 처럼 붙어 있으면 문장 끝이 아님
@@ -901,18 +995,19 @@ _ANNO_HTML = """
     // 표시를 문장 단위로 잡을 때 이 짝 정보를 쓴다 (원문에 그으면 번역 쪽 문장도 함께)
     en.__pairing = ko.__pairing = {en: E, ko: K, pairs: pairs, enCell: en, koCell: ko};
     var row = en.getAttribute('data-row'), segE = [], segK = [];
-    function push(dst, src, idx, id, solo){
-      for (var z = 0; z < idx.length; z++) dst.push({s: src[idx[z]].s, e: src[idx[z]].e, id: id, solo: solo});
+    function push(dst, src, idx, id, solo, pi){
+      for (var z = 0; z < idx.length; z++) dst.push({s: src[idx[z]].s, e: src[idx[z]].e, id: id, solo: solo, pi: pi});
     }
     for (i = 0; i < pairs.length; i++){
       var id = row + '-' + i, solo = !pairs[i][0].length || !pairs[i][1].length;
-      push(segE, E, pairs[i][0], id, solo);
-      push(segK, K, pairs[i][1], id, solo);
+      push(segE, E, pairs[i][0], id, solo, i);
+      push(segK, K, pairs[i][1], id, solo, i);
     }
     function make(seg){
       var sp = document.createElement('span');
       sp.className = 'sent';
       sp.setAttribute('data-pair', seg.id);
+      sp.setAttribute('data-pi', seg.pi);      // 짝 인덱스 — 더블클릭이 이 짝을 통째로 집는다
       if (seg.solo) sp.setAttribute('data-solo', '1');    // 짝을 못 찾은 문장 — 옅은 회색으로 구분
       return sp;
     }
@@ -920,6 +1015,22 @@ _ANNO_HTML = """
     wrapRanges(ko, segK, make);
   }
 
+  // 부드러운 스크롤이 **끝난 뒤에** fn을 부른다. 애니메이션 도중에 메모 카드를 열면,
+  // 스크롤을 감시하는 닫기 리스너가 그 카드를 곧바로 닫아 버린다(먼 곳의 메모일수록 확실히).
+  // 그동안 scrollLock을 세워 닫기 리스너 자체도 쉬게 한다.
+  function afterScroll(fn){
+    var quiet = null, hard = null;
+    function fire(){
+      clearTimeout(quiet); clearTimeout(hard);
+      document.removeEventListener('scroll', bump, true);
+      scrollLock = false; fn();
+    }
+    function bump(){ clearTimeout(quiet); quiet = setTimeout(fire, 130); }
+    scrollLock = true;
+    document.addEventListener('scroll', bump, true);
+    quiet = setTimeout(fire, 130);
+    hard = setTimeout(fire, 2000);   // 스크롤이 아예 안 일어난 경우까지
+  }
   function setPair(id){
     if (id === hoverPair) return;
     var on = document.querySelectorAll('.sent-hl'), i;
@@ -1493,6 +1604,104 @@ def _review_url(root: Path) -> str:
     return f"/review?wd={quote(str(Path(root).resolve()))}"
 
 
+# 창 크롬 — 헤더의 논문 탭 + '새 창으로' 링크. 고정한 논문이 여러 편이면 탭 줄이 가로로
+# 스크롤한다(헤더 높이는 그대로 — 읽는 자리를 빼앗지 않는다).
+# 단계 탭 이름 — 이름으로 '마지막에 보던 단계'를 되찾으므로 한 곳에서만 정한다.
+_STEP_NAMES = ("1 · 변환", "2 · 번역", "3 · 뷰어")
+
+_CHROME_CSS = """
+/* 헤더 한 줄 — 논문 탭은 아래 끝에 물리고, 그림자를 없애야 활성 탭이 본문으로 이어져 보인다. */
+.md4-header { min-height: 44px; padding: 0 8px 0 2px !important; box-shadow: none !important; gap: 4px; }
+.md4-hdr-back { margin-bottom: 6px; }
+.md4-tabstrip { max-width: 52vw; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.md4-tabstrip::-webkit-scrollbar { height: 0; }
+.md4-tabtools { padding-bottom: 5px; opacity: .9; }
+/* 단계 전환 — 밑줄 탭이 아니라 눌린 알약 안의 세그먼트. 아이콘 없이 글자만이라 얇다. */
+.md4-seg { min-height: 28px; margin-bottom: 7px; border-radius: 9px; padding: 2px;
+  background: rgba(0,0,0,.14); flex: 0 0 auto; }
+.md4-seg .q-tabs__content { min-height: 0; }
+.md4-seg .q-tab { min-height: 24px; padding: 0 11px; border-radius: 7px; opacity: .82;
+  font-size: 12px; font-weight: 500; }
+.md4-seg .q-tab--active { background: rgba(255,255,255,.96); color: #37352f; opacity: 1; font-weight: 600; }
+.md4-seg .q-tab__indicator, .md4-seg .q-tabs__arrow { display: none; }
+/* 탭 하나 — 위만 둥근 사각형. 비활성은 헤더에 잠긴 색, 활성은 본문과 같은 흰 바닥. */
+.md4-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  max-width: 250px; min-width: 0; border-radius: 8px 8px 0 0; cursor: pointer;
+  font-size: 12.5px; line-height: 1; color: rgba(255,255,255,.86);
+  background: rgba(255,255,255,.13); transition: background .12s ease, color .12s ease; }
+.md4-tab + .md4-tab { margin-left: 2px; }
+.md4-tab:hover { background: rgba(255,255,255,.24); color: #fff; }
+.md4-tab.on { background: #fff; color: #37352f; font-weight: 600; cursor: default; }
+.md4-tab.on:hover { background: #fff; }
+.md4-tab-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.md4-tab-ico { flex: 0 0 auto; opacity: .55; }
+.md4-tab.on .md4-tab-ico { opacity: .5; }
+/* × 는 평소엔 자리만 비워 두고, 그 탭에 마우스가 올라올 때만 보인다 (Notion·브라우저 탭과 같게) */
+.md4-tab-x { flex: 0 0 14px; width: 14px; height: 14px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: 4px; font-size: 9px; opacity: 0; transition: opacity .12s ease; }
+.md4-tab:hover .md4-tab-x { opacity: .75; }
+.md4-tab-x:hover { opacity: 1 !important; background: rgba(0,0,0,.16); }
+.md4-tab.on .md4-tab-x:hover { background: rgba(0,0,0,.09); }
+.md4-newwin { display: inline-flex; align-items: center; padding: 5px; border-radius: 50%;
+  color: #9e9e9e; text-decoration: none; flex: 0 0 auto; }
+.md4-newwin:hover { background: rgba(0,0,0,.07); color: #616161; }
+.md4-newwin.dark { color: #fff; }
+.md4-newwin.dark:hover { background: rgba(255,255,255,.16); }
+"""
+
+
+async def _spawn_window(root: Path, state: dict, title: str) -> None:
+    """앱 창 모드에서 이 논문을 형제 앱 창으로 띄운다 (서버는 그대로 하나).
+
+    프로세스를 띄운 뒤 잠깐 지켜보고 나서 성공을 알린다 — 바로 죽는 경우(그 인터프리터에
+    pywebview가 없거나 웹뷰 백엔드가 없는 환경)에 '열었습니다'라고 거짓말하지 않기 위해서다.
+    """
+    from nicegui import ui
+
+    from md4paper.ui import window as extra_window
+
+    url = f"http://127.0.0.1:{state.get('port') or 8080}{_review_url(root)}"
+    if extra_window.already_open(url):
+        # 같은 논문을 두 창에서 고치면 하이라이트·메모는 나중에 저장한 쪽이 앞을 덮는다.
+        ui.notify("이 논문은 이미 다른 창에 떠 있습니다.", type="info", timeout=2000)
+        return
+    proc = extra_window.open_new(url, title or "md4paper")
+    if proc is None:
+        ui.notify("새 창을 띄우지 못했습니다 — 앱 창 의존성(pywebview)을 확인하세요.", type="negative")
+        return
+    await asyncio.sleep(1.2)
+    code = extra_window.died(proc)
+    if code is None:
+        ui.notify("새 창에서 열었습니다.", type="positive", timeout=1400)
+    else:
+        ui.notify(f"새 창이 바로 닫혔습니다 (종료 코드 {code}) — 앱 창 의존성(pywebview)을 확인하세요.",
+                  type="negative", timeout=6000)
+
+
+def new_window_button(root: Path, state: dict, title: str = "", *,
+                      dark: bool = False, small: bool = False) -> None:
+    """이 논문을 새 창으로 여는 단추 — 논문 둘을 나란히 놓고 볼 때. dark는 헤더(파란 배경)용.
+
+    앱 창 모드에서는 웹뷰 프로세스를 하나 더 띄운다(§ui/window.py). 브라우저 모드에서는 새 탭인데,
+    서버를 왕복해 window.open을 부르면 사용자 제스처가 끊겨 팝업 차단에 걸리므로 **진짜 링크**
+    (`<a target="_blank">`)를 그린다 — 브라우저가 자기 방식으로 새 탭·새 창을 연다.
+    """
+    from nicegui import ui
+
+    tip = "새 창으로 열기 — 두 논문을 나란히 볼 때"
+    if desktop.active():
+        ui.button(icon="open_in_new", color=None,
+                  on_click=lambda: _spawn_window(root, state, title)) \
+            .props("flat dense round " + ("text-color=white" if dark else "color=grey")
+                   + (" size=sm" if small else "")).tooltip(tip)
+        return
+    link = ui.link(target=_review_url(root), new_tab=True) \
+        .classes("md4-newwin" + (" dark" if dark else ""))
+    with link:
+        ui.icon("open_in_new", size="17px" if small else "20px")
+    link.tooltip(tip)
+
+
 def _relative_time(ts: float) -> str:
     """수정 시각 → '방금 전 / N분 전 / N시간 전 / N일 전'."""
     diff = max(0, int(time.time() - ts))
@@ -1505,27 +1714,91 @@ def _relative_time(ts: float) -> str:
     return f"{diff // 86400}일 전"
 
 
-def build(ctrl: UIController) -> None:
-    """현재 페이지 컨텍스트에 UI를 구성한다."""
+def build(ctrl: UIController, state: dict | None = None) -> None:
+    """현재 페이지 컨텍스트에 UI를 구성한다. state는 서버 수명 상태(작업 폴더·포트 — 헤더 탭용)."""
     from nicegui import ui
 
+    state = state if state is not None else {}
     m = ctrl.manifest
     tok = wd_token(ctrl.wd.root)  # 이미지·PDF URL에 넣는 논문별 토큰 (캐시 충돌 방지)
+    _title = m.title or ctrl.wd.root.name
 
-    with ui.header().classes("items-center justify-between q-py-none"):
-        with ui.row().classes("items-center gap-2 no-wrap min-w-0"):
-            # color(kwarg)는 '배경색'이라 흰 상자가 된다 → 배경은 flat(투명), 글자는 text-color=white
-            ui.button("다른 논문", icon="arrow_back", color=None,
-                      on_click=lambda: ui.navigate.to("/home")).props("flat dense no-caps text-color=white") \
-                .tooltip("업로드 / 최근 작업으로")
-            _title = m.title or ctrl.wd.root.name
-            ui.label(_title).classes("text-base font-bold").style(
-                "max-width:46vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap").tooltip(_title)
-        # 단계 탭을 헤더 오른쪽에 (변환 ↔ 번역 ↔ 뷰어)
-        with ui.tabs().props("dense") as steps:
-            step_convert = ui.tab("1 · 변환", icon="article")
-            step_translate = ui.tab("2 · 번역", icon="translate")
-            step_sbs = ui.tab("3 · 뷰어", icon="vertical_split")
+    ui.add_css(_CHROME_CSS)
+    find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 — 앱 창에는 브라우저 찾기 바가 없다
+    scroll_memory.install(tok)  # 읽던 자리(단계별 스크롤) 기억 — 탭으로 오가도 그 자리로
+
+    @ui.refreshable
+    def paper_tabs() -> None:
+        """헤더의 논문 탭 — 고정한 논문들 + (고정 안 했으면) 지금 보고 있는 논문.
+
+        탭은 페이지 이동이다(한 창에 한 논문). 나란히 보려면 옆의 ⧉로 새 창을 띄운다.
+        """
+        here = str(ctrl.wd.root.resolve())
+        pins = pinned_workdirs(state["upload_dir"]) if state.get("upload_dir") else []
+        pinned_here = is_pinned(ctrl.wd.root)
+        # 작업 폴더 밖의 논문은 목록에 없어도 고정될 수 있다 → 탭 줄에 자기 자리를 만들어 준다.
+        if pinned_here and not any(str(pin["root"].resolve()) == here for pin in pins):
+            pins = [*pins, {"root": ctrl.wd.root, "title": _title, "pinned_at": 0.0}]
+        with ui.row().classes("items-end gap-0 no-wrap md4-tabstrip"):
+            if not pinned_here:  # 지금 보는 논문은 고정 전이라도 '현재 탭'으로 보인다
+                _tab_chip(_title, ctrl.wd.root, active=True)
+            for pin in pins:
+                _tab_chip(pin["title"], pin["root"],
+                          active=str(pin["root"].resolve()) == here, pinned=True)
+        with ui.row().classes("items-center gap-0 no-wrap md4-tabtools"):
+            # 고정 토글 — 눌러 두면 어느 논문을 보다가도 헤더 탭에서 한 번에 돌아온다
+            ui.button(icon="push_pin", color=None, on_click=toggle_pin) \
+                .props(f"flat dense round size=sm text-color={'amber-4' if pinned_here else 'white'}") \
+                .tooltip("탭에서 고정 해제" if pinned_here else "이 논문을 탭에 고정")
+            new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
+
+    def _tab_chip(title: str, root: Path, active: bool = False, pinned: bool = False) -> None:
+        """논문 탭 하나 — 요소를 직접 짓는다.
+
+        Quasar chip으로 그리면 알약 모양·배지 느낌이 나서 '탭'으로 읽히지 않는다. 위쪽만 둥근
+        사각형 + 활성 탭은 본문과 같은 흰 바닥이라야 헤더에 물려 있는 탭처럼 보인다.
+        """
+        tab = ui.element("div").classes("md4-tab" + (" on" if active else ""))
+        with tab:
+            ui.icon("description", size="14px").classes("md4-tab-ico")
+            ui.label(title).classes("md4-tab-t")
+            if pinned:  # 고정한 논문만 닫을 수 있다 (× = 고정 해제, 논문은 그대로)
+                x = ui.element("span").classes("md4-tab-x")
+                with x:
+                    ui.html("&#10005;")
+                x.on("click.stop", lambda _, r=root: unpin(r))
+                x.tooltip("탭에서 내리기 (고정 해제)")
+        tab.tooltip(title if active else f"{title}\n클릭하면 이 논문으로 이동")
+        if not active:
+            tab.on("click", lambda _, r=root: ui.navigate.to(_review_url(r)))
+
+    def toggle_pin() -> None:
+        now_pinned = is_pinned(ctrl.wd.root)
+        if not set_pinned(ctrl.wd.root, not now_pinned):
+            ui.notify("고정 처리 실패 (경로 확인).", type="negative")
+            return
+        paper_tabs.refresh()
+        ui.notify("탭 고정을 해제했습니다." if now_pinned else "헤더 탭에 고정했습니다.",
+                  type="positive", timeout=1400)
+
+    def unpin(root: Path) -> None:
+        set_pinned(root, False)
+        paper_tabs.refresh()
+
+    # 헤더는 한 줄이다 — 논문 탭은 아래 끝에 물려(활성 탭이 본문 흰 바닥과 맞닿아 '탭'으로 읽힌다),
+    # 단계(변환/번역/뷰어)는 오른쪽의 작은 세그먼트 컨트롤로. 단계는 '한 논문 안의 화면 전환'이라
+    # 논문 탭과 같은 모양이면 안 되고, 아이콘·2단 라벨로 헤더 높이를 먹지 않아야 한다.
+    with ui.header().classes("md4-header items-end no-wrap"):
+        # color(kwarg)는 '배경색'이라 흰 상자가 된다 → 배경은 flat(투명), 글자는 text-color=white
+        ui.button(icon="arrow_back", color=None, on_click=lambda: ui.navigate.to("/home")) \
+            .props("flat dense round text-color=white").classes("md4-hdr-back") \
+            .tooltip("다른 논문 — 업로드 / 최근 작업으로")
+        paper_tabs()
+        ui.space()
+        with ui.tabs().props("dense no-caps indicator-color=transparent").classes("md4-seg") as steps:
+            step_convert = ui.tab(_STEP_NAMES[0])
+            step_translate = ui.tab(_STEP_NAMES[1])
+            step_sbs = ui.tab(_STEP_NAMES[2])
 
     # 변환 탭 프리뷰와 뷰어는 같은 en.md를 읽는다 → 한쪽만 갱신하면 인용 표기·레벨 변경이 어긋난다.
     # 뷰어는 그리드를 통째로 다시 만들어 무거우므로, 바뀌면 표시만 해 두고 탭을 옮길 때 한 번 갱신한다.
@@ -1536,9 +1809,16 @@ def build(ctrl: UIController) -> None:
         viewer_stale["on"] = True
 
     def on_step_change(_=None) -> None:  # noqa: ANN001 — NiceGUI 값 변경 이벤트
+        # 어느 단계를 보고 있었는지 논문별로 적어 둔다 — 헤더 탭으로 돌아오면 그 단계로 (스크롤은
+        # 창 쪽 sessionStorage가 기억한다, §ui/scroll_memory.py).
+        if steps.value in _STEP_NAMES:
+            state.setdefault("step_by_root", {})[str(ctrl.wd.root.resolve())] = steps.value
         if viewer_stale["on"]:
             viewer_stale["on"] = False
             side_by_side.refresh()
+        # 탭 패널이 keep-alive라, 뷰어가 안 보이는 동안 다시 그려졌으면 그때는 셀이 DOM에 없어
+        # 하이라이트가 안 얹힌다. 탭을 옮길 때마다 한 번 더 얹으라고 시킨다(없으면 무시된다).
+        ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")
 
     steps.on_value_change(on_step_change)
 
@@ -2053,7 +2333,7 @@ def build(ctrl: UIController) -> None:
             ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
-                .tooltip("하이라이트 · 메모 목록 — 본문을 드래그하면 그 문장이 원문·번역 양쪽에 표시됩니다")
+                .tooltip("하이라이트 · 메모 목록 — 드래그하면 그 자리에, 문장을 더블클릭하면 원문·번역 양쪽에")
             ui.button(icon="forum", on_click=lambda: ui.run_javascript(
                 "window.__mdChatTogglePanel && window.__mdChatTogglePanel()")).props(
                 "flat dense round color=grey-7").tooltip("논문에 질문하기 — 답의 근거 문단을 원문·번역으로 확인")
@@ -2066,7 +2346,10 @@ def build(ctrl: UIController) -> None:
                 .props("flat dense no-caps color=primary").tooltip("하이라이트·메모를 마크다운으로 저장")
 
     # 번역 진행(섹션별) — 워커 스레드가 콜백으로 쓰고, UI 타이머가 폴링해 트리 아이콘을 갱신
-    translate_state = {"status": {}, "done": 0, "total": 0, "active": False, "failures": {}}
+    # failures는 지난 실행 것을 status.json에서 되살린다 — 메모리에만 두면 리뷰 화면을 다시 열었을 때
+    # "왜 이 섹션이 영어로 남았는지"가 사라진다(실패 청크는 캐시에 없어 사후 재구성도 불가능).
+    translate_state = {"status": {}, "done": 0, "total": 0, "active": False,
+                       "failures": (ctrl.wd.load_status().get("translate") or {}).get("failures", {})}
     # 섹션 트리 노드에 직접 붙이는 상태 아이콘 (Quasar QTree의 node.icon/iconColor).
     # 헤더 슬롯을 덮어쓰지 않으므로 번역 선택 체크박스가 그대로 살아 있다.
     # translating은 primary 색 → CSS에서 .q-tree__icon.text-primary만 회전(스피너처럼). done/실패는 정지.
@@ -2803,13 +3086,16 @@ def build(ctrl: UIController) -> None:
 
     # ===== 단계 패널 (탭 컨트롤은 헤더에) =====
     # 번역까지 끝난 논문은 뷰어를, 아니면 변환 탭을 기본으로 연다.
-    _start_tab = step_sbs if ctrl.ko_markdown() else step_convert
+    # 마지막으로 보던 단계로 돌아간다. 처음 여는 논문은 번역이 있으면 뷰어, 없으면 변환부터.
+    _seen = state.get("step_by_root", {}).get(str(ctrl.wd.root.resolve()))
+    _default_tab = step_sbs if ctrl.ko_markdown() else step_convert
+    _start_tab = _seen if _seen in _STEP_NAMES else _default_tab
     with ui.tab_panels(steps, value=_start_tab).classes("w-full md4-steps").props("keep-alive"):  # md4-steps: 챗봇이 열리면 이 폭이 줄어 본문이 덮이지 않는다
         # ---------- 1단계: 변환 ----------
         with ui.tab_panel(step_convert).classes("p-0"):
             with ui.splitter(value=46).classes("w-full").style("height: calc(100vh - 108px)") as sp1:
                 with sp1.before:
-                    with ui.column().classes(_panel).style(_scroll):
+                    with ui.column().classes(_panel + " md4-scroll").style(_scroll):
                         ui.button("레이아웃 자동 수정", icon="auto_fix_high", on_click=open_fix_dialog) \
                             .props("outline no-caps color=primary").classes("w-full").tooltip(
                                 "쪼개진 헤더·깨진 수식·끊긴 문단을 AI가 문서 전체에서 찾아 고칩니다")
@@ -2840,10 +3126,10 @@ def build(ctrl: UIController) -> None:
         with ui.tab_panel(step_translate).classes("p-0"):
             with ui.splitter(value=32).classes("w-full").style("height: calc(100vh - 108px)") as sp2:
                 with sp2.before:
-                    with ui.column().classes(_panel).style(_scroll):
+                    with ui.column().classes(_panel + " md4-scroll").style(_scroll):
                         translate_settings()
                 with sp2.after:
-                    with ui.column().classes("p-3 w-full").style(_scroll):
+                    with ui.column().classes("p-3 w-full md4-scroll").style(_scroll):
                         with ui.row().classes("items-center w-full no-wrap"):
                             with ui.tabs() as ttabs:
                                 tab_gloss = ui.tab("용어집 · 번역 실행")
@@ -2885,6 +3171,7 @@ _HOME_CSS = """
 @keyframes md4spin { to { transform: rotate(360deg); } }
 .md4-recent-new { box-shadow: inset 4px 0 0 #21ba45; }
 .md4-new-dot { width: 8px; height: 8px; border-radius: 50%; background: #2383e2; flex: 0 0 8px; }
+.md4-pinchip { margin: 2px 0 !important; font-size: 12.5px; max-width: 100%; }
 @media (prefers-color-scheme: dark) {
   .md4-hint { border-color: #464646; }
   .md4-dropwrap:hover .md4-hint { background: rgba(35,131,226,.14); }
@@ -3199,6 +3486,9 @@ def build_home(state: dict) -> None:
         return state["upload_dir"]
 
     ui.add_css(_HOME_CSS)
+    ui.add_css(_CHROME_CSS)  # 카드의 '새 창으로' 링크
+    scroll_memory.install("home")  # 논문을 열었다 돌아와도 목록의 그 자리
+    find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 (앱 창에는 브라우저 찾기 바가 없다)
     state.setdefault("queue", [])
     state.setdefault("recent_new", {})
 
@@ -3228,13 +3518,47 @@ def build_home(state: dict) -> None:
         name, data = ctrl.export_zip(which, config.resolve_export_target())
         await desktop.deliver(name, data)
 
+    def toggle_pin(item: dict) -> None:
+        """목록 위 '고정한 논문' 줄 + 리뷰 헤더 탭에 올리기/내리기 (status.json에만 표시)."""
+        if not set_pinned(item["root"], not item["pinned"]):
+            ui.notify("고정 처리 실패 (경로 확인).", type="negative")
+            return
+        pinned_strip.refresh()
+        recent_list.refresh()
+
+    def unpin_root(root: Path) -> None:
+        set_pinned(root, False)
+        pinned_strip.refresh()
+        recent_list.refresh()
+
+    @ui.refreshable
+    def pinned_strip() -> None:
+        """고정한 논문을 목록 맨 위 칩 한 줄로 — 논문이 쌓여도 자주 보는 건 한 번에 열린다."""
+        pins = pinned_workdirs(ws())
+        if not pins:
+            return
+        with ui.row().classes("items-center gap-1 w-full q-pb-xs").style("flex-wrap:wrap"):
+            ui.icon("push_pin", size="15px").classes("text-primary")
+            for pin in pins:
+                title = pin["title"]
+                short = title if len(title) <= 34 else title[:33] + "…"
+                chip = ui.chip(short, icon="article", color="primary", text_color="white",
+                               removable=True,
+                               on_value_change=lambda e, r=pin["root"]: None if e.value else unpin_root(r))
+                chip.props("dense clickable").classes("md4-pinchip") \
+                    .tooltip(f"{title}\n클릭하면 열기 · ×로 고정 해제")
+                chip.on("click", lambda _, r=pin["root"]: open_wd(r))
+
     def hide_paper(item: dict, hidden: bool = True) -> None:
         """목록 표시만 끄기/되돌리기 (파일은 그대로 — status.json에 표시)."""
         if not set_hidden(item["root"], hidden):
             ui.notify("처리 실패 (경로 확인).", type="negative")
             return
+        if hidden:
+            set_pinned(item["root"], False)  # 숨긴 논문이 고정 칩·헤더 탭에 남아 있으면 앞뒤가 안 맞는다
         selected.discard(str(item["root"]))  # 숨기면 일괄 다운로드 선택에서도 빠진다
         sel_bar.refresh()
+        pinned_strip.refresh()
         recent_list.refresh()
         ui.notify("목록에서 숨겼습니다 — 파일은 그대로입니다." if hidden else "목록에 다시 표시합니다.",
                   type="positive")
@@ -3263,6 +3587,7 @@ def build_home(state: dict) -> None:
                 if ok:
                     selected.discard(str(item["root"]))
                     sel_bar.refresh()
+                    pinned_strip.refresh()
                     recent_list.refresh()
                     ui.notify("삭제됨", type="positive")
                 else:
@@ -3415,9 +3740,16 @@ def build_home(state: dict) -> None:
                                 ui.badge("영어 변환", color="blue").props("outline")
                             if unopened:
                                 ui.badge("NEW", color="primary")
+                            if r["pinned"]:
+                                ui.badge("고정", color="primary").props("outline")
                             if r["hidden"]:
                                 ui.badge("숨김", color="grey").props("outline")
                             ui.label(_relative_time(r["mtime"])).classes("text-xs text-gray-400")
+                    # 고정 = 목록 맨 위 칩 + 리뷰 헤더 탭. 자주 오가는 논문을 매번 찾지 않도록.
+                    ui.button(icon="push_pin", on_click=lambda _, item=r: toggle_pin(item)) \
+                        .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-5")) \
+                        .classes("shrink-0").tooltip("고정 해제" if r["pinned"] else "위에 고정 (헤더 탭에도)")
+                    new_window_button(r["root"], state, r["title"], small=True)
                     # 번역된 문서는 원문(EN)·번역(KO)을 각각 버튼으로. 미번역은 영어 하나만.
                     ui.button("EN", icon="download", on_click=lambda _, root=r["root"]: download_zip(root, "en")) \
                         .props("flat dense no-caps size=sm color=grey").classes("shrink-0") \
@@ -3538,7 +3870,7 @@ def build_home(state: dict) -> None:
 
     with ui.splitter(value=42).classes("w-full").style("height: calc(100vh - 72px)") as sp:
         # ---- 왼쪽: 업로드 · 설정 · 진행상황 ----
-        with sp.before, ui.column().classes("p-4 gap-3 w-full").style("height:100%; overflow-y:auto"):
+        with sp.before, ui.column().classes("p-4 gap-3 w-full md4-scroll").style("height:100%; overflow-y:auto"):
             _kstat = config.key_status()
             if not any(_kstat.values()):
                 ui.label("⚠ AI 키가 없어 참고문헌 정리·번역 기능이 꺼져 있습니다 — 'AI 설정'에서 키를 넣으세요.") \
@@ -3713,7 +4045,7 @@ def build_home(state: dict) -> None:
 
             # 저장 위치 — 변환한 논문(영어·한국어 마크다운)이 쌓일 폴더 + 작업 폴더
             build_location_settings(
-                state, lambda: (dropzone_caption.refresh(), recent_list.refresh()))
+                state, lambda: (dropzone_caption.refresh(), pinned_strip.refresh(), recent_list.refresh()))
 
             if not backend_ready:
                 ui.label("⚠ 추출 엔진(docling)이 설치되지 않았습니다. `uv sync`로 설치하세요 — "
@@ -3735,7 +4067,7 @@ def build_home(state: dict) -> None:
             queue_panel()
 
         # ---- 오른쪽: 변환한 논문 (검색·정렬·다중선택·리스트) ----
-        with sp.after, ui.column().classes("p-4 gap-2 w-full").style("height:100%; overflow-y:auto"):
+        with sp.after, ui.column().classes("p-4 gap-2 w-full md4-scroll").style("height:100%; overflow-y:auto"):
             with ui.row().classes("items-center w-full no-wrap"):
                 ui.label("변환한 논문").classes("text-sm font-semibold")
                 ui.space()
@@ -3753,6 +4085,7 @@ def build_home(state: dict) -> None:
                     recent_list.refresh()
                 ui.select({"recent": "최근순", "name": "제목순", "year": "연도순", "translated": "번역됨 먼저"},
                           value="recent", on_change=on_sort).props("dense outlined").classes("w-32")
+            pinned_strip()  # 고정한 논문 — 검색·정렬과 무관하게 항상 맨 위
             sel_bar()  # 다중 선택 시 일괄 다운로드 툴바
             recent_list()
 
@@ -3874,9 +4207,17 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         state["current_wd"] = wdir  # 이미지 서빙이 이 워크디렉토리를 가리키도록
         _register_wd(wdir)  # 토큰 등록 (이 논문 자산 URL 해석용)
         _mark_opened(wdir)  # 미열람 표시 해제 (한 번이라도 열면 '새 항목' 아님)
-        build(UIController(wdir))
+        build(UIController(wdir), state)
 
     port = pick_port(port)
+    state["port"] = port  # 새 창(형제 웹뷰 프로세스)이 가리킬 주소를 만들 때 쓴다
+
+    @fastapi_app.on_shutdown
+    def _close_extra_windows() -> None:
+        from md4paper.ui import window as extra_window
+
+        extra_window.close_all()  # 서버가 내려가면 형제 창도 함께 (서버 없는 창은 빈 페이지다)
+
     if native:
         desktop.configure()  # 창 크기·Dock 아이콘·다운로드 설정 (웹뷰 프로세스로 전달된다)
         print(f"md4paper 앱 창 시작 (내부 주소 http://127.0.0.1:{port})")
