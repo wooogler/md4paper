@@ -284,3 +284,61 @@ def test_single_column_items_are_not_full_width():
     geom = export_geometry(d)
     assert geom.pages[1].n_cols == 1
     assert not any(g.full_width for g in geom.items)
+
+
+# --- 저자 격자: docling이 셀을 병합하고, 왼쪽 단에 가짜 격자가 있는 첫 페이지 -----------
+def _merged_grid_page() -> DoclingDocument:
+    """실측 CoAuthor(CHI'22) 1쪽의 재현 — 세 가지가 겹쳐 저자 격자를 놓치던 배치.
+
+    (1) docling이 2·3열의 셀 셋을 **한 아이템(prov 3개)** 으로 병합해 내보낸다.
+    (2) 왼쪽 단의 짧은 왼쪽정렬 헤딩들의 중심이 ~10.5pt 등간격이라 **가짜 격자**를 만든다
+        (예전엔 격자 후보를 하나만 받아서 이 가짜가 진짜 저자 격자를 가렸다).
+    (3) 이름 행과 이메일 행 사이가 2.8pt로, line_h·_ROW_GAP보다 좁아 **두 행이 한 행으로 붙는다**.
+    """
+    d = _doc()
+    _add(d, "TITLE OF THE PAPER ABOUT SOMETHING", [(1, (54.3, 84.0, 557.7, 110.0), (0, 34))],
+         DocItemLabel.SECTION_HEADER)
+    # 1열 (Mina) — 이름, 그리고 이메일/소속
+    _add(d, "A1 Mina Lee", [(1, (119.7, 131.2, 165.0, 141.6), (0, 11))])
+    _add(d, "A4 minalee@x.edu Stanford University", [(1, (91.2, 144.4, 193.4, 177.0), (0, 35))])
+    # 왼쪽 단 — 짧은 헤딩들의 중심이 83.8 / 94.3 / 105.2 (등간격 ≈10.5pt) = 가짜 격자
+    for text, right, top in (("ABSTRACT", 113.8, 187.6), ("CCS CONCEPTS", 134.8, 409.3),
+                             ("ACMReference Format:", 156.6, 507.4)):
+        _add(d, text, [(1, (53.8, top, right, top + 5.1), (0, len(text)))],
+             DocItemLabel.SECTION_HEADER)
+    _add(d, "L1 " + "left column body text. " * 8, [(1, _para(COL_L, 200.0, 190.0), (0, 187))])
+    _add(d, "L2 " + "more left column text. " * 8, [(1, _para(COL_L, 420.0, 80.0), (0, 187))])
+    # 2·3열 — 이름 하나는 따로, 나머지 셋은 docling이 한 아이템으로 병합해 늦게 내보냈다
+    _add(d, "A2 Percy Liang", [(1, (277.5, 131.2, 335.4, 141.6), (0, 14))])
+    merged = "A5 pliang@x.edu Stanford University " "A3 Qian Yang " "A6 qianyang@y.edu Cornell University"
+    i5, i3 = 0, merged.index("A3 Qian Yang ")
+    i6 = merged.index("A6 qianyang")
+    _add(d, merged, [(1, (258.7, 144.4, 354.2, 177.0), (i5, i3)),
+                     (1, (445.3, 131.2, 496.0, 141.6), (i3, i6)),
+                     (1, (424.8, 144.4, 516.5, 177.0), (i6, len(merged)))])
+    _add(d, "R1 " + "right column body text. " * 8, [(1, _para(COL_R, 200.0, 190.0), (0, 195))])
+    return d
+
+
+def test_merged_author_grid_beats_a_decoy_lattice():
+    d = _merged_grid_page()
+    meta = repair_reading_order(d)
+    assert meta["reordered_pages"] == [1]
+    assert "grid" in meta["reading_order"][1]["violations"]
+    heads = [t.split()[0] for t in _order(d)]
+    # 세 이름이 모두 저자 블록 안에, 행 우선 순서로 — 어느 이름도 본문으로 밀려나지 않는다
+    assert heads[:7] == ["TITLE", "A1", "A2", "A3", "A4", "A5", "A6"]
+
+
+def test_decoy_lattice_alone_does_not_reorder():
+    """가짜 격자만 있고 저자 격자가 없는 쪽은 여전히 손대지 않는다."""
+    d = _doc()
+    _add(d, "TITLE OF THE PAPER ABOUT SOMETHING", [(1, (54.3, 84.0, 557.7, 110.0), (0, 34))],
+         DocItemLabel.SECTION_HEADER)
+    for text, right, top in (("ABSTRACT", 113.8, 187.6), ("CCS CONCEPTS", 134.8, 409.3),
+                             ("ACMReference Format:", 156.6, 507.4)):
+        _add(d, text, [(1, (53.8, top, right, top + 5.1), (0, len(text)))],
+             DocItemLabel.SECTION_HEADER)
+    _add(d, "L1 " + "left column body text. " * 8, [(1, _para(COL_L, 200.0, 190.0), (0, 187))])
+    _add(d, "R1 " + "right column body text. " * 8, [(1, _para(COL_R, 200.0, 190.0), (0, 195))])
+    assert repair_reading_order(d)["reordered_pages"] == []

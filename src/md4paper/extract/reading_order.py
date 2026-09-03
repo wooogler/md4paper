@@ -180,14 +180,22 @@ def _rows(frags: list[_Frag], gap: float) -> list[list[_Frag]]:
     return rows
 
 
-def _lattice(centers: list[float]) -> list[int] | None:
+def _lattices(centers: list[float]) -> list[list[int]]:
     """등간격 격자 위에 놓인 열 중심들의 인덱스 — 저자 그리드의 가장 확실한 지문.
 
     마지막 줄이 가운데로 몰려 반 칸 어긋나도 중심들은 여전히 같은 간격으로 늘어선다.
     저자 그리드는 본문 블록과 한 띠를 나눠 쓰는 일이 많으므로(전폭 그림이 없는 첫 페이지)
     전체가 아니라 **부분집합**에서 격자를 찾고, 격자 칸이 빈 곳 없이 이어질 때만 인정한다.
+
+    후보를 **점 수가 많은 순으로 전부** 돌려준다. 예전에는 가장 긴 것 하나만 돌려줬는데,
+    한 쪽에 격자가 여럿 보일 때 가짜가 진짜를 가렸다. 실측(CoAuthor CHI'22): 왼쪽 단의 짧은
+    왼쪽정렬 헤딩들(ABSTRACT·CCS CONCEPTS·ACMReference Format:·ACM ISBN …)이 길이가 조금씩
+    달라 중심이 ~10.7pt 등간격으로 늘어서면서 4점짜리 가짜 격자를 만들었고, 진짜 저자 격자
+    (142.3 / 306.5 / 470.6, 간격 164.2)는 3점이라 밀려 **한 번도 시도되지 않았다**.
+    하류 가드가 가짜를 정확히 걷어냈지만 그때는 이미 `_grid`가 None을 반환한 뒤였다.
     """
-    best: list[int] | None = None
+    seen: set[tuple[int, ...]] = set()
+    out: list[list[int]] = []
     for i in range(len(centers)):
         for j in range(i + 1, len(centers)):
             step = centers[j] - centers[i]
@@ -204,9 +212,11 @@ def _lattice(centers: list[float]) -> list[int] | None:
             if keys != list(range(keys[0], keys[0] + len(keys))):
                 continue  # 중간에 빈 칸이 있으면 격자로 보지 않는다
             hit = [slots[s] for s in keys]
-            if len(hit) >= _GRID_MIN_COLS and (best is None or len(hit) > len(best)):
-                best = hit
-    return best
+            if len(hit) >= _GRID_MIN_COLS and tuple(hit) not in seen:
+                seen.add(tuple(hit))
+                out.append(hit)
+    # 점이 많은 것부터. 동점은 인덱스 순으로 — 순서가 실행마다 흔들리지 않게.
+    return sorted(out, key=lambda h: (-len(h), h))
 
 
 def _grid(frags: list[_Frag], cols: list[tuple[float, float]], line_h: float) -> tuple | None:
@@ -231,9 +241,19 @@ def _grid(frags: list[_Frag], cols: list[tuple[float, float]], line_h: float) ->
     if len(clusters) < _GRID_MIN_COLS:
         return None
     all_centers = [sum(f.cx for f in c) / len(c) for c in clusters]
-    hit = _lattice(all_centers)
-    if hit is None:
-        return None
+    others = [f for f in frags if f.width >= _GRID_MAX_W * col_w]
+    # 격자 후보를 점 수가 많은 순으로 **차례로** 시도한다. 아래 가드들은 가짜 격자를 정확히
+    # 걷어내지만, 예전처럼 후보를 하나만 받으면 그 하나가 가짜일 때 진짜가 가려졌다.
+    for hit in _lattices(all_centers):
+        got = _grid_on(hit, all_centers, clusters, cols, others, line_h)
+        if got is not None:
+            return got
+    return None
+
+
+def _grid_on(hit: list[int], all_centers: list[float], clusters: list[list[_Frag]],
+             cols: list[tuple[float, float]], others: list[_Frag], line_h: float) -> tuple | None:
+    """격자 후보 하나를 검증한다. 통과하면 `_grid`의 반환 튜플, 아니면 None."""
     centers = [all_centers[k] for k in hit]
     # 본문 단과 어긋났는지 — 한 단 안에 그리드 열이 둘 이상 들어가거나, 단 사이 여백을 걸친 열이 있을 때.
     # 본문 단과 1:1로 겹치는 배치라면 단 순서만으로 충분하므로 그리드로 다루지 않는다.
@@ -248,9 +268,14 @@ def _grid(frags: list[_Frag], cols: list[tuple[float, float]], line_h: float) ->
         return None
     # 그리드가 차지한 세로 구간에는 본문 폭 블록이 없어야 한다 — 짧은 섹션 제목·낱개 조각이
     # 우연히 격자에 얹혀 본문 문단까지 그리드로 빨아들이는 것을 막는다.
-    others = [f for f in frags if f.width >= _GRID_MAX_W * col_w]
-    rows = _rows([f for k in hit for f in clusters[k]], line_h * _ROW_GAP)
-    rows = _clean_run(rows, others)
+    grouped = [f for k in hit for f in clusters[k]]
+    rows = _clean_run(_rows(grouped, line_h * _ROW_GAP), others)
+    if len(rows) < 2:
+        # 셀 하나가 여러 줄짜리 한 아이템으로 나오면 line_h(그 쪽 조각 높이의 20퍼센타일)가
+        # 실제 행 간격보다 커져 이웃한 두 행이 통째로 붙는다. 실측(CoAuthor CHI'22): 이름 행과
+        # 이메일/소속 행 사이가 2.8pt인데 line_h·_ROW_GAP은 3.03pt라 6개 셀이 한 행이 됐고,
+        # '행이 둘 미만'으로 저자 격자 전체를 놓쳤다. 그때는 세로로 겹치는 것만 묶어 다시 본다.
+        rows = _clean_run(_rows(grouped, 0.0), others)
     if len(rows) < 2:
         return None
     members = [f for row in rows for f in row]
