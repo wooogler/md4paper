@@ -9,17 +9,159 @@ from md4paper.extract.docling_backend import (
 )
 
 
+# --- 문단 재결합은 기하 근거(export 순서 + 단/쪽 경계)가 있을 때만 -------------------
+# 텍스트 예측만으로는 캡션이 뒤 문단을 삼키는 오결합을 못 막으므로, 아래 헬퍼로 "그 자리가
+# 정말 단 경계인지"를 알려주는 기하를 만들어 준다. 기하가 없으면 재결합은 아무것도 하지 않는다.
+BAND = (50.0, 700.0)  # 본문 띠 위/아래
+LINE_H = 10.0
+
+
+def _g(text, col, top, bottom, label="text", page=1, full=False, page_end=None, col_end=None):
+    from md4paper.extract.reading_order import ItemGeom
+
+    return ItemGeom(text=text, label=label, page_start=page, col_start=col, top=top,
+                    page_end=page if page_end is None else page_end,
+                    col_end=col if col_end is None else col_end,
+                    bottom=bottom, full_width=full)
+
+
+def _geom(items, n_cols=2, pages=(1,)):
+    from md4paper.extract.reading_order import ExportGeometry, PageGeom
+
+    return ExportGeometry(items=list(items), pages={
+        p: PageGeom(n_cols=n_cols, band_top=BAND[0], band_bottom=BAND[1], line_h=LINE_H)
+        for p in pages})
+
+
+ABSTRACT_HEAD = "Abstract"
+ABSTRACT_TAIL = (
+    "We present an interactive system that operationalizes this workflow, guiding "
+    "developers to discover edge cases and evaluate revised prompts against a growing test set. A")
+ABSTRACT_CONT = "user study shows our workflow helps people refine prompts systematically."
+COLUMN_SPLIT_MD = f"## {ABSTRACT_HEAD}\n\n{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
+COLUMN_SPLIT_GEOM = _geom([
+    _g(ABSTRACT_HEAD, 0, 50.0, 62.0, label="section_header"),
+    _g(ABSTRACT_TAIL, 0, 70.0, BAND[1]),      # 왼쪽 단 맨 아래에서 끊김
+    _g(ABSTRACT_CONT, 1, BAND[0], 200.0),     # 오른쪽 단 맨 위에서 이어짐
+])
+
+
 def test_join_broken_paragraphs_merges_column_split_abstract():
     # footer 제거 후 컬럼 경계에서 끊긴 초록 — 앞이 종결부호 없이 끝, 뒤가 소문자 시작
-    md = (
-        "## Abstract\n\n"
-        "We present an interactive system that operationalizes this workflow, guiding "
-        "developers to discover edge cases and evaluate revised prompts against a growing test set. A\n\n"
-        "user study shows our workflow helps people refine prompts systematically.\n"
-    )
-    out = _join_broken_paragraphs(md)
+    stats: dict = {}
+    out = _join_broken_paragraphs(COLUMN_SPLIT_MD, COLUMN_SPLIT_GEOM, stats)
     assert "growing test set. A user study shows" in out
     assert "## Abstract" in out  # 헤더는 그대로
+    assert stats["joins_made"] == 1 and stats["joins_refused"] == 0
+
+
+def test_join_broken_paragraphs_refuses_without_provenance():
+    """근거(기하)가 없으면 결합하지 않는다 — 잘못 붙인 문단은 되돌릴 수 없기 때문."""
+    stats: dict = {}
+    assert _join_broken_paragraphs(COLUMN_SPLIT_MD, None, stats) == COLUMN_SPLIT_MD
+    assert stats["joins_made"] == 0 and stats["joins_refused"] == 1
+
+
+def test_join_broken_paragraphs_refuses_caption_weld():
+    """Figure 캡션은 뒤 문단을 삼키지 못한다 — 텍스트 조건은 맞지만 라벨이 caption이다.
+
+    실제로 관찰된 유일한 오결합(NIRVANA 4쪽): 마침표 없이 끝나는 캡션 + '(' 로 시작하는 본문.
+    """
+    cap = "Figure 2: Distribution of word count and inquiry counts across participants"
+    body = "(CSI) [13], excluding the collaboration subscale, was used to measure creativity."
+    md = f"{cap}\n\n{body}\n"
+    geom = _geom([_g(cap, 0, 300.0, 320.0, label="caption"), _g(body, 0, 330.0, 400.0)])
+    stats: dict = {}
+    out = _join_broken_paragraphs(md, geom, stats)
+    assert out == md and stats["joins_refused"] == 1
+
+
+def test_join_broken_paragraphs_refuses_full_width_partner():
+    """단을 가로지르는 전폭 블록(러닝 헤더 등)은 문단 연속의 상대가 될 수 없다."""
+    md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
+    geom = _geom([_g(ABSTRACT_TAIL, 0, 70.0, BAND[1]),
+                  _g(ABSTRACT_CONT, 1, BAND[0], 200.0, full=True)])
+    assert _join_broken_paragraphs(md, geom) == md
+
+
+def test_join_broken_paragraphs_refuses_when_a_figure_sits_between():
+    """마크다운에 남아 있는 아이템이 사이에 끼면 이어지는 문단이 아니다."""
+    md = f"{ABSTRACT_TAIL}\n\n![img](img-01.png)\n\n{ABSTRACT_CONT}\n"
+    geom = _geom([_g(ABSTRACT_TAIL, 0, 70.0, BAND[1]),
+                  _g("![img](img-01.png)", 0, 300.0, 400.0, label="picture"),
+                  _g(ABSTRACT_CONT, 1, BAND[0], 200.0)])
+    assert _join_broken_paragraphs(md, geom) == md
+
+
+def test_join_broken_paragraphs_refuses_mid_column_pair():
+    """같은 단 한가운데의 두 문단은 단이 잘린 자리가 아니다 — 세로로 멀면 결합하지 않는다."""
+    md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
+    geom = _geom([_g(ABSTRACT_TAIL, 0, 100.0, 200.0), _g(ABSTRACT_CONT, 0, 400.0, 500.0)])
+    assert _join_broken_paragraphs(md, geom) == md
+
+
+def test_join_broken_paragraphs_refuses_when_prev_stops_mid_column():
+    """단 중간에서 끝난 문단은 다음 단으로 이어질 수 없다 — 단의 끝까지 내려가 있어야 한다."""
+    from md4paper.extract.reading_order import ExportGeometry, PageGeom
+
+    md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
+    geom = ExportGeometry(
+        items=[_g(ABSTRACT_TAIL, 0, 70.0, 300.0), _g(ABSTRACT_CONT, 1, 60.0, 200.0)],
+        pages={1: PageGeom(n_cols=2, band_top=BAND[0], band_bottom=BAND[1], line_h=LINE_H,
+                           col_top={0: 70.0, 1: 60.0}, col_bottom={0: 640.0, 1: 640.0})})
+    assert _join_broken_paragraphs(md, geom) == md  # 왼쪽 단은 640까지 이어지는데 300에서 끊겼다
+
+
+def test_join_broken_paragraphs_ignores_footnotes_when_measuring_the_column_end():
+    """단의 끝은 각주를 빼고 잰다 — 첫 페이지 아래 각주 뭉치가 초록 재결합을 막지 않게."""
+    from md4paper.extract.reading_order import ExportGeometry, PageGeom
+
+    md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
+    geom = ExportGeometry(
+        items=[_g(ABSTRACT_TAIL, 0, 70.0, 590.0), _g(ABSTRACT_CONT, 1, 60.0, 200.0)],
+        pages={1: PageGeom(n_cols=2, band_top=BAND[0], band_bottom=709.0, line_h=LINE_H,
+                           col_top={0: 70.0, 1: 60.0}, col_bottom={0: 590.0, 1: 640.0})})
+    assert "test set. A user study shows" in _join_broken_paragraphs(md, geom)
+
+
+def test_join_broken_paragraphs_joins_across_page_break():
+    """앞 쪽 마지막 단 아래 → 다음 쪽 첫 단 위는 정당한 이어짐이다."""
+    md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
+    geom = _geom([_g(ABSTRACT_TAIL, 1, 70.0, BAND[1], page=1),
+                  _g(ABSTRACT_CONT, 0, BAND[0], 200.0, page=2)], pages=(1, 2))
+    assert "test set. A user study shows" in _join_broken_paragraphs(md, geom)
+
+
+# --- 대문자로 이어지는 삽입구 (약어 풀어쓰기) ------------------------------
+PAREN_TAIL = (
+    "Moreover, researchers lack validated tools for analyzing such temporal data at scale. "
+    "To address these gaps, we present NIRVANA (Naturalistic Interactions and")
+PAREN_CONT = ("Replay of Voluntary AI-Assisted Nonfiction Academic Writing), a dataset and "
+              "replay platform designed to investigate how students use generative AI.")
+
+
+def test_join_broken_paragraphs_joins_unclosed_parenthesis_across_pages():
+    """열린 괄호를 남긴 채 끊긴 문단은 뒤가 대문자로 시작해도 이어짐이다 — 약어 풀어쓰기."""
+    md = f"{PAREN_TAIL}\n\n{PAREN_CONT}\n"
+    geom = _geom([_g(PAREN_TAIL, 1, 70.0, BAND[1], page=1),
+                  _g(PAREN_CONT, 0, BAND[0], 200.0, page=2)], pages=(1, 2))
+    assert "NIRVANA (Naturalistic Interactions and Replay of Voluntary" in _join_broken_paragraphs(
+        md, geom)
+
+
+def test_join_broken_paragraphs_refuses_uppercase_without_open_parenthesis():
+    """괄호가 닫혀 있으면 대문자 시작은 이어짐의 근거가 못 된다 — 다음 문단을 삼키지 않는다."""
+    tail = PAREN_TAIL.replace("(Naturalistic Interactions and", "a new dataset and")
+    md = f"{tail}\n\n{PAREN_CONT}\n"
+    geom = _geom([_g(tail, 1, 70.0, BAND[1], page=1),
+                  _g(PAREN_CONT, 0, BAND[0], 200.0, page=2)], pages=(1, 2))
+    assert _join_broken_paragraphs(md, geom) == md
+
+
+def test_join_broken_paragraphs_uppercase_still_needs_geometry():
+    """괄호가 열려 있어도 기하 근거가 없으면 결합하지 않는다(게이트는 그대로)."""
+    md = f"{PAREN_TAIL}\n\n{PAREN_CONT}\n"
+    assert _join_broken_paragraphs(md, None) == md
 
 
 def test_join_broken_paragraphs_keeps_author_email_separate():
@@ -239,8 +381,19 @@ def test_strip_contact_footer_removes_block_and_enables_rejoin():
     stripped = _strip_contact_footer(md)
     assert "Corresponding author" not in stripped
     assert "alexliux@uw.edu" not in stripped and "Seattle" not in stripped
-    # 연락처가 갈라놓았던 두 문단이 이어붙는다
-    assert "technology, rather than emphasizing" in _join_broken_paragraphs(stripped)
+    # 연락처가 갈라놓았던 두 문단이 이어붙는다 — 사이에 낀 아이템은 마크다운에서 이미 빠졌으므로
+    # 두 문단은 원래 붙어 있던 자리다(export 스트림에는 남아 있어도 된다).
+    head = md.split("\n\n")[0]
+    tail = "than emphasizing solely on underlying model capabilities Roschelle et al. (2013)."
+    geom = _geom([
+        _g(head, 0, 70.0, BAND[1]),
+        _g("Corresponding author:", 0, 600.0, 610.0, label="section_header"),
+        _g("Alex Liu, Univeristy of Washington College of Education, "
+           "AmplifyLearn AI Center, Seattle, WA, 98195, US.", 0, 620.0, 640.0),
+        _g("Email: alexliux@uw.edu", 0, 650.0, 660.0),
+        _g(tail, 1, BAND[0], 200.0),
+    ])
+    assert "technology, rather than emphasizing" in _join_broken_paragraphs(stripped, geom)
 
 
 def test_strip_contact_footer_keeps_following_body_paragraph():
@@ -533,3 +686,18 @@ def test_drop_line_numbers_ignores_running_header_page_numbers():
                + _gutter(2, 53, 52, 84.1) + _bodies(2) + [hdr])
     assert _drop_line_numbers(doc) == 104
     assert hdr in doc.texts
+
+
+def test_join_broken_paragraphs_joins_in_a_single_column_paper():
+    """1단 조판(arXiv 프리프린트)에서도 바로 아래 이어지는 문단은 결합한다."""
+    md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
+    geom = _geom([_g(ABSTRACT_TAIL, 0, 100.0, 200.0), _g(ABSTRACT_CONT, 0, 210.0, 300.0)],
+                 n_cols=1)
+    assert "test set. A user study shows" in _join_broken_paragraphs(md, geom)
+
+
+def test_join_key_survives_entity_escaping():
+    """export가 '<'를 '&lt;'로 바꿔도 아이템과 같은 지문이 나와야 정렬이 유지된다."""
+    from md4paper.extract.docling_backend import _join_key
+
+    assert _join_key("p &lt; 0.001") == _join_key("p < 0.001")

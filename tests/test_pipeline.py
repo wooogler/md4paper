@@ -371,6 +371,102 @@ def test_run_frontmatter_normalizes_and_caches(tmp_path):
     assert r2.get("skipped") is True
 
 
+def _fm_wd(tmp_path, meta: dict | None):
+    """SWAPPED 모양(밀려난 Abstract) raw.md + 선택적 extract/meta.json 을 갖춘 작업 폴더."""
+    import json
+
+    from md4paper.workdir import WorkDir
+
+    wd = WorkDir(tmp_path)
+    wd.extract.mkdir(parents=True)
+    wd.raw_md.write_text(
+        "## Paper Title\n\n"
+        "## [Alice Kim](https://orcid.org/1)\n\n"
+        "CS Virginia Tech, USA alice@vt.edu\n\n"
+        "## 1 Introduction\n\nFirst intro paragraph carrying the real body text.\n\n"
+        "## Abstract\n\nWe introduce a dataset of student writing and contribute\n\n"
+        "## 2 Related Work\n\nRelated work body text.\n",
+        encoding="utf-8")
+    if meta is not None:
+        wd.meta_json.write_text(json.dumps(meta), encoding="utf-8")
+    return wd
+
+
+def _fm_provider():
+    """블록 라벨을 고정으로 돌려주는 가짜 provider — Abstract(5,6)가 본문 뒤에 있다."""
+    from md4paper.ir import FrontMatterLayout
+    from md4paper.llm.base import FakeProvider
+
+    return FakeProvider(
+        parse_fn=lambda system, user, schema: FrontMatterLayout(
+            title=0, authors=[1, 2], sections=[5, 6], body_start=3),
+        model="fake")
+
+
+def test_frontmatter_pull_is_gated_on_measured_inversion(tmp_path):
+    """끌어올리기는 '추출이 되돌리지 못한 뒤집힘'을 잰 논문에서만 켜진다.
+
+    meta.json에 reading_order_suspect가 없으면(정상 논문·이미 되돌린 논문) 이 복구는
+    통째로 no-op이라 Abstract가 본문 뒤 제자리에 남는다 — 눈에 보이고 아무것도 잃지 않는다.
+    """
+    from md4paper import pipeline
+
+    wd = _fm_wd(tmp_path / "off.md4", {"reordered_pages": [1], "reading_order_suspect": []})
+    r = pipeline.run_frontmatter(wd, provider=_fm_provider())
+    raw = wd.raw_md.read_text(encoding="utf-8")
+    assert r["allow_pull"] is False and r["pulled"] == []
+    assert raw.index("## 1 Introduction") < raw.index("## Abstract")  # 제자리
+
+
+def test_frontmatter_pull_runs_when_a_page_stayed_scrambled(tmp_path):
+    from md4paper import pipeline
+
+    wd = _fm_wd(tmp_path / "on.md4", {"reading_order_suspect": [1]})
+    r = pipeline.run_frontmatter(wd, provider=_fm_provider())
+    raw = wd.raw_md.read_text(encoding="utf-8")
+    assert r["allow_pull"] is True and r["pulled"] == [5, 6]
+    assert raw.index("## Abstract") < raw.index("## 1 Introduction")  # 앞으로 되돌린다
+    assert raw.count("We introduce a dataset") == 1                   # 중복 없음
+
+
+def test_frontmatter_pull_is_off_without_meta(tmp_path):
+    """meta.json이 없으면 보수적으로 끈다 — 신호 없이 본문을 옮기지 않는다."""
+    from md4paper import pipeline
+
+    wd = _fm_wd(tmp_path / "nometa.md4", None)
+    r = pipeline.run_frontmatter(wd, provider=_fm_provider())
+    assert r["allow_pull"] is False and r["pulled"] == []
+
+
+def test_frontmatter_records_pull_ops_in_status(tmp_path):
+    """무엇을 끌어올렸는지 status.json에 남긴다 — 조용한 이동이 되지 않게."""
+    from md4paper import pipeline
+
+    wd = _fm_wd(tmp_path / "ops.md4", {"reading_order_suspect": [1]})
+    pipeline.run_frontmatter(wd, provider=_fm_provider())
+    entry = wd.load_status()["frontmatter"]
+    assert entry["pulled"] == [5, 6] and entry["pull_runs"] == [2]
+    assert entry["pulled_heads"][0].startswith("## Abstract")
+    assert entry["sections_after_body"] == 2
+
+
+def test_author_note_anchor_never_reaches_the_output(tmp_path):
+    """규칙 경로가 일찍 반환하는 문서에서도 앵커는 남지 않는다 (링크 대상이 없는 표시)."""
+    from md4paper import pipeline
+    from md4paper.workdir import WorkDir
+
+    wd = WorkDir(tmp_path / "note.md4")
+    wd.extract.mkdir(parents=True)
+    wd.raw_md.write_text(
+        "Plain text first, so the heuristic path returns early.\n\n"
+        '<a id="fn-author-1"></a>∗ Alice conducted this work as a visiting scholar.\n\n'
+        "## 1 Introduction\n\nBody text.\n", encoding="utf-8")
+    pipeline.run_frontmatter(wd, provider=None)
+    raw = wd.raw_md.read_text(encoding="utf-8")
+    assert "fn-author" not in raw
+    assert "visiting scholar" in raw  # 주석 본문은 그대로 남는다
+
+
 def test_sibling_runin_headers_share_level(tmp_path):
     """형제 무번호 run-in 소제목은 같은 레벨 — 4,5로 계단식으로 깊어지지 않는다."""
     from md4paper import config

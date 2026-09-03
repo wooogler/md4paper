@@ -48,15 +48,44 @@ def run_frontmatter(wd: WorkDir, provider=None, force: bool = False) -> dict:
     if not force and entry and entry.get("output_hash") == cur_hash:
         return {"skipped": True}  # 이미 정규화됨
 
-    new, authors = front_matter.normalize_authors(provider, raw, config.resolve_author_parts())
+    # 기하 신호(extract/meta.json)는 **추출기가 방금 쓴 raw.md**를 설명한다. 이 단계가 raw.md를
+    # 덮어쓰므로, 이미 정규화된 raw.md에 --force로 다시 들어오면 meta.json은 사라진 문서의 기록이다
+    # (extract는 신선하면 건너뛰어 meta.json을 다시 쓰지 않는다). 그때는 신호 없음으로 본다.
+    pristine = not entry or entry.get("input_hash") == cur_hash
+    meta = _extract_meta(wd) if pristine else {}
+    # 본문 뒤 블록을 앞으로 끌어올리는 복구는 **추출 단계가 되돌리지 못한 단 뒤집힘을 잰
+    # 논문에서만** 켠다. 그 밖의 논문에서는 통째로 no-op이라 이 복구가 없던 때와 출력이 같다.
+    suspect = meta.get("reading_order_suspect") or []
+    allow_pull = bool(suspect)
+    # 저자 순서를 원문 블록 순서로 되세우는 것은 그 순서를 믿을 수 있을 때만 — 되돌리지 못한
+    # 뒤집힘이 남은 첫 페이지에서는 원문 순서가 틀렸고, 되세우면 LLM의 맞은 답을 망가뜨린다.
+    trust_order = _FRONT_PAGE not in suspect
+    ops: dict = {"allow_pull": allow_pull, "trust_order": trust_order, "pulled": [],
+                 "pull_runs": [], "pulled_heads": [], "sections_after_body": 0}
+    new, authors = front_matter.normalize_authors(
+        provider, raw, config.resolve_author_parts(), allow_pull, ops, trust_order)
     if new != raw:
         wd.raw_md.write_text(new, encoding="utf-8")
     # 구조화 저자 저장 → 나중에 표기(author_parts) 변경 시 LLM 재호출 없이 재렌더
     if authors:
         wd.authors_json.write_text(
             json.dumps([a.model_dump() for a in authors], ensure_ascii=False, indent=2), encoding="utf-8")
-    wd.mark_done("frontmatter", cur_hash, output_hash=hash_text(new), changed=new != raw)
-    return {"changed": new != raw}
+    wd.mark_done("frontmatter", cur_hash, output_hash=hash_text(new), changed=new != raw,
+                 model=getattr(provider, "model", "") if provider is not None else "", **ops)
+    return {"changed": new != raw, **ops}
+
+
+_FRONT_PAGE = 1  # 저자 그리드가 있는 쪽 — 여기 읽기 순서를 못 믿으면 저자 순서도 못 믿는다
+
+
+def _extract_meta(wd: WorkDir) -> dict:
+    """extract/meta.json — 없거나 깨졌으면 빈 dict (기하 신호 없음 = 복구 끔)."""
+    import json
+
+    try:
+        return json.loads(wd.meta_json.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — 메타가 없으면 보수적으로 끈다
+        return {}
 
 
 def run_structure(wd: WorkDir, flavor: Flavor = Flavor.STANDARD, force: bool = False, provider=None):

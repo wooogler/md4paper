@@ -11,6 +11,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from md4paper.extract.reading_order import export_geometry, repair_reading_order
 from md4paper.extract.text_clean import ExtractError, rewrite_image_refs
 from md4paper.workdir import WorkDir
 
@@ -58,7 +59,32 @@ def _split_author_block(md: str) -> str:
 # 뒤 블록이 소문자/여는 괄호로 시작(= 앞 문장의 연속).
 _CONT_END_RE = re.compile(r"[A-Za-z0-9,]$")
 _CONT_START_RE = re.compile(r"^[a-z(]")
+# 대문자로 이어지는 경우는 앞 블록에 **닫히지 않은 여는 괄호**가 남아 있을 때만 허용한다.
+# 약어를 풀어 쓰는 삽입구("… we present NIRVANA (Naturalistic Interactions and" /
+# "Replay of Voluntary …)")는 고유명사라 대문자로 시작한다. 괄호가 열린 채로 끝났다는 사실
+# 자체가 문장이 안 끝났다는 증거라, '소문자로 시작' 만큼 강한 근거가 된다.
+# (대문자 시작을 무조건 허용하면, 마침표를 잃은 평범한 문단 뒤의 **다른** 문단까지 삼킨다 —
+#  같은 단에서 바로 아래 이어지는 두 문단은 기하 게이트를 그대로 통과하기 때문이다.)
+_CONT_START_UPPER_RE = re.compile(r"^[A-Z]")
 _ORDERED_LI_RE = re.compile(r"^\d+[.)]\s")
+
+
+def _open_paren(text: str) -> bool:
+    """블록이 **닫히지 않은 여는 괄호**를 남긴 채 끝났는지 — 문장이 안 끝났다는 구조적 증거."""
+    depth = 0
+    for ch in text:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+    return depth > 0
+
+
+def _continues(prev: str, nxt: str) -> bool:
+    """뒤 블록이 앞 블록 문장의 연속으로 보이는지 (텍스트 근거만 — 기하 확인은 호출부에서)."""
+    if _CONT_START_RE.match(nxt):
+        return True
+    return bool(_CONT_START_UPPER_RE.match(nxt)) and _open_paren(prev)
 _NON_PROSE_START = ("#", "-", "*", "+", ">", "|", "!", "```", "~~~", "<", "$$")
 # 앞 블록이 이 길이 이상일 때만 결합 → 저자명·소속 같은 짧은 라인 오결합 방지
 # (진짜 컬럼 경계에서 끊긴 문단 조각은 컬럼이 거의 꽉 차 훨씬 길다).
@@ -380,25 +406,119 @@ def _place_author_notes(md: str, notes: list[str]) -> str:
     return text + "\n" if md.endswith("\n") else text
 
 
-def _join_broken_paragraphs(md: str) -> str:
-    """열·페이지 경계나 footer/저작권 블록 제거로 끊긴 문단을 재결합.
+# --- 문단 재결합의 기하 근거 ------------------------------------------------
+# 재결합은 원문을 되돌릴 수 없게 바꾸므로(두 블록이 한 블록이 된다) **근거가 없으면 하지 않는다**.
+# 텍스트 예측(앞이 미완결·뒤가 소문자)만으로는 캡션이 뒤 문단을 삼키는 오결합을 못 막는다:
+# "Figure 2: … across participants" + "(CSI) [13], excluding …" 는 두 조건을 모두 만족한다.
+_JOIN_LABELS = frozenset({"text", "paragraph"})   # 이 라벨끼리만 이어붙인다 (캡션·수식·표·제목 제외)
+_JOIN_ALIGN_MIN = 24     # 정렬 확인에 쓸 최소 정규화 길이 — 이보다 짧으면 완전일치만 인정
+_JOIN_EDGE_LINES = 4.0   # 단의 위/아래 '끝자락'으로 볼 줄 수 — 단 넘김/쪽 넘김 판정
+_JOIN_GAP_LINES = 3.0    # 같은 단에서 이어지는 것으로 볼 최대 세로 간격 (줄 높이 배수)
+
+
+def _join_key(s: str) -> str:
+    """마크다운 표기를 걷어낸 영숫자만 — export 텍스트와 아이템 텍스트를 맞대볼 지문.
+
+    export가 '<' 를 '&lt;' 로 이스케이프하므로 먼저 되돌린다. 안 그러면 부등호가 든 문단
+    (통계 결과 'p &lt; 0.001' 등)이 아이템에 정렬되지 않아 애먼 재결합이 거부된다.
+    """
+    import html
+
+    return re.sub(r"[^a-z0-9]+", "", html.unescape(s).lower())
+
+
+def _align_blocks(blocks: list[str], items: list) -> list[int | None]:
+    """마크다운 블록 → export 아이템 인덱스. 확실하지 않으면 None (fail closed).
+
+    two-pointer로 앞에서부터만 훑는다. 리스트처럼 아이템 여러 개가 한 블록이 되는 자리는
+    일부러 정렬되지 않게 두어(완전일치 요구) 재결합 대상에서 빠지게 한다.
+    """
+    keys = [_join_key(getattr(it, "text", "") or "") for it in items]
+    out: list[int | None] = []
+    at = 0
+    for b in blocks:
+        key = _join_key(b)
+        hit = None
+        if key:
+            for j in range(at, len(items)):
+                k = keys[j]
+                if not k:
+                    continue
+                if k == key or (len(key) >= _JOIN_ALIGN_MIN and len(k) >= _JOIN_ALIGN_MIN
+                                and (k.startswith(key) or key.startswith(k))):
+                    hit = j
+                    break
+        out.append(hit)
+        if hit is not None:
+            at = hit + 1
+    return out
+
+
+def _joinable_geom(geom, prev_i: int | None, next_i: int | None,  # noqa: ANN001
+                   aligned: set[int]) -> bool:
+    """두 아이템이 정말 '한 문단이 끊긴 자리'인지 — 라벨·인접·기하 세 가지를 모두 본다."""
+    if geom is None or prev_i is None or next_i is None or next_i <= prev_i:
+        return False
+    # G2: export 스트림에서 이웃이어야 한다. 사이에 낀 아이템이 있어도, 그것이 **마크다운에서
+    # 이미 빠진** 것(연락처 footer 등)이면 두 문단은 원래 붙어 있던 자리다. 마크다운에 남아 있는
+    # 아이템(그림·표·다른 문단)이 끼어 있으면 이어지는 문단이 아니다.
+    if any(prev_i < j < next_i for j in aligned):
+        return False
+    a, b = geom.items[prev_i], geom.items[next_i]
+    if a.label not in _JOIN_LABELS or b.label not in _JOIN_LABELS:
+        return False  # G1: 캡션·제목·수식·표는 문단 연속이 될 수 없다
+    if a.full_width or b.full_width:
+        return False  # G3: 단을 가로지르는 블록(러닝 헤더·전폭 그림 설명)은 이어짐의 상대가 아니다
+    pa, pb = geom.pages.get(a.page_end), geom.pages.get(b.page_start)
+    if pa is None or pb is None:
+        return False
+    if a.page_end == b.page_start and a.col_end == b.col_start:
+        return 0 <= b.top - a.bottom <= _JOIN_GAP_LINES * pa.line_h  # 같은 단에서 바로 아래
+    # 단·쪽을 넘는 이어짐: 앞 문단이 자기 단의 **끝까지** 내려가 있어야 한다. 단 중간에서
+    # 끊긴 문단은 다음 단으로 이어질 리가 없다(단의 끝은 각주를 뺀 본문 흐름 기준으로 잰다).
+    if a.bottom < pa.col_bottom.get(a.col_end, pa.band_bottom) - _JOIN_EDGE_LINES * pa.line_h:
+        return False
+    if a.page_end == b.page_start:
+        # 다음 단으로 넘어가면 흐름은 위로 되돌아간다 — 아래로 내려가면 이어짐이 아니다.
+        return b.col_start == a.col_end + 1 and b.top <= a.top
+    if b.page_start != a.page_end + 1 or a.col_end != pa.n_cols - 1 or b.col_start != 0:
+        return False
+    return b.top <= pb.col_top.get(b.col_start, pb.band_top) + _JOIN_EDGE_LINES * pb.line_h
+
+
+def _join_broken_paragraphs(md: str, geom=None, stats: dict | None = None) -> str:  # noqa: ANN001
+    """열·페이지 경계나 footer/저작권 블록 제거로 끊긴 문단을 재결합 — 근거가 있을 때만.
 
     2단 조판에서 초록 같은 문단이 컬럼 경계에서 쪼개지고, 그 사이의 저작권 boilerplate를
     제거하면 "…test set. A" / "user study…" 처럼 빈 줄로 나뉜 두 문단이 남는다.
     앞 문단이 종결부호 없이(그리고 충분히 길게) 끝나고 뒤 문단이 소문자로 시작하면 한 문장의
-    연속으로 보고 공백 결합. 헤더·리스트·표·이미지·코드·이메일 블록은 건드리지 않는다.
+    연속 **후보**로 본다. 여기까지는 텍스트 예측일 뿐이라, 실제로 그 자리가 단·쪽 경계인지
+    `geom`(export 순서 기하)으로 확인한 뒤에만 결합한다. geom이 없거나 블록이 아이템에
+    정렬되지 않으면 결합하지 않는다 — 잘못 붙인 문단은 되돌릴 수 없기 때문이다.
     """
     blocks = _split_blocks(md)
+    align = _align_blocks(blocks, geom.items) if geom is not None else [None] * len(blocks)
+    aligned = {j for j in align if j is not None}
+    made = refused = 0
     merged: list[str] = []
-    for b in blocks:
+    at: list[int | None] = []  # merged[-1]이 정렬된 아이템 인덱스
+    for b, idx in zip(blocks, align):
         prev = merged[-1] if merged else ""
         if (merged and _is_prose_block(prev) and _is_prose_block(b)
                 and len(prev.rstrip()) >= _MIN_CONT_LEN
                 and _CONT_END_RE.search(prev.rstrip())
-                and _CONT_START_RE.match(b.lstrip())):
-            merged[-1] = prev.rstrip() + " " + b.lstrip()
-        else:
-            merged.append(b)
+                and _continues(prev.rstrip(), b.lstrip())):
+            if _joinable_geom(geom, at[-1], idx, aligned):
+                merged[-1] = prev.rstrip() + " " + b.lstrip()
+                at[-1] = idx  # 이어붙인 문단의 끝은 이제 뒤 아이템
+                made += 1
+                continue
+            refused += 1
+        merged.append(b)
+        at.append(idx)
+    if stats is not None:
+        stats["joins_made"] = stats.get("joins_made", 0) + made
+        stats["joins_refused"] = stats.get("joins_refused", 0) + refused
     text = "\n\n".join(merged)
     return text + "\n" if md.endswith("\n") else text
 
@@ -857,6 +977,13 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
     line_numbers = _drop_line_numbers(result.document)  # 투고 원고 여백의 줄 번호 gutter
     run_heads = _drop_running_heads(result.document)  # 쪽마다 되풀이되는 러닝 헤더/푸터
     footnotes, boilerplate, author_notes = _relocate_footer_blocks(result.document)
+    # 다단 조판에서 뒤집힌 단·열 우선 저자 그리드를 되돌린다 (prov bbox가 살아 있는 마지막 지점)
+    order_meta = repair_reading_order(result.document)
+    try:  # 되돌린 뒤의 방출 순서 기하 — 문단 재결합의 근거. 못 얻으면 재결합을 안 할 뿐이다.
+        geom = export_geometry(result.document)
+    except Exception:  # noqa: BLE001 — 기하 실패가 추출 전체를 막지 않게
+        geom = None
+    join_stats: dict = {"joins_made": 0, "joins_refused": 0, "geometry": geom is not None}
     wd.extract.mkdir(parents=True, exist_ok=True)
     wd.frontmatter_txt.write_text("\n".join(boilerplate), encoding="utf-8")  # 서지(venue/연도) 추출용
     pictures = list(getattr(result.document, "pictures", []))  # 아티팩트 파일명 인덱스와 매핑
@@ -870,7 +997,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         md = md_path.read_text(encoding="utf-8")
         md = _split_author_block(md)  # 2단 저자 블록(한 줄)을 저자별로 분리
         md = _strip_contact_footer(md)  # 본문에 흘러든 'Corresponding author' 연락처 블록 제거
-        md = _join_broken_paragraphs(md)  # 컬럼/footer 제거로 끊긴 문단 재결합
+        md = _join_broken_paragraphs(md, geom, join_stats)  # 컬럼/footer로 끊긴 문단 재결합(기하 확인)
         md = _place_author_notes(md, author_notes)  # 저자 주석(∗ …)은 앞부분에 (문서 끝 각주 아님)
         # 각주: 본문 마커를 위첨자 링크로, 내용은 문서 끝 목록 + 구조화 저장(호버 툴팁용)
         if footnotes:
@@ -909,4 +1036,6 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         "images": len(mapping) // 2 if mapping else 0,
         "line_numbers_dropped": line_numbers,
         "running_heads_dropped": run_heads,
+        **order_meta,
+        **join_stats,
     }
