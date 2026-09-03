@@ -18,8 +18,10 @@ CSS = """
    본문을 덮지 않고 **오른쪽을 차지한다**: 열리면 단계 패널이 그만큼 좁아져(body.mc-open)
    PDF 패널처럼 나란히 놓인다. 위치는 fixed로 두는데, 서랍이 body에 붙어 있어야 뷰어가
    다시 그려져도 대화 상태가 살아남기 때문이다 — 자리는 padding으로 비운다. */
-:root { --mc-w: 380px; }
-#md-chat-panel { position: fixed; top: 50px; right: 0; bottom: 0; width: var(--mc-w); z-index: 9000;
+:root { --mc-w: 380px; --mc-top: 50px; }
+/* --mc-top은 헤더를 실제로 재서 넣는다(아래 syncTop) — 헤더는 탭 아이콘+라벨이라 높이가
+   고정이 아니고, 상수로 두면 서랍이 헤더 위로 올라와 탭 라벨을 가린다. */
+#md-chat-panel { position: fixed; top: var(--mc-top); right: 0; bottom: 0; width: var(--mc-w); z-index: 9000;
   display: none; flex-direction: column; background: #fff; border-left: 1px solid #e6e4e0;
   color: #37352f; }
 #md-chat-panel.open { display: flex; }
@@ -30,10 +32,15 @@ body.mc-open .md4-steps { padding-right: var(--mc-w); }
 .mc-handle::after { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px;
   background: transparent; }
 .mc-handle:hover::after { background: #2383e2; width: 2px; }
-.mc-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px;
+.mc-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px; flex-wrap: nowrap;
   border-bottom: 1px solid #ecebe8; font-size: 13px; }
-.mc-model { font-size: 10.5px; padding: 1px 7px; border-radius: 9px; background: #f0efec;
-  color: #6b6862; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 좁은 서랍에 드롭다운까지 들어가므로 줄바꿈을 막고, 남는 폭은 드롭다운이 먼저 양보한다 */
+.mc-head > b, .mc-head .mc-btn { white-space: nowrap; flex: 0 0 auto; }
+.mc-model { font-size: 10.5px; padding: 1px 4px; border-radius: 9px; background: #f0efec;
+  color: #6b6862; flex: 0 1 auto; min-width: 44px; max-width: 116px; border: none;
+  cursor: pointer; font-family: inherit; }
+.mc-model:hover { background: #e6e4e0; }
+.mc-model:disabled { cursor: default; opacity: .7; }
 /* '메모 포함' 토글 — 내 하이라이트·메모를 근거에 넣을지 */
 .mc-tog { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px;
   color: #6b6862; cursor: pointer; white-space: nowrap; }
@@ -78,26 +85,7 @@ a.chat-cite-note.on { background: #e0b53c; color: #2f2500; }
 .mc-meta .mc-link:hover { background: #f0efec; }
 
 /* 근거 카드 (인용 칩 클릭 → 펼침) */
-.mc-ev { border: 1px solid #e6e4e0; border-radius: 10px; padding: 8px 9px; margin: 0 0 8px;
-  background: #faf9f7; }
-.mc-ev-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b6862; }
-.mc-ev-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mc-seg { display: inline-flex; border: 1px solid #e0ded9; border-radius: 7px; overflow: hidden; }
-.mc-seg button { border: none; background: none; font-size: 10.5px; padding: 2px 7px;
-  cursor: pointer; color: #6b6862; }
-.mc-seg button.on { background: #2383e2; color: #fff; }
-.mc-ev-body { display: grid; gap: 9px; margin-top: 7px; max-height: 210px; overflow-y: auto; }
-.mc-ev-body.two { grid-template-columns: 1fr 1fr; }
-.mc-ev-lab { font-size: 10px; color: #97948d; margin-bottom: 2px; }
 /* 근거 카드 안의 '메모' 섹션 — 색 점 + 표시한 문장 + 내가 쓴 메모 */
-.mc-ev-note { border-left: 2px solid #d9a406; padding: 1px 0 1px 7px; margin: 7px 0 0; }
-.mc-ev-note .mc-ev-lab { display: flex; align-items: center; gap: 4px; }
-.mc-ev-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block;
-  border: 1px solid rgba(0,0,0,.18); }
-.mc-ev-quote { font-size: 11.5px; line-height: 1.6; color: #4a4740; }
-.mc-ev-mine { font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; color: #37352f;
-  margin-top: 3px; }
-.mc-ev-txt { font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; color: #4a4740; }
 .mc-hits { margin: 0 0 8px; padding: 6px; border: 1px solid #e6e4e0; border-radius: 10px; }
 .mc-hit { display: block; width: 100%; text-align: left; border: none; background: none;
   font-size: 11px; line-height: 1.5; color: #5b5851; padding: 4px 6px; border-radius: 7px;
@@ -139,14 +127,12 @@ a.chat-cite-note.on { background: #e0b53c; color: #2f2500; }
   #md-chat-panel { background: #1f1f1f; border-color: #3a3a3a; color: #d4d4d4; }
   .mc-head, .mc-foot { border-color: #2c2c2c; }
   .mc-model, .mc-a code, .mc-a pre { background: #2c2c2c; color: #b8b8b8; }
+  .mc-model:hover { background: #3a3a3a; }
   .mc-btn:hover, .mc-meta .mc-link:hover, .mc-hit:hover { background: #2c2c2c; }
   .mc-q { background: #24303d; }
-  .mc-empty, .mc-ev-lab, .mc-meta { color: #8f8f8f; }
-  .mc-ev, .mc-hits, .mc-note { background: #262626; border-color: #3a3a3a; color: #b8b8b8; }
-  .mc-ev-txt, .mc-hit, .mc-ev-quote { color: #b8b8b8; }
-  .mc-hit b, .mc-ev-mine { color: #d4d4d4; }
+  .mc-empty, .mc-meta { color: #8f8f8f; }
+  .mc-hit b { color: #d4d4d4; }
   .mc-tog { color: #8f8f8f; }
-  .mc-seg { border-color: #3a3a3a; }
   .mc-input { background: #262626; border-color: #3a3a3a; }
   .mc-input:disabled { background: #232323; color: #7d7d7d; }
   .mc-turn + .mc-turn { border-color: #2c2c2c; }
@@ -157,7 +143,7 @@ a.chat-cite-note.on { background: #e0b53c; color: #2f2500; }
 HTML = """
 <div id="md-chat-panel">
   <div class="mc-handle" title="드래그해서 너비 조절"></div>
-  <div class="mc-head"><b>논문에 질문</b><span class="mc-model"></span>
+  <div class="mc-head"><b>논문에 질문</b><select class="mc-model" title="이 서랍에서 쓸 모델 — 번역 설정과 별개입니다"></select>
     <span class="mc-sp"></span>
     <label class="mc-tog" title="내 하이라이트·메모도 검색과 답변 근거에 넣습니다">
       <input type="checkbox" class="mc-tog-in" checked>메모 포함<b class="mc-tog-n"></b></label>
@@ -182,7 +168,7 @@ HTML = """
   var togIn = panel.querySelector('.mc-tog-in');
   var togN = panel.querySelector('.mc-tog-n');
   var turns = [], loaded = false, busy = false, pending = null, errMsg = null;
-  var openEv = {};   // '<턴id>:<근거키>' → 근거 카드 표시 모드 ('both'|'en'|'ko'), 없으면 닫힘
+  var openHits = {};  // '<턴id>' → 그 턴의 '검색된 문단' 목록이 펼쳐져 있나
 
   // '메모 포함' 토글 — 브라우저에 기억시킨다 (사생활 모드 등에서 던지는 예외는 무시)
   var useNotes = true;
@@ -196,6 +182,59 @@ HTML = """
   function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : s;
     return d.innerHTML; }
   function tok(){ return window.__mdChatTok || ''; }
+
+  // ---- 모델 고르기 (챗봇 전용 — 번역 설정과 별개) ----
+  var models = [], picked = '';
+  var PROV = {openai: 'OpenAI', anthropic: 'Anthropic', gemini: 'Gemini'};
+  function renderModels(){
+    var cur = picked || window.__mdChatModel
+      || (turns.length ? turns[turns.length - 1].model : '');
+    if (!models.length){                    // 목록을 아직 못 받았으면 이름만 (드롭다운은 비활성)
+      badge.innerHTML = '';
+      var o = document.createElement('option');
+      o.textContent = cur || ''; badge.appendChild(o); badge.disabled = true;
+      return;
+    }
+    badge.disabled = false;
+    badge.innerHTML = '';
+    var byProv = {};
+    models.forEach(function(m){ (byProv[m.provider] = byProv[m.provider] || []).push(m); });
+    Object.keys(byProv).forEach(function(prov){
+      var g = document.createElement('optgroup');
+      g.label = PROV[prov] || prov;
+      byProv[prov].forEach(function(m){
+        var o = document.createElement('option');
+        o.value = m.provider + '/' + m.model;
+        // 키 없는 제공사는 목록에 남기되 못 고르게 — 왜 안 보이는지 헤매지 않도록
+        o.textContent = m.model + (m.price ? '  ' + m.price : '') + (m.has_key ? '' : '  (키 없음)');
+        o.disabled = !m.has_key;
+        if (m.model === cur) o.selected = true;
+        g.appendChild(o);
+      });
+      badge.appendChild(g);
+    });
+  }
+  badge.addEventListener('change', function(){
+    var v = (badge.value || '').split('/');
+    if (v.length < 2) return;
+    var prev = picked;
+    picked = v[1];
+    fetch('/chat/' + tok() + '/model', {method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({provider: v[0], model: v[1]})})
+      .then(function(r){ return r.json(); })
+      .then(function(j){
+        if (j.error){ picked = prev; errMsg = j.error; render(); return; }
+        picked = j.model || picked;
+        window.__mdChatModel = picked;
+        window.__mdChatReady = !!j.ready;
+        if (j.reason) window.__mdChatReason = j.reason;
+        if (j.models) models = j.models;
+        errMsg = null;
+        render();
+      })
+      .catch(function(){ picked = prev; renderModels(); });
+  });
   function ready(){ return !!window.__mdChatReady; }
 
   // ---- 본문(뷰어 정렬 행)으로 이동 + 깜빡임 ----
@@ -264,10 +303,6 @@ HTML = """
   // ---- 렌더 ----
   var SWATCH = {yellow: '#ffe08a', green: '#b5e7b8', blue: '#a9d8f5', pink: '#f9bcd4',
                 purple: '#d8c6f5'};
-  var SIDE = {en: '원문', ko: '번역', both: '원문·번역'};
-  function keyOf(cite){                       // 근거 카드 키 — 메모는 id, 문단은 행
-    return cite.kind === 'note' ? 'a:' + cite.id : 'r:' + cite.row;
-  }
   function citeOf(turn, row){                 // 문단 근거 (행)
     var cs = turn.citations || [];
     for (var i = 0; i < cs.length; i++)
@@ -280,70 +315,6 @@ HTML = """
     for (var i = 0; i < cs.length; i++)
       if (cs[i].kind === 'note' && cs[i].id === id) return cs[i];
     return null;
-  }
-  function noteBox(cite){                     // 근거 카드 위쪽 '메모' 섹션
-    var box = document.createElement('div');
-    box.className = 'mc-ev-note';
-    var lab = document.createElement('div');
-    lab.className = 'mc-ev-lab';
-    var dot = document.createElement('span');
-    dot.className = 'mc-ev-dot';
-    dot.style.background = SWATCH[cite.color] || SWATCH.yellow;
-    lab.appendChild(dot);
-    var lt = document.createElement('span');
-    lt.textContent = '내 메모 · ' + (SIDE[cite.side] || '원문') + '에 표시';
-    lab.appendChild(lt);
-    box.appendChild(lab);
-    var q = document.createElement('div');
-    q.className = 'mc-ev-quote'; q.textContent = '“' + (cite.quote || '') + '”';
-    box.appendChild(q);
-    if ((cite.note || '').trim()){
-      var mine = document.createElement('div');
-      mine.className = 'mc-ev-mine'; mine.textContent = cite.note;
-      box.appendChild(mine);
-    }
-    return box;
-  }
-  function evCard(turn, cite){
-    var key = turn.id + ':' + keyOf(cite);
-    var mode = openEv[key] || 'both';
-    var box = document.createElement('div');
-    box.className = 'mc-ev';
-    var hasKo = !!cite.ko;
-    var head = document.createElement('div');
-    head.className = 'mc-ev-head';
-    head.innerHTML = '<span class="mc-ev-title">[' + esc(String(cite.n)) + '] '
-      + (cite.kind === 'note' ? '독자 메모 · ' : '')
-      + esc(cite.heading || ('행 ' + cite.row)) + '</span>'
-      + '<span class="mc-seg">'
-      + (hasKo ? '<button data-m="both">나란히</button>' : '')
-      + '<button data-m="en">원문</button>'
-      + (hasKo ? '<button data-m="ko">번역</button>' : '')
-      + '</span>'
-      + '<button class="mc-btn mc-ev-go" title="뷰어에서 이 문단으로 이동">본문으로</button>';
-    box.appendChild(head);
-    if (!hasKo && mode !== 'en') mode = 'en';
-    head.querySelectorAll('.mc-seg button').forEach(function(b){
-      if (b.getAttribute('data-m') === mode) b.classList.add('on');
-      b.addEventListener('click', function(){ openEv[key] = b.getAttribute('data-m'); render(); });
-    });
-    head.querySelector('.mc-ev-go').addEventListener('click', function(){
-      if (cite.kind === 'note') gotoNote(cite.id, cite.row); else gotoRow(cite.row);
-    });
-    if (cite.kind === 'note') box.appendChild(noteBox(cite));   // 메모 → 그 아래 원문·번역
-    var body = document.createElement('div');
-    body.className = 'mc-ev-body' + (mode === 'both' && hasKo ? ' two' : '');
-    function col(label, text){
-      var c = document.createElement('div');
-      var l = document.createElement('div'); l.className = 'mc-ev-lab'; l.textContent = label;
-      var t = document.createElement('div'); t.className = 'mc-ev-txt'; t.textContent = text || '';
-      c.appendChild(l); c.appendChild(t); body.appendChild(c);
-    }
-    if (mode === 'both'){ col('원문', cite.en); if (hasKo) col('번역', cite.ko); }
-    else if (mode === 'ko') col('번역', cite.ko);
-    else col('원문', cite.en);
-    box.appendChild(body);
-    return box;
   }
   function hitsCard(turn){
     var box = document.createElement('div');
@@ -382,20 +353,13 @@ HTML = """
         ? '내 메모 — “' + (c.quote || '').slice(0, 90) + '”'
           + ((c.note || '').trim() ? ' / ' + c.note.replace(/\\s+/g, ' ').slice(0, 70) : '')
         : (c.heading ? c.heading + ' — ' : '') + (c.en || '').replace(/\\s+/g, ' ').slice(0, 160);
-      var key = turn.id + ':' + keyOf(c);
-      if (openEv[key]) chip.classList.add('on');
+      // 칩은 곧장 뷰어의 그 문단으로 보낸다 — 원문·번역은 거기 이미 나란히 있으므로
+      // 서랍 안에 한 번 더 그리지 않는다(툴팁으로 어디로 가는지만 미리 보여준다).
       chip.addEventListener('click', function(ev){
         ev.preventDefault();
-        if (openEv[key]) delete openEv[key]; else openEv[key] = 'both';
         if (isNote) gotoNote(c.id, c.row); else gotoRow(c.row);
-        render();
       });
     });
-    var evs = document.createElement('div');
-    cites.forEach(function(c){
-      if (openEv[turn.id + ':' + keyOf(c)]) evs.appendChild(evCard(turn, c));
-    });
-    wrap.appendChild(evs);
     var meta = document.createElement('div');
     meta.className = 'mc-meta';
     var bits = [];
@@ -407,15 +371,14 @@ HTML = """
       var btn = document.createElement('button');
       btn.className = 'mc-link';
       btn.textContent = '검색된 문단 ' + n + '개';
-      var shownKey = 'hits:' + turn.id;
       btn.addEventListener('click', function(){
-        if (openEv[shownKey]) delete openEv[shownKey]; else openEv[shownKey] = 1;
+        if (openHits[turn.id]) delete openHits[turn.id]; else openHits[turn.id] = 1;
         render();
       });
       meta.appendChild(btn);
     }
     wrap.appendChild(meta);
-    if (openEv['hits:' + turn.id]) wrap.appendChild(hitsCard(turn));
+    if (openHits[turn.id]) wrap.appendChild(hitsCard(turn));
     if (turn.error){
       var e = document.createElement('div');
       e.className = 'mc-err'; e.textContent = turn.error;
@@ -424,7 +387,7 @@ HTML = """
     return wrap;
   }
   function render(){
-    badge.textContent = window.__mdChatModel || (turns.length ? turns[turns.length - 1].model : '');
+    renderModels();
     var nn = window.__mdChatNotes || 0;
     togN.textContent = nn ? ' ' + nn : '';
     list.innerHTML = '';
@@ -476,6 +439,8 @@ HTML = """
       window.__mdChatReady = !!j.ready;
       if (j.reason) window.__mdChatReason = j.reason;
       if (j.model) window.__mdChatModel = j.model;
+      if (j.models) models = j.models;
+      if (j.picked) picked = j.picked;
       window.__mdChatNotes = j.notes || 0;
       render();
     }).catch(function(){ render(); });
@@ -504,7 +469,7 @@ HTML = """
       });
   }
   function clearAll(){
-    turns = []; openEv = {}; errMsg = null; render();
+    turns = []; openHits = {}; errMsg = null; render();
     fetch('/chat/' + tok(), {method: 'DELETE'}).catch(function(){});
   }
   function autosize(){
@@ -516,6 +481,15 @@ HTML = """
   // 'open'은 여러 경로에서 붙었다 뗀다(버튼·✕·Esc·메모 서랍). 한 곳에서 관찰해 body 클래스를
   // 맞춰야 본문 자리 비우기가 어느 경로로 닫아도 따라온다.
   function syncBody(){ document.body.classList.toggle('mc-open', panel.classList.contains('open')); }
+  // 서랍 위끝을 헤더 아래에 맞춘다 (메모 서랍이 여는 순간 하는 것과 같은 계산).
+  // 창 크기가 바뀌면 헤더 높이도 바뀔 수 있어 resize에서도 다시 잰다.
+  function syncTop(){
+    var h = document.querySelector('.q-header');
+    var top = h ? Math.max(0, h.getBoundingClientRect().bottom) : 0;
+    document.documentElement.style.setProperty('--mc-top', top + 'px');
+  }
+  window.addEventListener('resize', syncTop);
+  syncTop();
   if (window.MutationObserver)
     new MutationObserver(syncBody).observe(panel, {attributes: true, attributeFilter: ['class']});
   syncBody();
@@ -545,6 +519,7 @@ HTML = """
     var opening = !panel.classList.contains('open');
     panel.classList.toggle('open', opening);
     if (opening){
+      syncTop();
       var ap = annoPanel();
       if (ap) ap.classList.remove('open');          // 없을 수도 있다 (메모 기능 미탑재)
       if (!loaded) loadHistory(); else render();
@@ -575,10 +550,25 @@ HTML = """
 """
 
 
+def model_options() -> list[dict]:
+    """서랍 드롭다운에 채울 모델 목록 — 제공사별 저렴→비쌈, 키 없는 건 표시만 하고 못 고른다."""
+    from md4paper.llm.base import PRICING
+
+    keys = config.key_status()
+    out: list[dict] = []
+    for prov in config.PROVIDERS:
+        for mid in config.MODEL_TIERS.get(prov, ()):
+            pr = PRICING.get(mid)
+            out.append({"provider": prov, "model": mid,
+                        "price": (f"${pr[0]:g}/${pr[1]:g}" if pr else ""),
+                        "has_key": bool(keys.get(prov))})
+    return out
+
+
 def readiness() -> tuple[bool, str]:
     """LLM 키가 준비됐는지 (준비됐나?, 안내 메시지). 네트워크는 건드리지 않는다."""
     try:
-        config.build_provider()
+        config.build_chat_provider()
     except RuntimeError as e:
         return False, str(e)
     except Exception as e:  # noqa: BLE001 — 설정 파일 손상 등도 안내로 보여준다
@@ -587,9 +577,9 @@ def readiness() -> tuple[bool, str]:
 
 
 def _model_name() -> str:
-    """헤더 배지에 쓸 모델명 (키가 없으면 빈 문자열)."""
+    """헤더 드롭다운의 현재 값 (키가 없으면 빈 문자열)."""
     try:
-        return str(config.build_provider().model)
+        return str(config.build_chat_provider().model)
     except Exception:  # noqa: BLE001
         return ""
 
@@ -610,7 +600,7 @@ def register_routes(fastapi_app, wd_for: Callable[[str], object],  # noqa: ANN00
     from fastapi.responses import JSONResponse
     from starlette.exceptions import HTTPException
 
-    make = build_provider or config.build_provider
+    make = build_provider or config.build_chat_provider
 
     def _readiness() -> tuple[bool, str]:
         try:
@@ -634,6 +624,7 @@ def register_routes(fastapi_app, wd_for: Callable[[str], object],  # noqa: ANN00
             except Exception:  # noqa: BLE001
                 model = ""
         return {"turns": chat.load(cur), "ready": ok, "reason": reason, "model": model,
+                "models": model_options(), "picked": config.resolve_chat_choice()[1],
                 "notes": len(annotations.load(cur))}   # 서랍의 '메모 포함' 토글 옆 개수
 
     # 동기 def — LLM 호출(수 초)이 이벤트 루프를 막지 않도록 FastAPI 스레드풀에서 돌린다.
@@ -658,6 +649,20 @@ def register_routes(fastapi_app, wd_for: Callable[[str], object],  # noqa: ANN00
             return JSONResponse({"error": msg[:200]}, status_code=502)
         chat.append(cur, turn)
         return turn
+
+    @fastapi_app.put("/chat/{token}/model")
+    def _put_model(token: str, body: dict):  # noqa: ANN202 — 챗봇이 쓸 모델 고르기
+        if wd_for(token) is None:
+            raise HTTPException(status_code=404)
+        prov = str((body or {}).get("provider") or "").strip()
+        mid = str((body or {}).get("model") or "").strip()
+        try:
+            config.set_chat_choice(prov or None, mid or None)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=400)
+        ok, reason = _readiness()
+        return {"ok": True, "ready": ok, "reason": reason,
+                "model": config.resolve_chat_choice()[1], "models": model_options()}
 
     @fastapi_app.delete("/chat/{token}")
     def _del_chat(token: str):  # noqa: ANN202 — 대화 기록 삭제

@@ -529,3 +529,73 @@ def test_init_js_carries_token_and_reason():
     js = chat_panel.init_js("tok123", False, "openai API 키가 없습니다.")
     assert "tok123" in js and "__mdChatReady" in js and "키가 없습니다" in js
     assert "<" not in js  # </script> 조기 종료 방지
+
+
+# --- 모델 고르기 --------------------------------------------------------
+
+
+def test_chat_choice_falls_back_to_global_default():
+    """[chat]을 안 정했으면 전역 기본을 그대로 따른다."""
+    from md4paper import config
+
+    assert config.resolve_chat_choice() == (config.DEFAULT_PROVIDER,
+                                            config.DEFAULT_MODELS[config.DEFAULT_PROVIDER])
+    config.set_default("default_provider", "anthropic")
+    assert config.resolve_chat_choice() == ("anthropic", config.DEFAULT_MODELS["anthropic"])
+
+
+def test_chat_choice_overrides_global_and_clears():
+    """챗봇만 다른 모델로 — 전역 기본(번역 등)은 건드리지 않는다."""
+    from md4paper import config
+
+    config.set_default("default_provider", "openai")
+    config.set_chat_choice("anthropic", "claude-opus-5")
+    assert config.resolve_chat_choice() == ("anthropic", "claude-opus-5")
+    assert config.resolve_provider() == "openai"          # 전역은 그대로
+
+    config.set_chat_choice("gemini")                      # 모델 생략 → 그 제공사 기본
+    assert config.resolve_chat_choice() == ("gemini", config.DEFAULT_MODELS["gemini"])
+
+    config.set_chat_choice(None)                          # 해제 → 다시 전역
+    assert config.resolve_chat_choice() == ("openai", config.DEFAULT_MODELS["openai"])
+
+
+def test_chat_choice_rejects_unknown_provider():
+    from md4paper import config
+
+    with pytest.raises(ValueError):
+        config.set_chat_choice("mistral", "whatever")
+
+
+def test_model_options_marks_providers_without_key():
+    """키 없는 제공사도 목록에는 남긴다 — 왜 못 고르는지 보여주려고."""
+    from md4paper import config
+    from md4paper.ui import chat_panel
+
+    config.set_key("openai", "sk-test")
+    opts = chat_panel.model_options()
+    assert {o["model"] for o in opts} >= set(config.MODEL_TIERS["anthropic"])
+    by_prov = {o["provider"]: o["has_key"] for o in opts}
+    assert by_prov["openai"] is True and by_prov["anthropic"] is False
+
+
+def test_route_put_model_switches_and_reports(client):
+    c, _wd, _state = client
+    from md4paper import config
+
+    config.set_key("anthropic", "sk-ant-test")
+    got = c.put("/chat/tok/model", json={"provider": "anthropic", "model": "claude-sonnet-5"})
+    assert got.status_code == 200 and got.json()["model"] == "claude-sonnet-5"
+    assert config.resolve_chat_choice() == ("anthropic", "claude-sonnet-5")
+    assert c.get("/chat/tok").json()["picked"] == "claude-sonnet-5"
+
+
+def test_route_put_model_rejects_unknown_provider(client):
+    c, _wd, _state = client
+    got = c.put("/chat/tok/model", json={"provider": "mistral", "model": "x"})
+    assert got.status_code == 400
+
+
+def test_route_put_model_unknown_token_is_404(client):
+    c, _wd, _state = client
+    assert c.put("/chat/nope/model", json={"provider": "openai"}).status_code == 404
