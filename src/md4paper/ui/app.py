@@ -269,13 +269,17 @@ sup.md-fn a:hover { text-decoration: underline; }
 }
 """
 
-# ── 정렬 행 호버 + 하이라이트/메모 ────────────────────────────────────────────
-# 뷰어에서 원문|번역을 나란히 볼 때 "이 문단이 저 문단"이라는 대응이 눈에 안 들어온다.
-# 같은 grid row의 두 셀에 같은 옅은 배경 + 왼쪽 파란 선을 얹어 짝을 보여 준다(두 컬럼일 때만).
+# ── 문장 짝 호버 + 하이라이트/메모 ────────────────────────────────────────────
+# 나란히 놓아도 "이 문장이 저 문장"이라는 대응이 눈에 안 들어온다. 마우스를 올린 문장과 그
+# 짝이 되는 반대쪽 문장을 함께 칠한다. 문단(행)은 왼쪽 얇은 선으로만 — 문장이 주인공이다.
 _ANNO_CSS = """
-.sbs-grid.sbs-two .sbs-cell { transition: background-color .12s ease, box-shadow .12s ease; }
-.sbs-grid.sbs-two .sbs-cell.sbs-hl { background: rgba(35,131,226,.055);
-  box-shadow: inset 2px 0 0 rgba(35,131,226,.45); }
+.sbs-grid.sbs-two .sbs-cell { transition: box-shadow .12s ease; }
+.sbs-grid.sbs-two .sbs-cell.sbs-hl { box-shadow: inset 2px 0 0 rgba(35,131,226,.30); }
+.sent { transition: background-color .1s ease; }
+.sent.sent-hl { background: rgba(35,131,226,.17); border-radius: 3px;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+/* 짝을 못 찾은 문장 — 파랑(=짝 있음)과 구별되게 무채색으로 */
+.sent[data-solo].sent-hl { background: rgba(130,130,130,.20); }
 
 /* 하이라이트 — 배경색은 JS가 인라인으로(팔레트). 글자색은 밝은 형광 위라 항상 어둡게 고정한다
    (다크 모드의 옅은 글자색 그대로면 노랑 위에서 읽히지 않는다). */
@@ -308,8 +312,10 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
 .apop-del { border: none; background: none; color: #b3261e; font-size: 12.5px; padding: 3px 7px;
   border-radius: 7px; cursor: pointer; }
 .apop-del:hover { background: rgba(179,38,30,.12); }
-.apop-quote { font-size: 11.5px; line-height: 1.5; color: #8a8780; margin-bottom: 8px;
+.apop-quote { font-size: 11.5px; line-height: 1.5; color: #8a8780; margin-bottom: 6px;
   max-height: 52px; overflow: hidden; }
+.apop-quote.apop-ko, .ap-q.ap-ko { padding-left: 7px; border-left: 2px solid #e0ded9; }
+.apop-row + .apop-quote.apop-ko { border-left-color: #cfcdc8; }
 #md-anno-pop textarea { width: 100%; min-height: 66px; resize: vertical; box-sizing: border-box;
   border: 1px solid #e0ded9; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12.5px;
   background: #fff; color: inherit; outline: none; }
@@ -343,6 +349,7 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
 .ap-del:hover { background: rgba(179,38,30,.12); color: #b3261e; }
 .ap-q { font-size: 12px; line-height: 1.55; color: #5b5851;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ap-q.ap-ko { margin-top: 3px; color: #86837c; }
 .ap-n { font-size: 12px; line-height: 1.55; margin-top: 5px; padding-left: 7px;
   border-left: 2px solid #2383e2; white-space: pre-wrap; }
 .ap-lost .ap-q { opacity: .55; }
@@ -354,8 +361,9 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
   font-weight: 600; }
 
 @media (prefers-color-scheme: dark) {
-  .sbs-grid.sbs-two .sbs-cell.sbs-hl { background: rgba(90,150,230,.10);
-    box-shadow: inset 2px 0 0 rgba(90,150,230,.55); }
+  .sbs-grid.sbs-two .sbs-cell.sbs-hl { box-shadow: inset 2px 0 0 rgba(90,150,230,.45); }
+  .sent.sent-hl { background: rgba(90,150,230,.22); }
+  .sent[data-solo].sent-hl { background: rgba(150,150,150,.20); }
   #md-anno-pop, #md-anno-panel { background: #1f1f1f; border-color: #3a3a3a; color: #d4d4d4; }
   #md-anno-pop textarea { background: #262626; border-color: #3a3a3a; }
   .apop-quote, .ap-side, .ap-foot, .ap-empty { color: #8f8f8f; }
@@ -363,6 +371,8 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
   .ap-count { background: #2c2c2c; color: #b8b8b8; }
   .ap-item:hover, .ap-x:hover { background: #2c2c2c; }
   .ap-q { color: #b8b8b8; }
+  .ap-q.ap-ko { color: #8f8f8f; }
+  .apop-quote.apop-ko, .ap-q.ap-ko { border-left-color: #3a3a3a; }
 }
 """
 
@@ -376,7 +386,7 @@ _ANNO_HTML = """
   <div class="ap-head"><b>하이라이트 · 메모</b><span class="ap-count">0</span>
     <span class="apop-sp"></span><button class="ap-x" title="닫기 (Esc)">&#10005;</button></div>
   <div class="ap-list"></div>
-  <div class="ap-foot">본문을 드래그하면 색을 고를 수 있어요 · 하이라이트를 누르면 메모</div>
+  <div class="ap-foot">본문을 드래그하면 그 <b>문장</b>이 원문·번역 양쪽에 표시됩니다 · 눌러서 메모</div>
 </div>
 <script>
 (function(){
@@ -447,18 +457,12 @@ _ANNO_HTML = """
     }
     return best >= 0 ? [best, best + q.length] : null;
   }
-  function paint(scope, hits){        // hits: [{a, s, e}] — 겹쳐도 되도록 경계로 잘라 칠한다
-    var pts = {}, i, k;
-    for (i = 0; i < hits.length; i++){ pts[hits[i].s] = 1; pts[hits[i].e] = 1; }
-    var bs = Object.keys(pts).map(Number).sort(function(x, y){ return x - y; }), segs = [];
-    for (i = 0; i < bs.length - 1; i++){
-      var cov = [];
-      for (k = 0; k < hits.length; k++) if (hits[k].s <= bs[i] && hits[k].e >= bs[i + 1]) cov.push(hits[k].a);
-      if (cov.length) segs.push({s: bs[i], e: bs[i + 1], cov: cov});
-    }
-    // 자를 지점을 먼저 다 모은 뒤 노드별로 뒤에서 앞으로 자른다 — 한 노드를 쪼개도
-    // 다른 노드의 오프셋은 그대로고, 같은 노드 안에서는 뒷쪽부터 잘라야 앞 오프셋이 살아남는다.
-    var ns = textNodes(scope), nodes = [], groups = [], t = 0;
+  // 평문 오프셋 구간들을 텍스트 노드를 쪼개 감싼다 (구간끼리 겹치지 않아야 한다).
+  // 자를 지점을 먼저 다 모은 뒤 노드별로 뒤에서 앞으로 자른다 — 한 노드를 쪼개도 다른 노드의
+  // 오프셋은 그대로고, 같은 노드 안에서는 뒷쪽부터 잘라야 앞 오프셋이 살아남는다.
+  // 감싸도 textContent는 그대로라 하이라이트 앵커(오프셋)와 문장 span이 서로를 망가뜨리지 않는다.
+  function wrapRanges(scope, segs, make){
+    var ns = textNodes(scope), nodes = [], groups = [], t = 0, i, k, z;
     for (i = 0; i < ns.length; i++){ var L = ns[i].nodeValue.length; nodes.push([ns[i], t, t + L]); t += L; }
     for (i = 0; i < segs.length; i++){
       for (k = 0; k < nodes.length; k++){
@@ -467,7 +471,7 @@ _ANNO_HTML = """
         var a0 = Math.max(segs[i].s - s0, 0), b0 = Math.min(segs[i].e - s0, e0 - s0);
         if (b0 <= a0) continue;
         var g = null;
-        for (var z = 0; z < groups.length; z++) if (groups[z][0] === nodes[k][0]) { g = groups[z]; break; }
+        for (z = 0; z < groups.length; z++) if (groups[z][0] === nodes[k][0]) { g = groups[z]; break; }
         if (!g){ g = [nodes[k][0], []]; groups.push(g); }
         g[1].push({a: a0, b: b0, seg: segs[i]});
       }
@@ -479,50 +483,77 @@ _ANNO_HTML = """
         var h = hs[k];
         if (h.b < node.nodeValue.length) node.splitText(h.b);
         var target = h.a > 0 ? node.splitText(h.a) : node;
-        var top = h.seg.cov[h.seg.cov.length - 1], noted = false;
-        for (var q2 = 0; q2 < h.seg.cov.length; q2++) if ((h.seg.cov[q2].note || '').trim()) noted = true;
-        var mk = document.createElement('mark');
-        mk.className = 'md-anno' + (noted ? ' md-anno-note' : '');
-        mk.setAttribute('data-ids', h.seg.cov.map(function(a){ return a.id; }).join(' '));
-        mk.style.background = SWATCH[top.color] || SWATCH.yellow;
-        target.parentNode.replaceChild(mk, target);
-        mk.appendChild(target);
+        var el = make(h.seg);
+        target.parentNode.replaceChild(el, target);
+        el.appendChild(target);
       }
     }
   }
+  function paint(scope, hits){        // hits: [{a, s, e}] — 겹쳐도 되도록 경계로 잘라 칠한다
+    var pts = {}, i, k;
+    for (i = 0; i < hits.length; i++){ pts[hits[i].s] = 1; pts[hits[i].e] = 1; }
+    var bs = Object.keys(pts).map(Number).sort(function(x, y){ return x - y; }), segs = [];
+    for (i = 0; i < bs.length - 1; i++){
+      var cov = [];
+      for (k = 0; k < hits.length; k++) if (hits[k].s <= bs[i] && hits[k].e >= bs[i + 1]) cov.push(hits[k].a);
+      if (cov.length) segs.push({s: bs[i], e: bs[i + 1], cov: cov});
+    }
+    wrapRanges(scope, segs, function(seg){
+      var top = seg.cov[seg.cov.length - 1], noted = false;
+      for (var q = 0; q < seg.cov.length; q++) if ((seg.cov[q].note || '').trim()) noted = true;
+      var mk = document.createElement('mark');
+      mk.className = 'md-anno' + (noted ? ' md-anno-note' : '');
+      mk.setAttribute('data-ids', seg.cov.map(function(a){ return a.id; }).join(' '));
+      mk.style.background = SWATCH[top.color] || SWATCH.yellow;
+      return mk;
+    });
+  }
   function applyAll(){
-    var sc = scopes(), i, j;
+    var sc = scopes(), i, j, k;
+    // 뷰어가 다시 그려지면 셀이 통째로 새 요소다 — 마지막에 올려 뒀던 행 번호가 남아 있으면
+    // 같은 행에 다시 마우스를 올려도 "이미 그 행"으로 보고 문장 처리를 건너뛴다.
+    setPair(null); hoverRow = null;
     for (i = 0; i < sc.length; i++) unwrap(sc[i]);
     if (!sc.length){ renderPanel(); return; }   // 텍스트 패널이 안 보임(PDF만) — 목록만 유지
-    var placed = {}, has = {}, repaired = false;
+    var placed = [], has = {}, repaired = false;   // placed: [{item, anchor, sc, s, e}]
     for (i = 0; i < sc.length; i++) has[sc[i].getAttribute('data-side')] = 1;
+    function done(an){ for (var z = 0; z < placed.length; z++) if (placed[z].an === an) return true; return false; }
     for (i = 0; i < sc.length; i++){
       var side = sc[i].getAttribute('data-side'), row = +sc[i].getAttribute('data-row');
       for (j = 0; j < items.length; j++){
-        var a = items[j];
-        if (placed[a.id] || a.side !== side || a.row !== row) continue;
-        var r = resolve(sc[i], a);
-        if (r) placed[a.id] = {sc: sc[i], s: r[0], e: r[1]};
+        for (k = 0; k < items[j].anchors.length; k++){
+          var an = items[j].anchors[k];
+          if (an.side !== side || an.row !== row || done(an)) continue;
+          var r = resolve(sc[i], an);
+          if (r) placed.push({it: items[j], an: an, sc: sc[i], s: r[0], e: r[1]});
+        }
       }
     }
     for (j = 0; j < items.length; j++){   // 행이 밀렸으면 같은 쪽의 다른 셀에서 문구로 다시 찾는다
-      var b = items[j]; if (placed[b.id]) continue;
-      for (i = 0; i < sc.length; i++){
-        if (sc[i].getAttribute('data-side') !== b.side) continue;
-        var p = sc[i].textContent.indexOf(b.quote); if (p < 0) continue;
-        placed[b.id] = {sc: sc[i], s: p, e: p + b.quote.length};
-        b.row = +sc[i].getAttribute('data-row'); b.start = p; b.end = p + b.quote.length;
-        repaired = true; break;
+      for (k = 0; k < items[j].anchors.length; k++){
+        var b = items[j].anchors[k]; if (done(b)) continue;
+        for (i = 0; i < sc.length; i++){
+          if (sc[i].getAttribute('data-side') !== b.side) continue;
+          var p = sc[i].textContent.indexOf(b.quote); if (p < 0) continue;
+          placed.push({it: items[j], an: b, sc: sc[i], s: p, e: p + b.quote.length});
+          b.row = +sc[i].getAttribute('data-row'); b.start = p; b.end = p + b.quote.length;
+          repaired = true; break;
+        }
       }
     }
-    lost = {};   // 컬럼을 꺼 둔 쪽은 '못 찾음'이 아니라 그냥 안 보이는 것
-    for (j = 0; j < items.length; j++) if (!placed[items[j].id] && has[items[j].side]) lost[items[j].id] = 1;
+    // 보이는 쪽 앵커를 하나도 못 찾은 표시만 '위치 못 찾음' — 컬럼을 꺼 둔 쪽은 그냥 안 보이는 것
+    lost = {};
+    for (j = 0; j < items.length; j++){
+      var vis = 0, ok = 0;
+      for (k = 0; k < items[j].anchors.length; k++){
+        if (!has[items[j].anchors[k].side]) continue;
+        vis++; if (done(items[j].anchors[k])) ok++;
+      }
+      if (vis && !ok) lost[items[j].id] = 1;
+    }
     for (i = 0; i < sc.length; i++){
       var hits = [];
-      for (j = 0; j < items.length; j++){
-        var pl = placed[items[j].id];
-        if (pl && pl.sc === sc[i]) hits.push({a: items[j], s: pl.s, e: pl.e});
-      }
+      for (j = 0; j < placed.length; j++) if (placed[j].sc === sc[i]) hits.push({a: placed[j].it, s: placed[j].s, e: placed[j].e});
       if (hits.length) paint(sc[i], hits);
     }
     renderPanel();
@@ -557,19 +588,61 @@ _ANNO_HTML = """
     while (s < e && /\\s/.test(txt.charAt(s))) s++;          // 앞뒤 공백까지 칠하지 않게
     while (e > s && /\\s/.test(txt.charAt(e - 1))) e--;
     if (e <= s){ clearSel(); return; }
-    pending = {scope: sc, start: s, end: e, quote: txt.slice(s, e),
-      prefix: txt.slice(Math.max(0, s - CTX), s), suffix: txt.slice(e, e + CTX)};
+    pending = {scope: sc, start: s, end: e};
     bar.innerHTML = dots(null) + '<span class="ab-sep"></span>'
       + '<button class="ab-btn" data-act="note">메모 달기</button>';
     bar.classList.add('open');
     place(bar, r.getBoundingClientRect());
   }
+
+  // 표시는 **문장 단위**다 — 걸친 문장을 통째로 잡고, 짝이 있으면 반대쪽 문장까지 함께.
+  // 그래서 원문에 단 메모가 번역에도 같이 붙는다. 문장을 못 가려내면(표 칸·캡션 등)
+  // 드래그한 범위를 그대로 쓴다 — 표시를 못 하게 만드는 것보다 낫다.
+  function anchorOf(cell, s, e){
+    var txt = cell.textContent;
+    return {side: cell.getAttribute('data-side'), row: +cell.getAttribute('data-row'),
+      start: s, end: e, quote: txt.slice(s, e),
+      prefix: txt.slice(Math.max(0, s - CTX), s), suffix: txt.slice(e, e + CTX)};
+  }
+  function span(list, idx){          // 문장 인덱스 묶음 → 이어진 한 구간
+    if (!idx.length) return null;
+    var s = list[idx[0]].s, e = list[idx[0]].e;
+    for (var i = 1; i < idx.length; i++){ s = Math.min(s, list[idx[i]].s); e = Math.max(e, list[idx[i]].e); }
+    return [s, e];
+  }
+  function touched(list, s, e){      // 선택이 걸친 문장 인덱스
+    var out = [], weak = [];
+    for (var i = 0; i < list.length; i++){
+      var ov = Math.min(list[i].e, e) - Math.max(list[i].s, s);
+      if (ov <= 0) continue;
+      // 앞 문장의 마침표 하나만 스친 건 그 문장을 잡은 게 아니다 (드래그 시작점이 흔히 그렇다).
+      // 다만 스친 것밖에 없으면 그거라도 쓴다 — 아무것도 안 잡히는 것보다 낫다.
+      (ov >= 2 ? out : weak).push(i);
+    }
+    return out.length ? out : weak;
+  }
+  function anchorsFor(scope, s, e){
+    var P = scope.__pairing;
+    if (P){
+      var isEn = scope === P.enCell, mine = isEn ? P.en : P.ko;
+      var hit = touched(mine, s, e), eIdx = [], kIdx = [], i, j;
+      for (i = 0; i < P.pairs.length; i++){
+        var own = isEn ? P.pairs[i][0] : P.pairs[i][1], on = false;
+        for (j = 0; j < own.length; j++) if (hit.indexOf(own[j]) >= 0) on = true;
+        if (on){ eIdx = eIdx.concat(P.pairs[i][0]); kIdx = kIdx.concat(P.pairs[i][1]); }
+      }
+      var re = span(P.en, eIdx), rk = span(P.ko, kIdx), out = [];
+      if (re) out.push(anchorOf(P.enCell, re[0], re[1]));
+      if (rk) out.push(anchorOf(P.koCell, rk[0], rk[1]));
+      if (out.length) return out;
+    }
+    var solo = sentsOf(scope), h = touched(solo, s, e), r = span(solo, h);   // 한 컬럼만 보일 때
+    return [anchorOf(scope, r ? r[0] : s, r ? r[1] : e)];
+  }
   function create(color, withNote){
     if (!pending) return;
-    var a = {id: uid(), side: pending.scope.getAttribute('data-side'),
-      row: +pending.scope.getAttribute('data-row'), start: pending.start, end: pending.end,
-      quote: pending.quote, prefix: pending.prefix, suffix: pending.suffix,
-      color: color, note: '', created: Date.now() / 1000};
+    var a = {id: uid(), color: color, note: '', created: Date.now() / 1000,
+      anchors: anchorsFor(pending.scope, pending.start, pending.end)};
     items.push(a);
     var sel = window.getSelection(); if (sel) sel.removeAllRanges();
     clearSel(); applyAll(); flush();
@@ -590,12 +663,19 @@ _ANNO_HTML = """
     }
     return out;
   }
+  function quoteOf(a, side){         // 그 쪽 앵커의 문장 (없으면 빈 문자열)
+    for (var i = 0; i < a.anchors.length; i++) if (a.anchors[i].side === side) return a.anchors[i].quote;
+    return '';
+  }
+  function cut(t, n){ return t.length > n ? t.slice(0, n) + '…' : t; }
   function openPop(id, rect){
     var a = find(id); if (!a) return;
     editing = id;
+    var en = quoteOf(a, 'en'), ko = quoteOf(a, 'ko');
     pop.innerHTML = '<div class="apop-row">' + dots(a.color)
       + '<span class="apop-sp"></span><button class="apop-del">삭제</button></div>'
-      + '<div class="apop-quote">' + esc(a.quote.length > 140 ? a.quote.slice(0, 140) + '…' : a.quote) + '</div>'
+      + (en ? '<div class="apop-quote">' + esc(cut(en, 130)) + '</div>' : '')
+      + (ko ? '<div class="apop-quote apop-ko">' + esc(cut(ko, 130)) + '</div>' : '')
       + '<textarea placeholder="메모 (자동 저장)"></textarea>';
     var ta = pop.querySelector('textarea'); ta.value = a.note || '';
     pop.classList.add('open');
@@ -629,23 +709,28 @@ _ANNO_HTML = """
     panel.querySelector('.ap-count').textContent = items.length;
     var btn = document.querySelector('.md4-anno-btn');
     if (btn) btn.setAttribute('data-count', items.length);
+    function key(a){   // 문서 순서 — 원문 앵커 기준, 없으면 번역 앵커
+      var an = a.anchors[0];
+      for (var i = 0; i < a.anchors.length; i++) if (a.anchors[i].side === 'en') an = a.anchors[i];
+      return [an.row, an.side === 'en' ? 0 : 1, an.start];
+    }
     var sorted = items.slice().sort(function(x, y){
-      if (x.row !== y.row) return x.row - y.row;
-      if (x.side !== y.side) return x.side === 'en' ? -1 : 1;
-      return x.start - y.start;
+      var kx = key(x), ky = key(y);
+      return kx[0] - ky[0] || kx[1] - ky[1] || kx[2] - ky[2];
     });
     if (!sorted.length){
       list.innerHTML = '<div class="ap-empty">아직 표시한 곳이 없습니다.<br>본문을 드래그해 색을 고르면 여기에 쌓입니다.</div>';
       return;
     }
     list.innerHTML = sorted.map(function(a){
-      var q = a.quote.length > 180 ? a.quote.slice(0, 180) + '…' : a.quote;
+      var en = quoteOf(a, 'en'), ko = quoteOf(a, 'ko');
       return '<div class="ap-item' + (lost[a.id] ? ' ap-lost' : '') + '" data-id="' + esc(a.id) + '">'
         + '<div class="ap-top"><span class="ap-dot" style="background:' + (SWATCH[a.color] || SWATCH.yellow) + '"></span>'
-        + '<span class="ap-side">' + (a.side === 'ko' ? '번역' : '원문') + '</span>'
+        + '<span class="ap-side">' + (en && ko ? '원문 · 번역' : (ko ? '번역' : '원문')) + '</span>'
         + (lost[a.id] ? '<span class="ap-lostb">위치 못 찾음</span>' : '')
         + '<span class="apop-sp"></span><button class="ap-del" title="삭제">&#10005;</button></div>'
-        + '<div class="ap-q">' + esc(q) + '</div>'
+        + (en ? '<div class="ap-q">' + esc(cut(en, 170)) + '</div>' : '')
+        + (ko ? '<div class="ap-q ap-ko">' + esc(cut(ko, 170)) + '</div>' : '')
         + ((a.note || '').trim() ? '<div class="ap-n">' + esc(a.note) + '</div>' : '')
         + '</div>';
     }).join('');
@@ -698,22 +783,174 @@ _ANNO_HTML = """
     else if (panel.classList.contains('open')) panel.classList.remove('open');
   });
 
-  // ---- 정렬 행 호버 (원문 ↔ 번역 짝 보여 주기) ----
-  var hoverRow = null;
+  // ---- 문장 단위 호버 (원문 ↔ 번역 1:1) ----
+  // 행에 처음 마우스를 올릴 때만 그 행의 두 셀을 문장으로 쪼개 짝을 지어 span으로 감싼다(지연 처리).
+  // 논문 한 편의 문단이 수백 개라 전부 미리 처리하면 첫 렌더가 무거워진다.
+  var hoverRow = null, hoverPair = null;
+
+  // 블록 경계 — <p>a</p><p>b</p>의 textContent는 "ab"라 경계 문자가 없다. 블록별로 나눠
+  // 문장을 쪼개지 않으면 앞 문단의 끝과 뒤 문단의 첫 문장이 한 문장으로 붙는다.
+  var BLOCK = /^(P|LI|H1|H2|H3|H4|H5|H6|BLOCKQUOTE|PRE|TD|TH|FIGCAPTION|DT|DD)$/;
+  function blockRanges(scope){
+    var ns = textNodes(scope), out = [], t = 0, cur = null;
+    for (var i = 0; i < ns.length; i++){
+      var el = ns[i].parentElement, L = ns[i].nodeValue.length;
+      while (el && el !== scope && !BLOCK.test(el.tagName)) el = el.parentElement;
+      if (!cur || cur.el !== el){ cur = {el: el, s: t, e: t + L}; out.push(cur); }
+      else cur.e = t + L;
+      t += L;
+    }
+    return out;
+  }
+
+  // 문장 끝처럼 보이지만 아닌 것들: et al. · e.g. · 0.5 · 3.1 · 이니셜(A. Jelson) ·
+  // 괄호 안(인용 덩어리 [3, Adams et al., 2022]) · 마침표 뒤가 소문자로 이어지는 경우.
+  var ABBR = /(?:e\\.g|i\\.e|cf|vs|etc|al|Fig|Figs|Eq|Eqs|Sec|Secs|Tab|No|Dr|Mr|Mrs|Ms|Prof|St|approx|resp|Ref|Refs|pp|Vol|Ch|Inc|Ltd|Univ)\\.$/i;
+  var CLOSERS = '.!?\\u2026"\\u2019\\u201d\\')]';
+  function trimRange(txt, s, e){
+    while (s < e && /\\s/.test(txt.charAt(s))) s++;
+    while (e > s && /\\s/.test(txt.charAt(e - 1))) e--;
+    return e > s ? {s: s, e: e} : null;
+  }
+  function sentences(txt, s0, e0){
+    var out = [], start = s0, depth = 0, i, r;
+    for (i = s0; i < e0; i++){
+      var c = txt.charAt(i);
+      if (c === '(' || c === '[' || c === '{'){ depth++; continue; }
+      if (c === ')' || c === ']' || c === '}'){ depth = Math.max(0, depth - 1); continue; }
+      if (depth > 0 || '.!?\\u2026'.indexOf(c) < 0) continue;
+      var j = i + 1;
+      while (j < e0 && CLOSERS.indexOf(txt.charAt(j)) >= 0) j++;   // 닫는 따옴표·괄호까지 문장에 포함
+      if (j < e0 && !/\\s/.test(txt.charAt(j))) continue;          // 0.5 · 3.1 처럼 붙어 있으면 문장 끝이 아님
+      var head = txt.slice(start, i + 1);
+      if (ABBR.test(head) || /(^|[\\s(\\[])[A-Z]\\.$/.test(head)) continue;
+      var k = j; while (k < e0 && /\\s/.test(txt.charAt(k))) k++;
+      if (k < e0 && /[a-z,;]/.test(txt.charAt(k))) continue;       // 소문자로 이어지면 아직 한 문장
+      r = trimRange(txt, start, j); if (r) out.push(r);
+      start = k; i = k - 1;
+    }
+    r = trimRange(txt, start, e0); if (r) out.push(r);
+    return out;
+  }
+  function sentsOf(scope){
+    var txt = scope.textContent, bs = blockRanges(scope), out = [], i;
+    for (i = 0; i < bs.length; i++) out = out.concat(sentences(txt, bs[i].s, bs[i].e));
+    return out;
+  }
+
+  // 문장 수가 같으면 순서대로 1:1 (번역이 문장을 지킨 흔한 경우 — 추측이 아니다).
+  // 다르면 길이비 DP로 1:2·2:1·누락까지 허용해 맞춘다. 어림짐작이므로 절반 넘게 짝을 못 지으면
+  // 아예 포기하고 문단 표시로 물러난다 — 틀린 짝을 보여 주느니 안 보여 주는 게 낫다.
+  var MOVES = [[1, 1, 0], [1, 2, 1.4], [2, 1, 1.4], [1, 0, 4], [0, 1, 4]];
+  function pairUp(E, K){
+    var m = E.length, n = K.length, i, j, a, out = [];
+    if (!m || !n) return null;
+    if (m === n){ for (i = 0; i < m; i++) out.push([[i], [i]]); return out; }
+    var eL = [], kL = [], totE = 0, totK = 0;
+    for (i = 0; i < m; i++){ eL.push(E[i].e - E[i].s); totE += eL[i]; }
+    for (j = 0; j < n; j++){ kL.push(K[j].e - K[j].s); totK += kL[j]; }
+    var r = totK / Math.max(1, totE), INF = 1e18, d = [], bk = [];
+    for (i = 0; i <= m; i++){
+      d.push([]); bk.push([]);
+      for (j = 0; j <= n; j++){ d[i].push(INF); bk[i].push(null); }
+    }
+    d[0][0] = 0;
+    for (i = 0; i <= m; i++) for (j = 0; j <= n; j++){
+      if (d[i][j] >= INF) continue;
+      for (var t = 0; t < MOVES.length; t++){
+        var di = MOVES[t][0], dj = MOVES[t][1];
+        if (i + di > m || j + dj > n) continue;
+        var x = 0, y = 0;
+        for (a = 0; a < di; a++) x += eL[i + a];
+        for (a = 0; a < dj; a++) y += kL[j + a];
+        var c = d[i][j] + Math.abs(x * r - y) / Math.sqrt(Math.max(1, x * r + y)) + MOVES[t][2];
+        if (c < d[i + di][j + dj]){ d[i + di][j + dj] = c; bk[i + di][j + dj] = [i, j, di, dj]; }
+      }
+    }
+    if (d[m][n] >= INF) return null;
+    var path = [], p = [m, n];
+    while (p[0] || p[1]){
+      var b = bk[p[0]][p[1]]; if (!b) return null;
+      path.push(b); p = [b[0], b[1]];
+    }
+    path.reverse();
+    var solo = 0;
+    for (i = 0; i < path.length; i++){
+      var es = [], ks = [];
+      for (a = 0; a < path[i][2]; a++) es.push(path[i][0] + a);
+      for (a = 0; a < path[i][3]; a++) ks.push(path[i][1] + a);
+      if (!es.length || !ks.length) solo++;
+      out.push([es, ks]);
+    }
+    return solo * 2 > out.length ? null : out;
+  }
+
+  function rowCells(row){
+    return [].slice.call(document.querySelectorAll('.sbs-grid.sbs-two .sbs-cell[data-row="' + row + '"]'));
+  }
+  function prepareRow(cells){
+    var en = null, ko = null, i;
+    for (i = 0; i < cells.length; i++){
+      if (cells[i].dataset.sent) return;                  // 이미 처리한 행
+      if (cells[i].getAttribute('data-side') === 'en') en = cells[i]; else ko = cells[i];
+    }
+    if (!en || !ko) return;                               // 한 컬럼만 보이면 문장 대응은 의미가 없다
+    en.dataset.sent = ko.dataset.sent = '1';
+    var E = sentsOf(en), K = sentsOf(ko), pairs = pairUp(E, K);
+    if (!pairs) return;
+    // 표시를 문장 단위로 잡을 때 이 짝 정보를 쓴다 (원문에 그으면 번역 쪽 문장도 함께)
+    en.__pairing = ko.__pairing = {en: E, ko: K, pairs: pairs, enCell: en, koCell: ko};
+    var row = en.getAttribute('data-row'), segE = [], segK = [];
+    function push(dst, src, idx, id, solo){
+      for (var z = 0; z < idx.length; z++) dst.push({s: src[idx[z]].s, e: src[idx[z]].e, id: id, solo: solo});
+    }
+    for (i = 0; i < pairs.length; i++){
+      var id = row + '-' + i, solo = !pairs[i][0].length || !pairs[i][1].length;
+      push(segE, E, pairs[i][0], id, solo);
+      push(segK, K, pairs[i][1], id, solo);
+    }
+    function make(seg){
+      var sp = document.createElement('span');
+      sp.className = 'sent';
+      sp.setAttribute('data-pair', seg.id);
+      if (seg.solo) sp.setAttribute('data-solo', '1');    // 짝을 못 찾은 문장 — 옅은 회색으로 구분
+      return sp;
+    }
+    wrapRanges(en, segE, make);
+    wrapRanges(ko, segK, make);
+  }
+
+  function setPair(id){
+    if (id === hoverPair) return;
+    var on = document.querySelectorAll('.sent-hl'), i;
+    for (i = 0; i < on.length; i++) on[i].classList.remove('sent-hl');
+    hoverPair = id;
+    if (!id) return;
+    var el = document.querySelectorAll('[data-pair="' + id + '"]');
+    for (i = 0; i < el.length; i++) el[i].classList.add('sent-hl');
+  }
   function clearHover(){
     var on = document.querySelectorAll('.sbs-cell.sbs-hl');
     for (var i = 0; i < on.length; i++) on[i].classList.remove('sbs-hl');
-    hoverRow = null;
+    hoverRow = null; setPair(null);
   }
   document.addEventListener('mouseover', function(e){
     var cell = e.target.closest ? e.target.closest('.sbs-grid.sbs-two .sbs-cell') : null;
-    var row = cell ? cell.getAttribute('data-row') : null;
-    if (row === hoverRow) return;
-    clearHover();
-    if (row === null) return;
-    var pair = document.querySelectorAll('.sbs-grid.sbs-two .sbs-cell[data-row="' + row + '"]');
-    for (var i = 0; i < pair.length; i++) pair[i].classList.add('sbs-hl');
-    hoverRow = row;
+    if (!cell){ if (hoverRow !== null) clearHover(); return; }
+    var row = cell.getAttribute('data-row'), fresh = false;
+    if (row !== hoverRow){
+      clearHover();
+      hoverRow = row;
+      var cells = rowCells(row);
+      for (var i = 0; i < cells.length; i++) cells[i].classList.add('sbs-hl');
+      prepareRow(cells); fresh = true;
+    }
+    var t = e.target.closest('[data-pair]');
+    if (!t && fresh){   // 방금 감싼 직후엔 새 mouseover가 오지 않으니 커서 아래를 직접 본다
+      var under = document.elementFromPoint(e.clientX, e.clientY);
+      t = under && under.closest ? under.closest('[data-pair]') : null;
+    }
+    setPair(t ? t.getAttribute('data-pair') : null);
   });
 
   setTimeout(applyAll, 400);   // 첫 렌더 안전망 (이후엔 뷰어가 __mdAnnoApply를 부른다)
@@ -1431,7 +1668,7 @@ def build(ctrl: UIController) -> None:
     ui.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
     ui.add_css(_ANNO_CSS)
     ui.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
-    ui.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 정렬 행 호버
+    ui.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
 
     def push_cite_tips() -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""
@@ -1813,7 +2050,7 @@ def build(ctrl: UIController) -> None:
             ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
-                .tooltip("하이라이트 · 메모 목록 — 본문을 드래그하면 색을 고를 수 있어요")
+                .tooltip("하이라이트 · 메모 목록 — 본문을 드래그하면 그 문장이 원문·번역 양쪽에 표시됩니다")
             ui.space()
             export_fmt_review()
             library_button()
