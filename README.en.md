@@ -342,8 +342,14 @@ to make room), and it answers about this one paper only. Drag its left edge to r
 remembered.
 
 - **Click a citation number in the answer and it jumps to the paragraph behind it.** The point is to
-  show you where the answer came from instead of asking you to trust it — a `to the text` button
-  scrolls the viewer to that paragraph.
+  show you where the answer came from instead of asking you to trust it — the viewer scrolls to that
+  paragraph and flashes it. Since the original and the translation already sit side by side there,
+  the panel doesn't redraw the paragraph itself (hover the chip to preview where it goes). `N
+  paragraphs retrieved` under an answer lists what was searched.
+- **Pick the model in the panel header.** Because these are short exchanges, you may want a
+  different tier than you'd use to translate a whole paper, so **the chatbot's model is stored
+  separately and leaves your translation settings alone.** The list shows all three providers'
+  models with their prices; providers you have no key for are listed as `(no key)`.
 - **Ask in Korean and it still searches the English original.** Retrieval is BM25 (pure Python, no
   embeddings), splitting English into words and Korean into character bigrams. When the vocabulary
   doesn't line up, the LLM expands the question into synonym keywords and it searches again. The
