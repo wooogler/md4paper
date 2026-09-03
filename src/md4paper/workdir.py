@@ -152,6 +152,11 @@ class WorkDir:
     def status_json(self) -> Path:
         return self.root / "status.json"
 
+    @property
+    def annotations_json(self) -> Path:
+        """뷰어에서 그은 하이라이트 · 메모 (읽는 사람의 것이라 파이프라인이 덮어쓰지 않는다)."""
+        return self.root / "annotations.json"
+
     # --- 생성 ---
     def ensure(self) -> None:
         for d in (self.extract, self.structure, self.cite, self.translate, self.out, self.logs):

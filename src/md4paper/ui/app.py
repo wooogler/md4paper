@@ -6,6 +6,7 @@ CLI와 같은 아티팩트(sections.yaml 등)를 읽고 쓴다. 항상 떠 있�
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -13,7 +14,7 @@ from pathlib import Path
 
 from md4paper import config, library
 from md4paper.ir import Flavor, GlossaryEntry
-from md4paper.ui import desktop
+from md4paper.ui import annotations, desktop
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir
 
@@ -266,6 +267,458 @@ sup.md-fn a:hover { text-decoration: underline; }
   .vpdf { background: #151515; }
   .sbs-row-sep { border-top-color: #2c2c2c; }
 }
+"""
+
+# ── 정렬 행 호버 + 하이라이트/메모 ────────────────────────────────────────────
+# 뷰어에서 원문|번역을 나란히 볼 때 "이 문단이 저 문단"이라는 대응이 눈에 안 들어온다.
+# 같은 grid row의 두 셀에 같은 옅은 배경 + 왼쪽 파란 선을 얹어 짝을 보여 준다(두 컬럼일 때만).
+_ANNO_CSS = """
+.sbs-grid.sbs-two .sbs-cell { transition: background-color .12s ease, box-shadow .12s ease; }
+.sbs-grid.sbs-two .sbs-cell.sbs-hl { background: rgba(35,131,226,.055);
+  box-shadow: inset 2px 0 0 rgba(35,131,226,.45); }
+
+/* 하이라이트 — 배경색은 JS가 인라인으로(팔레트). 글자색은 밝은 형광 위라 항상 어둡게 고정한다
+   (다크 모드의 옅은 글자색 그대로면 노랑 위에서 읽히지 않는다). */
+mark.md-anno { color: #24211c; border-radius: 2px; padding: 0; cursor: pointer;
+  box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+mark.md-anno.md-anno-note { box-shadow: inset 0 -2px 0 rgba(0,0,0,.32); }  /* 메모가 붙은 것 */
+mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
+@keyframes mdAnnoFlash { 0%,55% { outline: 2px solid #2383e2; outline-offset: 2px; } 100% { outline-color: transparent; } }
+
+/* 드래그 직후 뜨는 색 고르기 막대 */
+#md-anno-bar { position: fixed; z-index: 10002; display: none; align-items: center; gap: 3px;
+  padding: 5px 7px; border-radius: 11px; background: #2b2b2e; box-shadow: 0 8px 26px rgba(0,0,0,.36); }
+#md-anno-bar.open { display: flex; }
+.ab-dot { width: 19px; height: 19px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 1.5px solid rgba(255,255,255,.32); transition: transform .1s ease; }
+.ab-dot:hover { transform: scale(1.16); }
+.ab-dot.on { border-color: #2383e2; box-shadow: 0 0 0 2px rgba(35,131,226,.35); }
+.ab-sep { width: 1px; height: 16px; background: rgba(255,255,255,.22); margin: 0 3px; }
+#md-anno-bar .ab-btn { border: none; background: none; color: #e8e8e8; font-size: 12.5px;
+  padding: 3px 7px; border-radius: 7px; cursor: pointer; }
+#md-anno-bar .ab-btn:hover { background: rgba(255,255,255,.16); }
+
+/* 하이라이트를 누르면 뜨는 메모 카드 */
+#md-anno-pop { position: fixed; z-index: 10003; display: none; width: 282px; padding: 10px;
+  border-radius: 12px; background: #fff; border: 1px solid #e6e4e0; color: #37352f;
+  box-shadow: 0 12px 36px rgba(0,0,0,.18); }
+#md-anno-pop.open { display: block; }
+.apop-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.apop-sp { flex: 1 1 auto; }
+.apop-del { border: none; background: none; color: #b3261e; font-size: 12.5px; padding: 3px 7px;
+  border-radius: 7px; cursor: pointer; }
+.apop-del:hover { background: rgba(179,38,30,.12); }
+.apop-quote { font-size: 11.5px; line-height: 1.5; color: #8a8780; margin-bottom: 8px;
+  max-height: 52px; overflow: hidden; }
+#md-anno-pop textarea { width: 100%; min-height: 66px; resize: vertical; box-sizing: border-box;
+  border: 1px solid #e0ded9; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12.5px;
+  background: #fff; color: inherit; outline: none; }
+#md-anno-pop textarea:focus { border-color: #2383e2; }
+
+/* 오른쪽 목록 서랍 */
+#md-anno-panel { position: fixed; top: 50px; right: 0; bottom: 0; width: 320px; z-index: 9000;
+  display: none; flex-direction: column; background: #fff; border-left: 1px solid #e6e4e0;
+  color: #37352f; box-shadow: -10px 0 30px rgba(0,0,0,.10); }
+#md-anno-panel.open { display: flex; }
+.ap-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px;
+  border-bottom: 1px solid #ecebe8; font-size: 13px; }
+.ap-count { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #f0efec; color: #6b6862; }
+.ap-x { border: none; background: none; font-size: 13px; color: #8a8780; cursor: pointer;
+  padding: 3px 6px; border-radius: 7px; }
+.ap-x:hover { background: #f0efec; }
+.ap-list { flex: 1 1 auto; overflow-y: auto; padding: 6px; }
+.ap-foot { padding: 8px 12px; border-top: 1px solid #ecebe8; font-size: 11px; color: #97948d; }
+.ap-empty { padding: 22px 14px; font-size: 12px; color: #97948d; text-align: center; line-height: 1.6; }
+.ap-item { padding: 8px 9px; border-radius: 9px; cursor: pointer; }
+.ap-item:hover { background: #f7f6f3; }
+.ap-item + .ap-item { margin-top: 2px; }
+.ap-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.ap-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; }
+.ap-side { font-size: 10.5px; color: #8a8780; }
+.ap-lostb { font-size: 10px; color: #b3261e; background: rgba(179,38,30,.10);
+  padding: 0 5px; border-radius: 6px; }
+.ap-del { border: none; background: none; color: #a9a69f; font-size: 11px; cursor: pointer;
+  padding: 2px 5px; border-radius: 6px; opacity: 0; }
+.ap-item:hover .ap-del { opacity: 1; }
+.ap-del:hover { background: rgba(179,38,30,.12); color: #b3261e; }
+.ap-q { font-size: 12px; line-height: 1.55; color: #5b5851;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ap-n { font-size: 12px; line-height: 1.55; margin-top: 5px; padding-left: 7px;
+  border-left: 2px solid #2383e2; white-space: pre-wrap; }
+.ap-lost .ap-q { opacity: .55; }
+
+/* 툴바의 메모 버튼에 개수 배지 (JS가 data-count를 갱신) */
+.md4-anno-btn[data-count]:not([data-count="0"])::after { content: attr(data-count);
+  position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 8px; background: #2383e2; color: #fff; font-size: 10px; line-height: 15px;
+  font-weight: 600; }
+
+@media (prefers-color-scheme: dark) {
+  .sbs-grid.sbs-two .sbs-cell.sbs-hl { background: rgba(90,150,230,.10);
+    box-shadow: inset 2px 0 0 rgba(90,150,230,.55); }
+  #md-anno-pop, #md-anno-panel { background: #1f1f1f; border-color: #3a3a3a; color: #d4d4d4; }
+  #md-anno-pop textarea { background: #262626; border-color: #3a3a3a; }
+  .apop-quote, .ap-side, .ap-foot, .ap-empty { color: #8f8f8f; }
+  .ap-head, .ap-foot { border-color: #2c2c2c; }
+  .ap-count { background: #2c2c2c; color: #b8b8b8; }
+  .ap-item:hover, .ap-x:hover { background: #2c2c2c; }
+  .ap-q { color: #b8b8b8; }
+}
+"""
+
+# 하이라이트 · 메모 — 순수 클라이언트 처리 + annotations.json 되저장.
+# 앵커는 렌더된 HTML이 아니라 셀(.anno-scope)의 평문 오프셋이라, 다시 렌더돼도 같은 자리에 붙는다.
+# 재조립·재번역으로 오프셋이 밀리면 quote(+앞뒤 문맥)로 다시 찾고, 고쳐진 좌표를 서버에 되저장한다.
+_ANNO_HTML = """
+<div id="md-anno-bar"></div>
+<div id="md-anno-pop"></div>
+<div id="md-anno-panel">
+  <div class="ap-head"><b>하이라이트 · 메모</b><span class="ap-count">0</span>
+    <span class="apop-sp"></span><button class="ap-x" title="닫기 (Esc)">&#10005;</button></div>
+  <div class="ap-list"></div>
+  <div class="ap-foot">본문을 드래그하면 색을 고를 수 있어요 · 하이라이트를 누르면 메모</div>
+</div>
+<script>
+(function(){
+  if (window.__mdAnnoInit) return; window.__mdAnnoInit = true;
+  var ORDER = ['yellow', 'green', 'blue', 'pink', 'purple'];
+  var SWATCH = {yellow:'#ffe08a', green:'#b5e7b8', blue:'#a9d8f5', pink:'#f9bcd4', purple:'#d8c6f5'};
+  var CTX = 40;                       // 재탐색용 앞뒤 문맥 길이 (서버 상한 60 안쪽)
+  var items = Array.isArray(window.__mdAnno) ? window.__mdAnno : [];
+  var lost = {};                      // 위치를 못 찾은 항목 id (지우지는 않고 목록에만 남긴다)
+  var bar = document.getElementById('md-anno-bar');
+  var pop = document.getElementById('md-anno-pop');
+  var panel = document.getElementById('md-anno-panel');
+  if (!bar || !pop || !panel) return;
+  var pending = null, editing = null, timer = null;
+
+  function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+  function uid(){ return 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function find(id){ for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i]; return null; }
+
+  // ---- 저장 (paper.md4/annotations.json) ----
+  function flush(){
+    if (timer) { clearTimeout(timer); timer = null; }
+    var tok = window.__mdAnnoTok; if (!tok) return;
+    fetch('/annotations/' + tok, {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({items: items})}).catch(function(){});
+  }
+  function save(){ if (timer) clearTimeout(timer);
+    timer = setTimeout(function(){ timer = null; flush(); renderPanel(); }, 300); }
+  window.__mdAnnoFlush = flush;
+  window.addEventListener('beforeunload', function(){ if (timer) flush(); });
+
+  // ---- 셀 평문 기준 오프셋 ----
+  function scopes(){ return [].slice.call(document.querySelectorAll('.anno-scope')); }
+  function scopeOf(node){
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return el && el.closest ? el.closest('.anno-scope') : null;
+  }
+  function textNodes(root){
+    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), out = [], n;
+    while ((n = w.nextNode())) out.push(n);
+    return out;
+  }
+  function absOffset(scope, container, offset){   // Range.toString()은 textContent와 같은 텍스트만 센다
+    var r = document.createRange(); r.selectNodeContents(scope);
+    try { r.setEnd(container, offset); } catch (e) { return -1; }
+    return r.toString().length;
+  }
+
+  // ---- 하이라이트 그리기 ----
+  function unwrap(scope){
+    var ms = scope.querySelectorAll('mark.md-anno');
+    for (var i = 0; i < ms.length; i++){
+      var m = ms[i], p = m.parentNode;
+      while (m.firstChild) p.insertBefore(m.firstChild, m);
+      p.removeChild(m);
+    }
+    scope.normalize();   // 쪼개졌던 텍스트 노드를 다시 합쳐 오프셋 계산을 단순하게
+  }
+  function resolve(scope, a){
+    var txt = scope.textContent, q = a.quote || '';
+    if (!q) return null;
+    if (txt.substr(a.start, q.length) === q) return [a.start, a.start + q.length];
+    var probe = (a.prefix || '') + q + (a.suffix || ''), i = txt.indexOf(probe);
+    if (i >= 0) return [i + (a.prefix || '').length, i + (a.prefix || '').length + q.length];
+    var best = -1, bd = Infinity, from = 0, j;   // 같은 문구가 여럿이면 원래 위치에 가장 가까운 것
+    while ((j = txt.indexOf(q, from)) >= 0){
+      var d = Math.abs(j - a.start); if (d < bd){ bd = d; best = j; } from = j + 1;
+    }
+    return best >= 0 ? [best, best + q.length] : null;
+  }
+  function paint(scope, hits){        // hits: [{a, s, e}] — 겹쳐도 되도록 경계로 잘라 칠한다
+    var pts = {}, i, k;
+    for (i = 0; i < hits.length; i++){ pts[hits[i].s] = 1; pts[hits[i].e] = 1; }
+    var bs = Object.keys(pts).map(Number).sort(function(x, y){ return x - y; }), segs = [];
+    for (i = 0; i < bs.length - 1; i++){
+      var cov = [];
+      for (k = 0; k < hits.length; k++) if (hits[k].s <= bs[i] && hits[k].e >= bs[i + 1]) cov.push(hits[k].a);
+      if (cov.length) segs.push({s: bs[i], e: bs[i + 1], cov: cov});
+    }
+    // 자를 지점을 먼저 다 모은 뒤 노드별로 뒤에서 앞으로 자른다 — 한 노드를 쪼개도
+    // 다른 노드의 오프셋은 그대로고, 같은 노드 안에서는 뒷쪽부터 잘라야 앞 오프셋이 살아남는다.
+    var ns = textNodes(scope), nodes = [], groups = [], t = 0;
+    for (i = 0; i < ns.length; i++){ var L = ns[i].nodeValue.length; nodes.push([ns[i], t, t + L]); t += L; }
+    for (i = 0; i < segs.length; i++){
+      for (k = 0; k < nodes.length; k++){
+        var s0 = nodes[k][1], e0 = nodes[k][2];
+        if (e0 <= segs[i].s || s0 >= segs[i].e) continue;
+        var a0 = Math.max(segs[i].s - s0, 0), b0 = Math.min(segs[i].e - s0, e0 - s0);
+        if (b0 <= a0) continue;
+        var g = null;
+        for (var z = 0; z < groups.length; z++) if (groups[z][0] === nodes[k][0]) { g = groups[z]; break; }
+        if (!g){ g = [nodes[k][0], []]; groups.push(g); }
+        g[1].push({a: a0, b: b0, seg: segs[i]});
+      }
+    }
+    for (i = 0; i < groups.length; i++){
+      var node = groups[i][0], hs = groups[i][1];
+      hs.sort(function(x, y){ return y.a - x.a; });
+      for (k = 0; k < hs.length; k++){
+        var h = hs[k];
+        if (h.b < node.nodeValue.length) node.splitText(h.b);
+        var target = h.a > 0 ? node.splitText(h.a) : node;
+        var top = h.seg.cov[h.seg.cov.length - 1], noted = false;
+        for (var q2 = 0; q2 < h.seg.cov.length; q2++) if ((h.seg.cov[q2].note || '').trim()) noted = true;
+        var mk = document.createElement('mark');
+        mk.className = 'md-anno' + (noted ? ' md-anno-note' : '');
+        mk.setAttribute('data-ids', h.seg.cov.map(function(a){ return a.id; }).join(' '));
+        mk.style.background = SWATCH[top.color] || SWATCH.yellow;
+        target.parentNode.replaceChild(mk, target);
+        mk.appendChild(target);
+      }
+    }
+  }
+  function applyAll(){
+    var sc = scopes(), i, j;
+    for (i = 0; i < sc.length; i++) unwrap(sc[i]);
+    if (!sc.length){ renderPanel(); return; }   // 텍스트 패널이 안 보임(PDF만) — 목록만 유지
+    var placed = {}, has = {}, repaired = false;
+    for (i = 0; i < sc.length; i++) has[sc[i].getAttribute('data-side')] = 1;
+    for (i = 0; i < sc.length; i++){
+      var side = sc[i].getAttribute('data-side'), row = +sc[i].getAttribute('data-row');
+      for (j = 0; j < items.length; j++){
+        var a = items[j];
+        if (placed[a.id] || a.side !== side || a.row !== row) continue;
+        var r = resolve(sc[i], a);
+        if (r) placed[a.id] = {sc: sc[i], s: r[0], e: r[1]};
+      }
+    }
+    for (j = 0; j < items.length; j++){   // 행이 밀렸으면 같은 쪽의 다른 셀에서 문구로 다시 찾는다
+      var b = items[j]; if (placed[b.id]) continue;
+      for (i = 0; i < sc.length; i++){
+        if (sc[i].getAttribute('data-side') !== b.side) continue;
+        var p = sc[i].textContent.indexOf(b.quote); if (p < 0) continue;
+        placed[b.id] = {sc: sc[i], s: p, e: p + b.quote.length};
+        b.row = +sc[i].getAttribute('data-row'); b.start = p; b.end = p + b.quote.length;
+        repaired = true; break;
+      }
+    }
+    lost = {};   // 컬럼을 꺼 둔 쪽은 '못 찾음'이 아니라 그냥 안 보이는 것
+    for (j = 0; j < items.length; j++) if (!placed[items[j].id] && has[items[j].side]) lost[items[j].id] = 1;
+    for (i = 0; i < sc.length; i++){
+      var hits = [];
+      for (j = 0; j < items.length; j++){
+        var pl = placed[items[j].id];
+        if (pl && pl.sc === sc[i]) hits.push({a: items[j], s: pl.s, e: pl.e});
+      }
+      if (hits.length) paint(sc[i], hits);
+    }
+    renderPanel();
+    if (repaired) save();
+  }
+  window.__mdAnnoApply = function(){ setTimeout(applyAll, 0); };
+
+  // ---- 드래그 → 색 고르기 막대 ----
+  function place(el, rect){
+    el.style.visibility = 'hidden'; el.style.left = '0px'; el.style.top = '0px';
+    var w = el.offsetWidth, h = el.offsetHeight;
+    var x = Math.min(window.innerWidth - w - 8, Math.max(8, rect.left + rect.width / 2 - w / 2));
+    var y = rect.top - h - 8;
+    if (y < 8) y = Math.min(window.innerHeight - h - 8, rect.bottom + 8);
+    el.style.left = x + 'px'; el.style.top = y + 'px'; el.style.visibility = '';
+  }
+  function dots(active){
+    return ORDER.map(function(c){
+      return '<button class="ab-dot' + (c === active ? ' on' : '') + '" data-color="' + c
+        + '" style="background:' + SWATCH[c] + '"></button>';
+    }).join('');
+  }
+  function clearSel(){ pending = null; bar.classList.remove('open'); }
+  function onSelect(){
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount){ clearSel(); return; }
+    var r = sel.getRangeAt(0), sc = scopeOf(r.startContainer);
+    if (!sc || sc !== scopeOf(r.endContainer)){ clearSel(); return; }
+    var s = absOffset(sc, r.startContainer, r.startOffset), e = absOffset(sc, r.endContainer, r.endOffset);
+    if (s < 0 || e <= s){ clearSel(); return; }
+    var txt = sc.textContent;
+    while (s < e && /\\s/.test(txt.charAt(s))) s++;          // 앞뒤 공백까지 칠하지 않게
+    while (e > s && /\\s/.test(txt.charAt(e - 1))) e--;
+    if (e <= s){ clearSel(); return; }
+    pending = {scope: sc, start: s, end: e, quote: txt.slice(s, e),
+      prefix: txt.slice(Math.max(0, s - CTX), s), suffix: txt.slice(e, e + CTX)};
+    bar.innerHTML = dots(null) + '<span class="ab-sep"></span>'
+      + '<button class="ab-btn" data-act="note">메모 달기</button>';
+    bar.classList.add('open');
+    place(bar, r.getBoundingClientRect());
+  }
+  function create(color, withNote){
+    if (!pending) return;
+    var a = {id: uid(), side: pending.scope.getAttribute('data-side'),
+      row: +pending.scope.getAttribute('data-row'), start: pending.start, end: pending.end,
+      quote: pending.quote, prefix: pending.prefix, suffix: pending.suffix,
+      color: color, note: '', created: Date.now() / 1000};
+    items.push(a);
+    var sel = window.getSelection(); if (sel) sel.removeAllRanges();
+    clearSel(); applyAll(); flush();
+    if (withNote) openPop(a.id);
+  }
+  bar.addEventListener('mousedown', function(e){ e.preventDefault(); });
+  bar.addEventListener('click', function(e){
+    var d = e.target.closest('.ab-dot');
+    if (d){ create(d.getAttribute('data-color'), false); return; }
+    if (e.target.closest('[data-act="note"]')) create('yellow', true);
+  });
+
+  // ---- 하이라이트 클릭 → 메모 카드 ----
+  function marksFor(id){
+    var ms = document.querySelectorAll('mark.md-anno'), out = [];
+    for (var i = 0; i < ms.length; i++){
+      if ((ms[i].getAttribute('data-ids') || '').split(' ').indexOf(id) >= 0) out.push(ms[i]);
+    }
+    return out;
+  }
+  function openPop(id, rect){
+    var a = find(id); if (!a) return;
+    editing = id;
+    pop.innerHTML = '<div class="apop-row">' + dots(a.color)
+      + '<span class="apop-sp"></span><button class="apop-del">삭제</button></div>'
+      + '<div class="apop-quote">' + esc(a.quote.length > 140 ? a.quote.slice(0, 140) + '…' : a.quote) + '</div>'
+      + '<textarea placeholder="메모 (자동 저장)"></textarea>';
+    var ta = pop.querySelector('textarea'); ta.value = a.note || '';
+    pop.classList.add('open');
+    var ms = marksFor(id);
+    place(pop, rect || (ms.length ? ms[0].getBoundingClientRect()
+      : {left: window.innerWidth / 2, top: 140, bottom: 140, width: 0, height: 0}));
+    ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+  }
+  function closePop(){ pop.classList.remove('open'); editing = null; }
+  function remove(id){
+    for (var i = 0; i < items.length; i++) if (items[i].id === id){ items.splice(i, 1); break; }
+    applyAll(); flush();
+  }
+  pop.addEventListener('click', function(e){
+    var a = find(editing); if (!a) return;
+    var d = e.target.closest('.ab-dot');
+    if (d){ a.color = d.getAttribute('data-color'); applyAll(); flush(); openPop(a.id); return; }
+    if (e.target.closest('.apop-del')){ closePop(); remove(a.id); }
+  });
+  pop.addEventListener('input', function(e){
+    var a = find(editing); if (!a || e.target.tagName !== 'TEXTAREA') return;
+    a.note = e.target.value;
+    var ms = marksFor(a.id), noted = !!a.note.trim();       // 밑줄 표시만 즉시 갱신 (다시 안 칠한다)
+    for (var i = 0; i < ms.length; i++) ms[i].classList.toggle('md-anno-note', noted);
+    save();
+  });
+
+  // ---- 목록 서랍 ----
+  function renderPanel(){
+    var list = panel.querySelector('.ap-list');
+    panel.querySelector('.ap-count').textContent = items.length;
+    var btn = document.querySelector('.md4-anno-btn');
+    if (btn) btn.setAttribute('data-count', items.length);
+    var sorted = items.slice().sort(function(x, y){
+      if (x.row !== y.row) return x.row - y.row;
+      if (x.side !== y.side) return x.side === 'en' ? -1 : 1;
+      return x.start - y.start;
+    });
+    if (!sorted.length){
+      list.innerHTML = '<div class="ap-empty">아직 표시한 곳이 없습니다.<br>본문을 드래그해 색을 고르면 여기에 쌓입니다.</div>';
+      return;
+    }
+    list.innerHTML = sorted.map(function(a){
+      var q = a.quote.length > 180 ? a.quote.slice(0, 180) + '…' : a.quote;
+      return '<div class="ap-item' + (lost[a.id] ? ' ap-lost' : '') + '" data-id="' + esc(a.id) + '">'
+        + '<div class="ap-top"><span class="ap-dot" style="background:' + (SWATCH[a.color] || SWATCH.yellow) + '"></span>'
+        + '<span class="ap-side">' + (a.side === 'ko' ? '번역' : '원문') + '</span>'
+        + (lost[a.id] ? '<span class="ap-lostb">위치 못 찾음</span>' : '')
+        + '<span class="apop-sp"></span><button class="ap-del" title="삭제">&#10005;</button></div>'
+        + '<div class="ap-q">' + esc(q) + '</div>'
+        + ((a.note || '').trim() ? '<div class="ap-n">' + esc(a.note) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  }
+  panel.addEventListener('click', function(e){
+    if (e.target.closest('.ap-x')){ panel.classList.remove('open'); return; }
+    var it = e.target.closest('.ap-item'); if (!it) return;
+    var id = it.getAttribute('data-id');
+    if (e.target.closest('.ap-del')){ if (editing === id) closePop(); remove(id); return; }
+    var ms = marksFor(id);
+    if (!ms.length){ openPop(id); return; }
+    ms[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+    for (var i = 0; i < ms.length; i++){
+      ms[i].classList.remove('md-anno-flash'); void ms[i].offsetWidth; ms[i].classList.add('md-anno-flash');
+    }
+    setTimeout(function(){ openPop(id); }, 420);
+  });
+  window.__mdAnnoTogglePanel = function(){
+    panel.classList.toggle('open');
+    if (panel.classList.contains('open')){
+      var h = document.querySelector('.q-header');
+      panel.style.top = (h ? Math.max(0, h.getBoundingClientRect().bottom) : 0) + 'px';
+      renderPanel();
+    }
+  };
+
+  // ---- 닫기·정리 ----
+  document.addEventListener('mouseup', function(e){
+    if (bar.contains(e.target) || pop.contains(e.target) || panel.contains(e.target)) return;
+    setTimeout(onSelect, 0);
+  });
+  document.addEventListener('keyup', function(e){ if (e.key && e.key.indexOf('Arrow') === 0) setTimeout(onSelect, 0); });
+  document.addEventListener('mousedown', function(e){
+    if (pop.contains(e.target) || bar.contains(e.target) || panel.contains(e.target)) return;
+    if (pop.classList.contains('open')) closePop();
+  }, true);
+  document.addEventListener('click', function(e){
+    var m = e.target.closest ? e.target.closest('mark.md-anno') : null;
+    if (!m || e.target.closest('a')) return;   // 인용 링크 클릭은 원래 동작 그대로
+    var ids = (m.getAttribute('data-ids') || '').split(' ').filter(Boolean);
+    if (ids.length) openPop(ids[ids.length - 1], m.getBoundingClientRect());
+  });
+  document.addEventListener('scroll', function(e){
+    if (pop.contains(e.target) || panel.contains(e.target)) return;
+    clearSel(); if (pop.classList.contains('open')) closePop();
+  }, true);
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Escape') return;
+    if (pop.classList.contains('open')) closePop();
+    else if (panel.classList.contains('open')) panel.classList.remove('open');
+  });
+
+  // ---- 정렬 행 호버 (원문 ↔ 번역 짝 보여 주기) ----
+  var hoverRow = null;
+  function clearHover(){
+    var on = document.querySelectorAll('.sbs-cell.sbs-hl');
+    for (var i = 0; i < on.length; i++) on[i].classList.remove('sbs-hl');
+    hoverRow = null;
+  }
+  document.addEventListener('mouseover', function(e){
+    var cell = e.target.closest ? e.target.closest('.sbs-grid.sbs-two .sbs-cell') : null;
+    var row = cell ? cell.getAttribute('data-row') : null;
+    if (row === hoverRow) return;
+    clearHover();
+    if (row === null) return;
+    var pair = document.querySelectorAll('.sbs-grid.sbs-two .sbs-cell[data-row="' + row + '"]');
+    for (var i = 0; i < pair.length; i++) pair[i].classList.add('sbs-hl');
+    hoverRow = row;
+  });
+
+  setTimeout(applyAll, 400);   // 첫 렌더 안전망 (이후엔 뷰어가 __mdAnnoApply를 부른다)
+})();
+</script>
 """
 
 # 인용 아래에 고정 렌더되는 단일 툴팁 요소 + 위임 이벤트 (프리뷰 새로고침에도 살아남음).
@@ -589,6 +1042,12 @@ def fn_tips_js(tips: dict[str, str]) -> str:
     """각주 사전을 window.__mdFnTips에 실어줄 JS (본문 위첨자 링크 #fn-N 호버 툴팁 조회용)."""
     payload = json.dumps(tips, ensure_ascii=False).replace("<", "\\u003c")
     return f"window.__mdFnTips = {payload};"
+
+
+def anno_items_js(items: list[dict], token: str) -> str:
+    """저장된 하이라이트·메모와 논문 토큰을 클라이언트에 실어줄 JS (되저장 주소로도 쓰인다)."""
+    payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
+    return f"window.__mdAnnoTok = {json.dumps(token)}; window.__mdAnno = {payload};"
 
 
 _HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
@@ -970,6 +1429,9 @@ def build(ctrl: UIController) -> None:
     ui.add_body_html(_CITE_TIP_HTML)
     ui.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
     ui.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
+    ui.add_css(_ANNO_CSS)
+    ui.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
+    ui.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 정렬 행 호버
 
     def push_cite_tips() -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""
@@ -1254,27 +1716,28 @@ def build(ctrl: UIController) -> None:
                             f"--sbs-cols:{'1fr 1fr' if two else '1fr'}"):
                         for k, (enb, kob, head) in enumerate(rows):
                             sep = " sbs-row-sep" if (head and k > 0) else ""
-                            # 첫 표시 셀에 data-row(목차 스크롤) + data-page(PDF 싱크)
-                            anchor_props = f"data-row={k}"
-                            if k in row_page0:
-                                anchor_props += f" data-page={row_page0[k]}"
+                            # data-row는 두 셀 모두에 — 목차 스크롤(첫 셀)과 호버 짝 표시(둘 다)에 쓴다.
+                            # data-page(PDF 싱크)는 행마다 하나여야 하므로 첫 표시 셀에만.
+                            page_prop = f" data-page={row_page0[k]}" if k in row_page0 else ""
                             anchored = False
                             if show_en:
                                 div = " sbs-cell-div" if two else ""
-                                with ui.element("div").classes(f"sbs-cell{div}{sep}").props(anchor_props):
+                                with ui.element("div").classes(f"sbs-cell anno-scope{div}{sep}").props(
+                                        f"data-row={k} data-side=en{page_prop}"):
                                     ui.markdown(enb, extras=_md).classes("md-preview sbs-md")
                                 anchored = True
                             if show_ko and aligned:
-                                with ui.element("div").classes(f"sbs-cell{sep}").props(
-                                        "" if anchored else anchor_props):
+                                with ui.element("div").classes(f"sbs-cell anno-scope{sep}").props(
+                                        f"data-row={k} data-side=ko" + ("" if anchored else page_prop)):
                                     ui.markdown(kob or "", extras=_md).classes("md-preview sbs-md")
                     if two:
                         ui.element("div").classes("vcol-handle")
                 if two:
                     ui.run_javascript(_ENKO_DRAG_JS)
             else:
-                # 정렬 실패 + 번역만 → 단일 패널
-                with ui.element("div").classes("vpane md-preview").style("padding:1px 22px 8px"):
+                # 정렬 실패 + 번역만 → 단일 패널 (여기서도 하이라이트·메모는 그대로 된다)
+                with ui.element("div").classes("vpane md-preview anno-scope").style(
+                        "padding:1px 22px 8px").props("data-row=0 data-side=ko"):
                     ui.markdown(served_markdown(ko_raw, tok), extras=_md)
 
         with ui.element("div").classes("vshell"):
@@ -1296,6 +1759,7 @@ def build(ctrl: UIController) -> None:
                     _pdf_pane()
                 else:
                     text_area()
+        ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")  # 하이라이트 다시 얹기
         # 토글 전 캡처해 둔 텍스트 스크롤 위치 복원 + (PDF 있으면) 그 위치로 PDF 정렬
         r = viewer_state.pop("_restore", None)
         if (show_en or show_ko) and r:
@@ -1346,11 +1810,17 @@ def build(ctrl: UIController) -> None:
                           on_click=lambda: _vtoggle("sync")).props(
                     "flat dense round " + ("color=primary" if viewer_state["sync"] else "color=grey-6")) \
                     .tooltip("스크롤 시 PDF 페이지 따라오기 " + ("(켜짐)" if viewer_state["sync"] else "(꺼짐)"))
+            ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
+                "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
+                .props("flat dense round color=grey-7").classes("md4-anno-btn") \
+                .tooltip("하이라이트 · 메모 목록 — 본문을 드래그하면 색을 고를 수 있어요")
             ui.space()
             export_fmt_review()
             library_button()
             ui.button("영어 zip", icon="download", on_click=download_en).props("flat dense no-caps color=primary")
             ui.button("한국어 zip", icon="download", on_click=download_ko).props("flat dense no-caps color=primary")
+            ui.button("메모 md", icon="download", on_click=download_notes) \
+                .props("flat dense no-caps color=primary").tooltip("하이라이트·메모를 마크다운으로 저장")
 
     # 번역 진행(섹션별) — 워커 스레드가 콜백으로 쓰고, UI 타이머가 폴링해 트리 아이콘을 갱신
     translate_state = {"status": {}, "done": 0, "total": 0, "active": False, "failures": {}}
@@ -1931,6 +2401,17 @@ def build(ctrl: UIController) -> None:
             return
         name, data = ctrl.export_zip("ko", config.resolve_export_target())
         await desktop.deliver(name, data)
+
+    async def download_notes() -> None:
+        """하이라이트·메모를 마크다운 한 장으로 (인용구 + 그 아래 메모)."""
+        await ui.run_javascript("window.__mdAnnoFlush && window.__mdAnnoFlush()")
+        await asyncio.sleep(0.3)  # 클라이언트의 되저장이 파일에 닿을 짬
+        items = annotations.load(ctrl.wd)
+        if not items:
+            ui.notify("표시해 둔 하이라이트·메모가 없습니다.", type="warning")
+            return
+        name, data = annotations.export_bytes(ctrl.wd, m.title or "")
+        await desktop.deliver(name, data, media_type="text/markdown")
 
     async def save_to_library() -> None:
         """홈에서 지정한 '저장 위치' 폴더에 결과 마크다운을 저장 (자동 저장을 꺼 뒀을 때도 수동으로)."""
@@ -3110,6 +3591,21 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
             raise HTTPException(status_code=404)
         return Response(content=png, media_type="image/png",
                         headers={"Cache-Control": "max-age=3600"})
+
+    @fastapi_app.get("/annotations/{token}")
+    def _get_annotations(token: str):  # noqa: ANN202 — 해당 논문의 하이라이트·메모
+        cur = _wd_for(token)
+        if cur is None:
+            raise HTTPException(status_code=404)
+        return {"items": annotations.load(cur)}
+
+    @fastapi_app.post("/annotations/{token}")
+    def _put_annotations(token: str, body: dict):  # noqa: ANN202 — 뷰어에서 되저장
+        cur = _wd_for(token)
+        if cur is None:
+            raise HTTPException(status_code=404)
+        saved = annotations.save(cur, body.get("items"))
+        return {"ok": True, "count": len(saved)}
 
     @ui.page("/")
     def index() -> None:
