@@ -352,12 +352,37 @@ def _native_available() -> bool:
         click.echo(click.style("앱 창 의존성(pywebview)이 없어 브라우저로 엽니다 — "
                                "`uv sync --extra ui --extra native`", fg="yellow"), err=True)
         return False
+    if sys.platform == "darwin":
+        return _cocoa_present()
     try:
         from webview.guilib import initialize
 
-        initialize()  # OS 웹뷰 백엔드 탐색 (macOS는 cocoa, 윈도우는 WebView2, 리눅스는 GTK/Qt)
+        initialize()  # OS 웹뷰 백엔드 탐색 (윈도우는 WebView2, 리눅스는 GTK/Qt)
     except Exception as e:  # noqa: BLE001 — 백엔드가 여럿이라 예외 종류도 제각각이다
         click.echo(click.style(f"앱 창을 띄울 수 없어 브라우저로 엽니다 ({e})", fg="yellow"), err=True)
+        return False
+    return True
+
+
+def _cocoa_present() -> bool:
+    """macOS 웹뷰 백엔드가 갖춰졌는지 — **임포트하지 않고** 모듈이 있는지만 본다.
+
+    다른 OS처럼 `guilib.initialize()`로 확인하면 안 된다. 그 호출은 `webview.platforms.cocoa`를
+    임포트하는데, 그 모듈은 클래스 본문에서 `NSApplication.sharedApplication()`과
+    `setActivationPolicy_(0)`을 실행한다 — 그러면 **창도 이벤트 루프도 없는 서버 프로세스**가
+    Dock에 앱으로 등록된다. macOS는 먼저 등록한 이 프로세스를 아이콘을 눌러 시작한 그 앱으로
+    보고(`lsappinfo`의 launch·checkin이 여기 붙는다), 정작 창을 가진 웹뷰 프로세스(NiceGUI가
+    따로 spawn한다)는 뒤늦게 **요청하지 않은 두 번째 인스턴스**로 체크인한다. 그 상태에서
+    웹뷰가 `activateIgnoringOtherApps_`로 앞에 나오려 하면 macOS는 허락 대신 Dock 아이콘을
+    튕겨서 알린다 — 백그라운드 작업이 끝났을 때 나오는 그 튕김이다.
+
+    macOS 백엔드는 pywebview를 깔면 pyobjc와 함께 따라오므로, 있는지만 봐도 충분하다.
+    """
+    missing = [name for name in ("webview.platforms.cocoa", "AppKit", "WebKit")
+               if importlib.util.find_spec(name) is None]
+    if missing:
+        click.echo(click.style(f"앱 창을 띄울 수 없어 브라우저로 엽니다 ({', '.join(missing)} 없음)",
+                               fg="yellow"), err=True)
         return False
     return True
 

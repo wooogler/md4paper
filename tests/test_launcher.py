@@ -192,6 +192,7 @@ def test_native_falls_back_to_browser_without_pywebview(monkeypatch, capsys):
     assert "브라우저로 엽니다" in capsys.readouterr().err  # 아이콘이 '무반응'이 되지 않게
 
 
+@pytest.mark.skipif(sys.platform == "darwin", reason="macOS는 백엔드를 임포트하지 않고 확인한다")
 def test_native_falls_back_when_gui_backend_missing(monkeypatch, capsys):
     """리눅스에서 WebKit2GTK·Qt가 없으면 pywebview는 import까지만 되고 창에서 죽는다."""
     pytest.importorskip("webview", reason="앱 창 의존성(native extra) 미설치")
@@ -215,3 +216,32 @@ def test_native_available_when_backend_loads():
     from md4paper import cli
 
     assert cli._native_available() is True
+
+
+@MACOS_ONLY
+def test_native_check_does_not_wake_appkit_in_server_process():
+    """서버 프로세스는 AppKit을 건드리면 안 된다 — 건드리는 순간 Dock 아이콘이 튕긴다.
+
+    `webview.platforms.cocoa`는 임포트만 해도 `NSApplication.sharedApplication()`과
+    `setActivationPolicy_(0)`을 실행한다. 그러면 창도 이벤트 루프도 없는 서버 프로세스가 앱의
+    실행 기록을 차지하고, 정작 창을 가진 웹뷰 프로세스는 두 번째 인스턴스가 되어 앞으로 나올 때
+    Dock 튕김으로 밀려난다. 그래서 앱 창 가능 여부는 임포트 없이 판정해야 한다.
+    """
+    pytest.importorskip("webview", reason="앱 창 의존성(native extra) 미설치")
+    from md4paper import cli
+
+    assert cli._native_available() is True
+    assert "webview.platforms.cocoa" not in sys.modules
+    assert "AppKit" not in sys.modules
+
+
+@MACOS_ONLY
+def test_native_falls_back_when_cocoa_backend_absent(monkeypatch, capsys):
+    """pyobjc가 빠져 있으면 (임포트하지 않고도) 알아채고 브라우저로 연다."""
+    from md4paper import cli
+
+    real = cli.importlib.util.find_spec
+    monkeypatch.setattr(cli.importlib.util, "find_spec",
+                        lambda name: None if name == "AppKit" else real(name))
+    assert cli._native_available() is False
+    assert "AppKit 없음" in capsys.readouterr().err
