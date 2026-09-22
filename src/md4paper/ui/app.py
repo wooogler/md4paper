@@ -4710,7 +4710,7 @@ def build_home(state: dict) -> None:
         q = state["queue"]
         if not q:
             return
-        ui.label("변환 대기열").classes("text-sm font-semibold self-start")
+        ui.label("변환 중").classes("text-xs text-gray-500 self-start")
         pend = 0
         for it in q:
             st = it["status"]
@@ -4729,7 +4729,7 @@ def build_home(state: dict) -> None:
             elif st == "bib":
                 sub = f"⑤ 서지 정보 보강 중… (온라인) {el}초"
             elif st == "done":
-                sub = "완료 → 오른쪽 '변환한 논문'에서 열기"
+                sub = "완료 → 아래 목록에서 열기"
                 boost = it.get("boost") or {}
                 bits = []
                 if boost.get("record"):
@@ -5009,9 +5009,7 @@ def build_home(state: dict) -> None:
 
             dropzone_caption()
 
-            queue_panel()
-
-        # ---- 오른쪽: 변환한 논문 (검색·정렬·다중선택·리스트) ----
+        # ---- 오른쪽: 변환 대기열 + 변환한 논문 (검색·정렬·다중선택·리스트) ----
         with sp.after, ui.column().classes("p-4 gap-2 w-full md4-scroll").style("height:100%; overflow-y:auto"):
             with ui.row().classes("items-center w-full no-wrap"):
                 ui.label("변환한 논문").classes("text-sm font-semibold")
@@ -5032,6 +5030,7 @@ def build_home(state: dict) -> None:
                 # 상관없는 목록 전용 필터처럼 보인다).
                 ui.select({"recent": "최근순", "name": "제목순", "year": "연도순", "translated": "번역됨 먼저"},
                           value="recent", on_change=on_sort).props("dense outlined").classes("w-32")
+            queue_panel()  # 변환 중인 논문 — 끝나면 바로 아래 목록에 나타나므로 같은 칸에 둔다
             sel_bar()  # 다중 선택 시 일괄 다운로드 툴바
             recent_list()
 
