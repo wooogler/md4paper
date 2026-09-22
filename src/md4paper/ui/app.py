@@ -12,11 +12,11 @@ import re
 import time
 from pathlib import Path
 
-from md4paper import config, library
+from md4paper import config, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
-from md4paper.ui import annotations, chat_panel, desktop, find_bar, scroll_memory
+from md4paper.ui import annotations, chat_panel, desktop, find_bar, mdrender, scroll_memory
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
-from md4paper.workdir import WorkDir, is_pinned, pinned_workdirs, set_pinned
+from md4paper.workdir import WorkDir, is_pinned, pinned_workdirs, set_pinned, set_project
 
 # 설명이 붙은 옵션 (값 → 사람이 이해하기 쉬운 라벨)
 _KSTYLE = {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)", "해요체": "해요체 (~해요 · 부드럽게)"}
@@ -214,7 +214,23 @@ sup.md-fn a:hover { text-decoration: underline; }
 .vcol-handle:hover::after { background: #2383e2; width: 2px; }
 .vpdf { height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px; background: #f4f3f1; }
 .vpane { height: 100%; overflow-y: auto; overscroll-behavior: contain; }  /* 정렬 불가 시 단일 마크다운 패널 */
-.conv-md { height: 100%; }  /* 변환 탭 마크다운 스크롤 패널 (마크다운↔PDF 싱크 컨테이너) */
+/* 변환 탭 프리뷰 스크롤 패널 (프리뷰↔PDF 싱크 컨테이너).
+   width:100%가 필요하다 — splitter 패널이 flex-column이라 이 상자가 내용의 max-content(844px)로
+   잡혀 611px 칸을 넘고 오른쪽이 잘렸다('마크다운 + PDF'에서도 매 줄 끝이 잘리던 기존 버그). */
+.conv-md { height: 100%; width: 100%; min-width: 0; }
+/* 분할 편집 — 왼쪽 원문 편집기 | 오른쪽 프리뷰. 두 열은 '언어'가 아니라 '표현'이 다른 것이라
+   에디터 쪽을 살짝 눌러 두 열이 한눈에 구분되게 한다(뷰어 탭의 원문|번역과 헷갈리지 않도록). */
+.conv-ed { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.conv-ed .cm-en-editor { flex: 1 1 auto; min-height: 0; }
+.conv-ed .cm-editor { height: 100%; background: #fbfaf9; }
+.conv-ed .cm-scroller { overscroll-behavior: contain; }
+/* CommonMark는 항목 사이에 빈 줄이 있는 목록을 loose로 보고 <li><p>로 감싼다(markdown2는 안 그랬다).
+   의미는 맞지만 문단 여백이 그대로 들어와 목록이 성기게 벌어지므로 여백만 지운다. */
+.md-preview li > p { margin: 0.15em 0; }
+.md-preview .md-math-raw { color: #b45309; }  /* MathML 변환 실패한 수식 — 원문을 그대로 */
+@media (prefers-color-scheme: dark) {
+  .conv-ed .cm-editor { background: #1d1d1d; }
+}
 /* 정렬 그리드 — 한 행의 두 셀이 같은 grid row라 높이가 큰 쪽에 맞춰져 스크롤이 안 어긋난다.
    컬럼 수/비율은 인라인 --sbs-cols로 지정(원문/번역 토글·드래그). */
 .sbs-grid { display: grid; grid-template-columns: var(--sbs-cols, 1fr 1fr); align-content: start;
@@ -1201,6 +1217,12 @@ _SEC_JUMP_HTML = """
     ev.preventDefault();
     var row = document.getElementById('sectree-' + b.getAttribute('data-sec'));
     if (!row) return;
+    // 설정·섹션 트리 열이 접혀 있으면 먼저 펼친다 — 안 보이는 곳으로 점프하지 않도록.
+    if (!row.offsetParent || row.getBoundingClientRect().width < 1){
+      if (typeof emitEvent === 'function') emitEvent('md4-open-side');
+      setTimeout(function(){ b.click(); }, 200);   // 펼쳐진 뒤 같은 클릭을 다시
+      return;
+    }
     var exp = row.closest('.q-expansion-item');
     var opening = exp && !exp.classList.contains('q-expansion-item--expanded');
     if (opening){ var hdr = exp.querySelector('.q-item'); if (hdr) hdr.click(); }  // 접혀 있으면 펼치기
@@ -1405,9 +1427,13 @@ def anchored_markdown(md: str, section_map: list[dict], page_by_id: dict | None 
                       jump: bool = False) -> str:
     """프리뷰 헤더에 `sec-<id>` 앵커를 심는다 (마크다운 스크롤 이동용).
 
-    en.md의 헤더 줄과 section_map의 id를 문서 순서로 짝지어(라인 이동에 견고), 각 헤더 앞에
-    앵커 span을 삽입한다. page_by_id가 있으면 앵커에 data-page(0-based)도 넣어 PDF 스크롤 싱크에 쓴다.
+    en.md의 헤더 줄과 section_map의 id를 문서 순서로 짝지어(라인 이동에 견고), 각 헤더 줄
+    **끝에** 앵커를 이어 붙인다. page_by_id가 있으면 앵커에 data-page(0-based)도 넣어 PDF 스크롤 싱크에 쓴다.
     jump=True면 각 헤더 옆에 '섹션 트리에서 편집' 점프 버튼(클릭 → 섹션 트리 항목 하이라이트+스크롤)을 붙인다.
+
+    앵커를 별도의 새 줄로 끼우지 않는 이유: 그러면 프리뷰가 세는 줄 번호가 원문보다 헤더 개수만큼
+    밀린다(코퍼스 헤더 수 중앙값 39, 최대 261). 에디터와 프리뷰를 소스 줄로 맞추는 분할 뷰에서는
+    그 어긋남이 곧 싱크 실패라, 줄 수가 원문과 1:1이어야 한다.
     """
     ids = [e["id"] for e in sorted(section_map, key=lambda x: x["out_line"])]
     out: list[str] = []
@@ -1417,14 +1443,16 @@ def anchored_markdown(md: str, section_map: list[dict], page_by_id: dict | None 
             sid = ids[j]
             pg = (page_by_id or {}).get(sid) if page_by_id else None
             dp = f' data-page="{pg - 1}"' if pg else ""
-            out.append(f'<a id="sec-{sid}"{dp}></a>')
+            line = line.rstrip() + f' <a id="sec-{sid}"{dp}></a>'
             if jump:  # 헤더 텍스트 끝에 점프 버튼(섹션 트리 해당 항목으로 이동+하이라이트)
-                line = line.rstrip() + (
+                line += (
                     f' <a class="md-sec-jump" href="#sectree-{sid}" data-sec="{sid}" '
-                    'title="섹션 트리에서 이 섹션의 레벨을 편집">✎ 섹션 편집</a>')
+                    'title="섹션 트리에서 이 섹션의 구조를 편집">✎ 섹션 구조</a>')
             j += 1
         out.append(line)
-    return "\n".join(out)
+    # 끝의 개행을 살린다 — splitlines/join 왕복은 문서 끝 빈 줄을 하나 삼킨다.
+    # 분할 뷰가 프리뷰 줄 N을 에디터 줄 N에 대응시키므로 줄 수가 원문과 같아야 한다.
+    return "\n".join(out) + ("\n" if md.endswith("\n") else "")
 
 
 def _split_sections(md: str) -> list[str]:
@@ -1579,6 +1607,27 @@ def _auto_metadata(wd: WorkDir) -> None:
         paper_meta.save(wd, meta)
     except Exception:  # noqa: BLE001
         pass
+
+
+def _auto_bibsource(wd: WorkDir) -> dict:
+    """변환 직후 서지를 온라인으로 보강 — 정확한 .bib 항목 + 참고문헌 DOI (§enrich.boost_workdir).
+
+    **`library.auto_export` 바로 앞에 놓여야 한다.** 저장 위치의 `references.bib`은 그때 쓰이고,
+    항목 내용은 여기서 받아 둔 `bib_source.json`에서 나온다 — 순서가 뒤집히면 논문을 올린
+    시점에는 PDF에서 읽은 부실한 항목이 쌓이고, 정확해지는 건 사용자가 나중에 따로 돌릴 때가 된다.
+
+    프로젝트 배정(`set_project`) **뒤**라야 그 프로젝트의 설정(`bib_lookup`)을 볼 수 있다.
+    실패해도 변환 결과는 이미 안전하므로 조용히 넘어간다 — 네트워크가 없어도 변환은 되어야 한다.
+    """
+    from md4paper import enrich, library
+
+    project = library.project_of(wd)
+    if not config.resolve_bib_lookup(project):
+        return {}
+    try:
+        return enrich.boost_workdir(wd, mailto=config.resolve_enrich_mailto() or None)
+    except Exception:  # noqa: BLE001 — 레이트리밋·오프라인 어느 것도 변환을 실패시키지 않는다
+        return {}
 
 
 def _auto_rename(wd: WorkDir, workspace: Path) -> WorkDir:
@@ -1839,7 +1888,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     viewer_stale = {"on": False}
 
     def refresh_preview() -> None:
-        preview.refresh()
+        preview_pane.refresh()
         viewer_stale["on"] = True
 
     def on_step_change(_=None) -> None:  # noqa: ANN001 — NiceGUI 값 변경 이벤트
@@ -1868,13 +1917,48 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ctrl.save_and_reassemble()
         library.auto_export(ctrl.wd)  # 저장 위치를 지정했으면 그 폴더의 사본도 최신으로
 
+    def guard_manual_edit(then, cancelled=None) -> None:  # noqa: ANN001
+        """재조립으로 수동 편집이 사라지기 **전에** 물어본다.
+
+        재조립(save_and_reassemble)은 raw.md + sections.yaml로 en.md를 다시 만들고 manual_edit
+        플래그까지 조용히 지운다 — 편집 내용도, 그것을 알려 주던 주황 배지도 함께 사라져 흔적이 안 남는다.
+        분할 뷰는 섹션 트리와 에디터를 상시 동시에 보여 주므로 이 사고가 한 번의 오조작으로 일어난다.
+        변이가 먼저 일어나면 되돌리기 어려우니 반드시 변이 **앞**에 건다.
+        """
+        if not ctrl.has_manual_edit():
+            then()
+            return
+
+        with ui.dialog() as dlg, ui.card().classes("gap-2"):
+            ui.label("직접 편집한 마크다운이 사라집니다").classes("text-base font-medium")
+            ui.label("섹션 구조를 바꾸면 원문에서 문서를 다시 만들기 때문에, 편집기에서 고친 내용이 "
+                     "그 결과로 덮어써집니다.").classes("text-sm text-gray-600").style("max-width:420px")
+            with ui.row().classes("justify-end gap-2 w-full"):
+                def cancel() -> None:
+                    dlg.close()
+                    if cancelled is not None:
+                        cancelled()
+
+                def proceed() -> None:
+                    dlg.close()
+                    then()
+
+                ui.button("취소", on_click=cancel).props("flat dense no-caps")
+                ui.button("다시 만들기", on_click=proceed).props("unelevated dense no-caps color=negative")
+        dlg.open()
+
     def change_level(sid: str, value) -> None:  # noqa: ANN001
         """레벨 변경 → 자동 저장 + 즉시 프리뷰·트리에 반영."""
-        ctrl.set_level(sid, value)
-        commit()
-        refresh_preview()
-        section_list.refresh()
-        _refresh_translate_tree()
+        def apply() -> None:
+            ctrl.set_level(sid, value)
+            commit()
+            refresh_preview()
+            section_list.refresh()
+            _refresh_translate_tree()
+            conv_body.refresh()  # 에디터도 새로 만들어진 en.md를 다시 읽어야 한다
+
+        # 취소하면 드롭다운이 새 값을 보인 채로 남으므로 트리를 다시 그려 원래 값으로 되돌린다.
+        guard_manual_edit(apply, cancelled=section_list.refresh)
 
     @ui.refreshable
     def section_list() -> None:
@@ -1935,21 +2019,30 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def apply_group(key: str, name: str, value) -> None:  # noqa: ANN001
             if value is None:
                 return
-            n = ctrl.apply_group_level(key, value)
-            commit()
-            refresh_preview()
-            section_list.refresh()
-            batch_level_panel.refresh()
-            _refresh_translate_tree()
-            ui.notify(f"{name} {n}개 → {_LEVEL_LABEL.get(value, value)}", type="positive")
+
+            def apply() -> None:
+                n = ctrl.apply_group_level(key, value)
+                commit()
+                refresh_preview()
+                section_list.refresh()
+                batch_level_panel.refresh()
+                _refresh_translate_tree()
+                conv_body.refresh()
+                ui.notify(f"{name} {n}개 → {_LEVEL_LABEL.get(value, value)}", type="positive")
+
+            guard_manual_edit(apply, cancelled=batch_level_panel.refresh)
 
         def change_in_group(sid: str, value) -> None:  # noqa: ANN001
             """그룹 내 개별 섹션 레벨 변경 → 프리뷰·섹션 트리·번역 트리 연동 (아코디언은 유지)."""
-            ctrl.set_level(sid, value)
-            commit()
-            refresh_preview()
-            section_list.refresh()
-            _refresh_translate_tree()
+            def apply() -> None:
+                ctrl.set_level(sid, value)
+                commit()
+                refresh_preview()
+                section_list.refresh()
+                _refresh_translate_tree()
+                conv_body.refresh()
+
+            guard_manual_edit(apply, cancelled=batch_level_panel.refresh)
 
         for g in groups:
             name = _GROUP_NAME.get((g["scheme"], g["depth"]), f"{g['scheme']} {g['depth']}단계")
@@ -1991,65 +2084,130 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""
         ui.run_javascript(cite_tips_js(ctrl.citation_tooltips()))
 
-    edit_state = {"on": False, "ratio": 0.0}
+    # 편집은 4번째 보기 모드가 아니라 마크다운 패널의 모디파이어다 — 켜면 그 패널이 에디터|프리뷰로 쪼개진다.
+    # 토글에 '에디터|프리뷰'를 넣으면 모드×편집이 직교해 상태가 8~10가지로 불어난다.
+    edit_state: dict = {"on": False, "editor": None, "live": True}
 
-    async def toggle_edit(on: bool) -> None:
-        """직접 편집 토글. 켤 때 프리뷰에서 보던 위치(스크롤 비율)를 편집기로 옮긴다."""
-        if on:
-            edit_state["ratio"] = await ui.run_javascript(
-                "(function(){var e=document.querySelector('.md-scroll-en');"
-                "if(!e) return 0; var m=e.scrollHeight-e.clientHeight;"
-                "return m>0 ? e.scrollTop/m : 0;})()"
-            ) or 0.0
+    def preview_markdown(md: str | None = None) -> str:
+        """프리뷰에 넣을 마크다운 — 이미지 경로 치환 + 헤더 줄 끝 앵커(sec-ID·data-page).
+
+        md를 주면 파일 대신 그 텍스트를 쓴다(타이핑 중 라이브 갱신용).
+        """
+        md = ctrl.en_markdown() if md is None else md
+        if not md:
+            return ""
+        page_by_id = {s.id: s.page for s in ctrl.manifest.sections}
+        return anchored_markdown(served_markdown(md, tok), ctrl.section_map(), page_by_id, jump=True)
+
+    def toggle_edit(on: bool) -> None:
+        """직접 편집 토글. 분할 뷰라 프리뷰가 계속 보이므로 스크롤 위치를 인수인계할 필요가 없다."""
         edit_state["on"] = on
-        refresh_preview()
-        edit_toggle.refresh()
+        if on and conv_view["pdf"]:
+            # 동시 표시 패널 ≤ 2 — 3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다.
+            # 어차피 지금도 편집 중 PDF는 싱크가 안 걸려 얼어 있었으므로 접는 것이 손해가 아니다.
+            conv_view["pdf"] = False
+            conv_view["pdf_folded"] = True
+        elif not on and conv_view.pop("pdf_folded", False):
+            conv_view["pdf"] = True
+        conv_toolbar.refresh()
+        conv_body.refresh()
 
     @ui.refreshable
     def edit_toggle() -> None:
         """툴바에 놓이는 마크다운 편집 스위치(+수동 편집 표시). 마크다운이 보일 때만 렌더된다."""
         ui.switch("마크다운 편집", value=edit_state["on"],
-                  on_change=lambda e: toggle_edit(e.value)).props("dense")
+                  on_change=lambda e: toggle_edit(e.value)).props("dense") \
+            .tooltip("켜면 원문 편집기와 프리뷰가 나란히 서고, 스크롤이 서로 따라옵니다")
+        if edit_state["on"]:
+            ui.switch("실시간 반영", value=edit_state["live"],
+                      on_change=lambda e: edit_state.update(live=e.value)).props("dense") \
+                .tooltip("끄면 '편집 저장'을 눌러야 프리뷰가 갱신됩니다")
         if ctrl.has_manual_edit():
             ui.badge("수동 편집됨", color="orange").props("outline").tooltip(
                 "재조립하면 이 편집은 사라집니다 (섹션 트리에서 다시 만들어지므로)")
 
     @ui.refreshable
-    def preview() -> None:
-        """프리뷰 / 직접 편집 (토글은 툴바에)."""
-        if not edit_state["on"]:
-            md = ctrl.en_markdown()
-            if md:
-                page_by_id = {s.id: s.page for s in ctrl.manifest.sections}
-                md = anchored_markdown(served_markdown(md, tok), ctrl.section_map(), page_by_id, jump=True)
-            ui.markdown(md or "_paper.en.md 없음 — convert를 먼저 실행하세요._",
-                        extras=["fenced-code-blocks", "tables", "latex"]).classes("md-preview")
+    def preview_pane() -> None:
+        """렌더된 프리뷰. `.conv-md`를 유지해 PDF 싱크·읽던 자리·인용 툴팁·그림 확대 계약을 그대로 쓴다."""
+        md = preview_markdown()
+        if md:
+            blocks = mdrender.blocks(md)
+            edit_state["blocks"] = blocks
+            html = "".join(h for _, h in blocks)
+        else:
+            edit_state["blocks"] = []
+            html = "<p><em>paper.en.md 없음 — convert를 먼저 실행하세요.</em></p>"
+        ui.html(html, sanitize=True).classes("md-preview")
+
+    def live_update(text: str) -> None:
+        """타이핑 → 프리뷰. 바뀐 블록만 갈아 끼운다 (디바운스 후 1회).
+
+        전체 재렌더는 렌더 HTML 274KB를 통째로 웹소켓에 태우고, innerHTML을 갈아엎으면서
+        폭·높이 속성이 없는 그림을 파괴·재생성해 컨테이너 높이를 무너뜨린다 → scrollTop이 0으로
+        잘리고 높이가 돌아와도 되돌아오지 않는다. 블록만 바꾸면 노드가 살아 있어 브라우저의
+        스크롤 앵커링이 위치를 알아서 잡아 준다.
+        """
+        t = edit_state.pop("timer", None)
+        if t is not None:
+            t.cancel()
+        edit_state["timer"] = ui.timer(0.12, lambda: _live_patch(text), once=True)
+
+    def _live_patch(text: str) -> None:
+        try:
+            new = mdrender.blocks(preview_markdown(text))
+        except Exception:  # noqa: BLE001 — 타이핑 도중의 반쪽 문법이 프리뷰를 죽이면 안 된다
             return
+        old = edit_state.get("blocks") or []
+        # 앞뒤 공통 구간을 잘라내고 가운데만 보낸다 — 한 글자 편집은 보통 블록 하나만 바꾼다.
+        i = 0
+        while i < len(old) and i < len(new) and old[i][1] == new[i][1]:
+            i += 1
+        j, k = len(old), len(new)
+        while j > i and k > i and old[j - 1][1] == new[k - 1][1]:
+            j -= 1
+            k -= 1
+        edit_state["blocks"] = new
+        if i == j and i == k:
+            return  # 렌더 결과가 같다 (공백만 바뀐 경우 등)
+        payload = "".join(h for _, h in new[i:k])
+        ui.run_javascript(
+            "(function(sel,start,del,html){"
+            " var root=document.querySelector(sel); if(!root) return;"
+            " var tmp=document.createElement('div'); tmp.setHTML(html);"  # NiceGUI의 DOMPurify 폴리필 경유
+            " for(var n=0;n<del;n++){ if(root.children[start]) root.removeChild(root.children[start]); }"
+            " var ref=root.children[start]||null;"
+            " while(tmp.firstChild){ root.insertBefore(tmp.firstChild, ref); }"
+            " var box=root.closest('.conv-md');"
+            " if(box && box.__mdsyncInvalidate) box.__mdsyncInvalidate();"
+            "})(%s,%d,%d,%s)" % (json.dumps(".conv-md .md-preview"), i, j - i, json.dumps(payload))
+        )
 
-        # 편집 모드: 마크다운 원문을 그대로 편집 (구조·수식·인용 앵커 손실 없음)
-        ui.label("마크다운 원문을 직접 고칩니다. 저장하면 번역은 이 내용을 사용합니다.").classes("text-xs text-gray-500")
+    def editor_pane() -> None:
+        """마크다운 원문 편집기. 원문이 진실의 원천이라 파싱→직렬화 왕복이 없다(손실 0)."""
+        def on_type(e) -> None:  # noqa: ANN001 — NiceGUI 값 변경 이벤트
+            if edit_state["live"]:
+                live_update(e.value)
+
         editor = ui.codemirror(
-            ctrl.en_markdown(), language="Markdown", line_wrapping=True,
-        ).classes("w-full cm-en-editor").style("height: calc(100vh - 260px)")
-
-        r = edit_state.get("ratio") or 0.0
-        if r:  # 프리뷰에서 보던 위치로 편집기 스크롤 (비율 근사)
-            ui.timer(0.12, lambda: ui.run_javascript(
-                "(function(){var s=document.querySelector('.cm-en-editor .cm-scroller');"
-                f"if(s){{var m=s.scrollHeight-s.clientHeight; s.scrollTop=(m>0?{r}:0)*m;}}}})()"
-            ), once=True)
+            ctrl.en_markdown(), language="Markdown", line_wrapping=True, on_change=on_type,
+        ).classes("w-full cm-en-editor").style("height:100%")
+        edit_state["editor"] = editor
 
         def save_edit() -> None:
             ctrl.save_en_markdown(editor.value)
             ui.notify("편집 저장됨 — 번역은 이 내용을 사용합니다.", type="positive")
-            refresh_preview()
+            preview_pane.refresh()
             edit_toggle.refresh()
 
-        with ui.row().classes("gap-2 items-center"):
+        def revert() -> None:
+            ctrl.save_and_reassemble()
+            conv_body.refresh()   # 에디터 내용까지 파일에서 다시 읽어야 한다
+            edit_toggle.refresh()
+            ui.notify("섹션 트리 기준으로 다시 만들었습니다.", type="info")
+
+        with ui.row().classes("gap-2 items-center shrink-0 q-pt-xs"):
             ui.button("편집 저장", icon="save", on_click=save_edit).props("color=primary dense")
-            ui.button("되돌리기(원본 다시 렌더)", icon="restore",
-                      on_click=lambda: (ctrl.save_and_reassemble(), refresh_preview(), edit_toggle.refresh(),
-                                        ui.notify("섹션 트리 기준으로 다시 만들었습니다.", type="info"))).props("outline dense")
+            ui.button("되돌리기(원본 다시 렌더)", icon="restore", on_click=revert).props("outline dense")
 
     @ui.refreshable
     def ko_preview() -> None:
@@ -2176,6 +2334,120 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """ % scroll_sel)
 
     _PDF_SYNC_JS = _pdf_sync_js(".sbs-grid")  # 뷰어 정렬 그리드용
+
+    def _md_sync_js(cm_id: int, pv_sel: str) -> str:
+        """에디터(CodeMirror 6) ↔ 프리뷰([data-line]) 양방향 스크롤 싱크.
+
+        _pdf_sync_js 와 같은 뼈대다 — 컨테이너 dataset 플래그로 1회만 바인딩, rAF 스로틀,
+        `[data-*]` 를 훑어 '화면 상단 기준 가장 최근 요소'를 찾고 상대 이동. 다른 점 셋:
+          - 에디터 쪽은 DOM이 아니라 CM의 높이맵(lineBlockAtHeight)을 읽는다. CM6는 화면 밖 줄을
+            DOM에서 지우지만 높이맵은 문서 전체를 알고 있어서 가상 스크롤에 영향받지 않는다.
+          - 앞뒤 앵커 사이를 픽셀 비율로 보간해 '소수 줄'을 낸다(VS Code와 같은 방식). 블록 하나가
+            여러 줄을 먹어도 그 안에서 위치가 이어진다.
+          - 따라가는 쪽의 scroll 이벤트가 되받아치므로 200ms 잠금을 건다. 이 잠금을 빼면 즉시 진동한다.
+
+        프리뷰를 프로그램적으로 스크롤해도 scroll 이벤트는 나므로, 기존 _pdf_sync_js가 새 코드 없이
+        체인의 끝(에디터 → 프리뷰 → PDF)으로 따라붙는다.
+        """
+        return """
+        (function(cmId, pvSel){
+          var host = (typeof getElement === 'function') ? getElement(cmId) : null;
+          var ed = host && host.editor;                       // CM6 EditorView
+          var pv = document.querySelector(pvSel);
+          if (!ed || !pv || pv.dataset.mdsync) return;
+          pv.dataset.mdsync = '1';
+          var sc = ed.scrollDOM;
+
+          var cells = null;                                   // 프리뷰의 소스라인 앵커 (재렌더 시 무효화)
+          function anchors(){
+            if (cells) return cells;
+            cells = [].slice.call(pv.querySelectorAll('[data-line]'))
+              .map(function(el){ return { el: el, line: +el.getAttribute('data-line') }; })
+              .filter(function(c){ return !isNaN(c.line); });
+            cells.sort(function(a, b){ return a.line - b.line; });
+            return cells;
+          }
+          pv.__mdsyncInvalidate = function(){ cells = null; };
+
+          var lock = 0, lockTimer = null;
+          function hold(){ lock = 1; clearTimeout(lockTimer); lockTimer = setTimeout(function(){ lock = 0; }, 200); }
+          var top = function(el){ return el.getBoundingClientRect().top; };
+
+          function editorLine(){                              // 에디터 뷰포트 상단 → 소스 줄(소수)
+            var h = sc.getBoundingClientRect().top - ed.documentTop;
+            var b = ed.lineBlockAtHeight(h), d = ed.state.doc;
+            var first = d.lineAt(b.from).number - 1, last = d.lineAt(b.to).number - 1;
+            var f = b.height > 0 ? Math.min(1, Math.max(0, (h - b.top) / b.height)) : 0;
+            return first + f * (last - first + 1);
+          }
+
+          function previewLine(){                             // 프리뷰 뷰포트 상단 → 소스 줄(소수)
+            var cs = anchors(), y = top(pv), prev = null, next = null;
+            for (var i = 0; i < cs.length; i++){
+              var r = cs[i].el.getBoundingClientRect();
+              if (r.bottom < y) { prev = cs[i]; continue; }
+              if (r.top > y) { next = cs[i]; break; }
+              prev = cs[i];                                   // 상단을 걸친 블록 — 그 안쪽 비율
+              var into = r.height > 0 ? Math.min(1, Math.max(0, (y - r.top) / r.height)) : 0;
+              var nx = cs[i + 1];
+              return prev.line + into * ((nx ? nx.line : prev.line + 1) - prev.line);
+            }
+            if (!prev) return 0;
+            if (!next) return prev.line;
+            var pb = prev.el.getBoundingClientRect(), gap = next.el.getBoundingClientRect().top - pb.top;
+            return prev.line + (gap > 0 ? Math.min(1, Math.max(0, (y - pb.top) / gap)) : 0) * (next.line - prev.line);
+          }
+
+          function revealPreview(line){
+            var cs = anchors(), prev = null, next = null;
+            for (var i = 0; i < cs.length; i++){
+              if (cs[i].line <= line) prev = cs[i]; else { next = cs[i]; break; }
+            }
+            if (!prev){ pv.scrollTop = 0; return; }
+            var py = top(prev.el), y = py;
+            if (next){
+              var span = next.line - prev.line;
+              var f = span > 0 ? Math.min(1, Math.max(0, (line - prev.line) / span)) : 0;
+              y = py + f * (top(next.el) - py);
+            }
+            pv.scrollTop += (y - top(pv));
+          }
+
+          /* CM6는 아직 렌더하지 않은 구간의 줄 높이를 '추정'한다. 그래서 먼 곳으로 한 번에 뛰면
+             착지점이 틀린다(목표 900줄 → 781줄 착지). 렌더 후 다시 재보고 보정하면 수렴한다.
+             새 목표가 오면 이전 보정 체인은 세대 번호로 버린다 — 안 버리면 옛 목표가 되끌어당긴다. */
+          var gen = 0;
+          function revealEditor(line){
+            var d = ed.state.doc, n = Math.min(d.lines, Math.max(1, Math.floor(line) + 1));
+            var pos = d.line(n).from, frac = Math.min(1, Math.max(0, line - Math.floor(line)));
+            var my = ++gen, tries = 0;
+            function target(){ var b = ed.lineBlockAt(pos); return b.top + frac * b.height; }
+            sc.scrollTop = target();
+            (function step(){
+              if (my !== gen || ++tries > 5) return;
+              requestAnimationFrame(function(){
+                if (my !== gen) return;
+                hold();
+                var t = target();
+                if (Math.abs(t - sc.scrollTop) > 2){ sc.scrollTop = t; step(); }
+              });
+            })();
+          }
+
+          var tickE = false, tickP = false;
+          sc.addEventListener('scroll', function(){
+            if (lock || tickE) return; tickE = true;
+            requestAnimationFrame(function(){ tickE = false; if (lock) return; hold(); revealPreview(editorLine()); });
+          }, { passive: true });
+          pv.addEventListener('scroll', function(){
+            if (lock || tickP) return; tickP = true;
+            requestAnimationFrame(function(){ tickP = false; if (lock) return; hold(); revealEditor(previewLine()); });
+          }, { passive: true });
+
+          window.__mdsync = { revealEditor: revealEditor, revealPreview: revealPreview,
+                              invalidate: function(){ cells = null; } };
+        })(%d, '%s');
+        """ % (cm_id, pv_sel)
 
     # 목차 너비 드래그 — .vtoc의 --vtoc-w를 갱신. window 전역에 저장해 재렌더에도 유지, 리스너 1회.
     _VTOC_DRAG_JS = """
@@ -2648,10 +2920,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 "({behavior:'smooth', block:'start'});"
             )
             return
-        if edit_state["on"]:  # 편집 모드면 렌더 프리뷰로 전환
-            edit_state["on"] = False
-            refresh_preview()
-            edit_toggle.refresh()
+        # 편집 중이어도 프리뷰가 나란히 살아 있으므로 편집을 끄지 않는다 — 입력 맥락을 끊지 않는 것이
+        # 분할 뷰의 순이익이다. 대신 에디터도 같은 소스 줄로 옮긴다(아래 revealEditor).
         if not conv_view["md"]:  # 마크다운·PDF 둘 다 꺼진 예외 상황 → 마크다운을 켠다
             conv_view["md"] = True
             conv_toolbar.refresh()
@@ -2660,6 +2930,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         # 마크다운을 해당 섹션으로. 나란히(PDF도 표시)면 클릭 스크롤은 sync 이벤트를 확실히 못 태우므로
         # PDF도 해당 페이지로 직접 이동시킨다(각 패널은 독립 스크롤 컨테이너).
         js = f"document.getElementById('sec-{sid}')?.scrollIntoView({{behavior:'instant', block:'start'}});"
+        if edit_state["on"]:  # 에디터도 그 헤더의 소스 줄로 (섹션맵의 out_line을 그대로 쓴다)
+            ln = next((e["out_line"] for e in ctrl.section_map() if e.get("id") == sid), None)
+            if isinstance(ln, int):
+                js += f" window.__mdsync && window.__mdsync.revealEditor({max(ln - 1, 0)});"
         if conv_view["pdf"] and has_pdf:
             pg = _sec_page0(sid)
             if pg is not None:
@@ -2668,30 +2942,77 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         await ui.run_javascript(js)
 
     # --- 변환 탭 우측: 마크다운 / PDF 토글 + 나란히(마크다운 스크롤 → PDF 페이지 싱크) ---
-    conv_view = {"md": True, "pdf": False, "split": 55}
+    conv_view = {"md": True, "pdf": False, "split": 55, "edsplit": 50}
+
+    def _preview_box() -> None:
+        # conv-md: PDF 싱크 컨테이너이자 읽던 자리 셀렉터. 프리뷰가 계속 이 클래스를 갖는 것이 중요하다 —
+        # 에디터에 재사용하면 scroll_memory 키(.conv-md#N)와 _pdf_sync_js 컨테이너가 어긋난다.
+        with ui.element("div").classes("conv-md md-scroll-en").style(
+                "height:100%; min-width:0; overflow-y:auto; overscroll-behavior:contain; padding:0 12px"):
+            preview_pane()
 
     def _conv_md_pane() -> None:
-        # md-scroll-en: 편집 토글이 스크롤 위치(비율)를 읽는 셀렉터. conv-md: PDF 싱크 컨테이너.
-        with ui.element("div").classes("conv-md md-scroll-en").style(
-                "height:100%; overflow-y:auto; overscroll-behavior:contain; padding:0 12px"):
-            preview()
+        """마크다운 자리 — 편집이 꺼져 있으면 프리뷰 하나, 켜져 있으면 에디터|프리뷰 분할."""
+        if not edit_state["on"]:
+            _preview_box()
+            return
+        with ui.splitter(value=conv_view["edsplit"]).classes("w-full").style("height:100%") as ed_sp:
+            ed_sp.on_value_change(lambda e: conv_view.update(edsplit=e.value))
+            with ed_sp.before:
+                with ui.column().classes("conv-ed").style(
+                        "height:100%; min-width:0; gap:4px; padding:0 8px 0 0; flex-wrap:nowrap"):
+                    editor_pane()
+            with ed_sp.after:
+                _preview_box()
+        # 에디터 ↔ 프리뷰 양방향 스크롤 싱크 (PDF는 프리뷰 뒤에 체인으로 붙는다)
+        editor = edit_state.get("editor")
+        if editor is not None:
+            ui.timer(0.35, lambda e=editor: ui.run_javascript(_md_sync_js(e.id, ".conv-md")), once=True)
 
     async def _cv_set_mode(mode: str) -> None:
         """보기 모드 단일 선택 — 'md' | 'pdf' | 'both'. 재렌더 전 마크다운 스크롤 위치를 캡처해
         재렌더 후 복원하고, PDF도 그 위치에 맞춘다(스크롤 유지 + 정렬)."""
         ratio = None
-        if conv_view["md"] and not edit_state["on"]:  # 현재 마크다운이 보이면 스크롤 비율 캡처
+        if conv_view["md"]:  # 현재 프리뷰가 보이면 스크롤 비율 캡처 (편집 중에도 프리뷰는 살아 있다)
             ratio = await ui.run_javascript(
                 "(function(){var e=document.querySelector('.conv-md');if(!e)return null;"
                 "var m=e.scrollHeight-e.clientHeight;return m>0?e.scrollTop/m:0;})()")
         conv_view["md"] = mode in ("md", "both")
         conv_view["pdf"] = mode in ("pdf", "both")
+        conv_view.pop("pdf_folded", None)  # 사용자가 직접 고른 모드가 자동 접기보다 우선한다
         if not conv_view["md"] and edit_state["on"]:  # PDF만 보기 → 마크다운 편집 종료
             edit_state["on"] = False
-            refresh_preview()
+        if conv_view["md"] and conv_view["pdf"] and edit_state["on"]:
+            conv_view["pdf"] = False  # 동시 표시 패널 ≤ 2
+            conv_view["pdf_folded"] = True
         conv_view["_restore"] = ratio if conv_view["md"] else None
         conv_toolbar.refresh()
         conv_body.refresh()
+
+    # 변환 탭 좌측 열(설정·섹션 트리) 접기 — 기본 창 1280에서 이 열이 46%(574px)를 먹어
+    # 마크다운 자리가 649px밖에 안 남는다. 편집|프리뷰로 쪼개면 324px씩이라 논문 본문이 안 읽힌다
+    # (실측 가독 하한은 패널 400px). 접으면 611px씩이 되어 편안해진다. 폭은 드래그한 값을 기억한다.
+    side_state = {"splitter": None, "width": 46}
+
+    def toggle_side() -> None:
+        sp = side_state["splitter"]
+        if sp is None:
+            return
+        if sp.value > 1:
+            side_state["width"] = sp.value
+            sp.value = 0
+        else:
+            sp.value = side_state["width"] or 46
+        conv_toolbar.refresh()
+
+    def open_side() -> None:
+        """✎ 섹션 구조 점프의 목적지가 접혀 있으면 펼친다 (안 보이는 곳으로 점프하지 않도록)."""
+        sp = side_state["splitter"]
+        if sp is not None and sp.value <= 1:
+            sp.value = side_state["width"] or 46
+            conv_toolbar.refresh()
+
+    ui.on("md4-open-side", lambda _: open_side())
 
     @ui.refreshable
     def conv_toolbar() -> None:
@@ -2701,6 +3022,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             else ("pdf" if (conv_view["pdf"] and has_pdf) else "md")
 
         with ui.row().classes("items-center gap-3 w-full no-wrap q-px-xs q-py-sm"):
+            sp = side_state["splitter"]
+            folded = sp is not None and sp.value <= 1
+            ui.button(icon="menu_open" if folded else "menu", on_click=toggle_side) \
+                .props("flat dense round color=grey-7").tooltip(
+                    "설정·섹션 트리 열 펼치기" if folded else "설정·섹션 트리 열 접기 (본문 폭 넓히기)")
             opts = {"md": "마크다운"}
             if has_pdf:
                 opts["both"] = "마크다운 + PDF"
@@ -2713,6 +3039,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             if mode in ("md", "both"):  # 마크다운이 보일 때만 편집 토글 노출
                 ui.separator().props("vertical").classes("h-6")
                 edit_toggle()
+            if conv_view.get("pdf_folded"):  # 편집을 켜느라 접은 PDF — 어디 갔는지 알려 주고 되돌릴 길을 둔다
+                ui.badge("PDF 접힘", color="grey-6").props("outline").classes("cursor-pointer") \
+                    .tooltip("편집 중에는 두 패널만 보여 줍니다 — 눌러서 편집을 끄고 PDF로 돌아가기") \
+                    .on("click", lambda: toggle_edit(False))
             ui.space()
             export_fmt_review()
             library_button()
@@ -2734,8 +3064,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         _conv_md_pane()
                     with sp.after:
                         _pdf_pane()
-                if not edit_state["on"]:  # 편집 중이 아니면 마크다운 스크롤 → PDF 싱크
-                    ui.run_javascript(_pdf_sync_js(".conv-md"))
+                # 프리뷰 스크롤 → PDF 페이지 싱크. 편집 중에도 건다 — 프리뷰는 항상 살아 있고,
+                # 에디터가 프리뷰를 밀면 프리뷰의 scroll 이벤트가 나므로 PDF가 체인 끝으로 따라온다.
+                ui.run_javascript(_pdf_sync_js(".conv-md"))
             elif show_pdf:
                 _pdf_pane()
             else:
@@ -2763,8 +3094,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         # 표기 설정을 바꾸면 원본에서 다시 렌더 → 새 표기로 인용 재적용 (평문 [n]에서 다시 링크)
         def reapply() -> None:
-            commit()  # 자동 저장 + rerender (raw→평문→새 표기 링크)
-            refresh_preview()
+            def apply() -> None:
+                commit()  # 자동 저장 + rerender (raw→평문→새 표기 링크)
+                refresh_preview()
+                conv_body.refresh()
+
+            guard_manual_edit(apply)
 
         # 참고문헌은 변환 시 API 키가 있으면 자동 파싱된다. 이 버튼은 (1) 키가 없어 자동
         # 파싱이 건너뛰어졌을 때의 수동 실행, (2) 표기·프롬프트를 바꾼 뒤 다시 뽑기용 폴백이다.
@@ -2835,10 +3170,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ui.label("그림·표").classes("font-semibold text-sm text-primary")
 
         def set_capstyle(v: str) -> None:
-            ctrl.set_setting("caption_style", v)
-            commit()  # 재조립 → 새 캡션 표기로 프리뷰 갱신
-            refresh_preview()
-            capstyle_picker.refresh()
+            def apply() -> None:
+                ctrl.set_setting("caption_style", v)
+                commit()  # 재조립 → 새 캡션 표기로 프리뷰 갱신
+                refresh_preview()
+                capstyle_picker.refresh()
+                conv_body.refresh()
+
+            guard_manual_edit(apply, cancelled=capstyle_picker.refresh)
 
         ui.label("그림·표 캡션 표기").classes("text-sm")
 
@@ -2974,11 +3313,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         await desktop.deliver(name, data, media_type="text/markdown")
 
     async def save_to_library() -> None:
-        """홈에서 지정한 '저장 위치' 폴더에 결과 마크다운을 저장 (자동 저장을 꺼 뒀을 때도 수동으로)."""
+        """이 논문의 자리에 결과 마크다운을 저장 (자동 저장을 꺼 뒀을 때도 수동으로).
+
+        자리는 그 논문이 속한 프로젝트의 폴더 > 공통 저장 위치 순으로 정해진다.
+        """
         from nicegui import run as ng_run
 
-        if not library.configured():
-            ui.notify("저장 위치가 지정돼 있지 않습니다 — 홈의 '저장 위치'에서 폴더를 고르세요.", type="warning")
+        if not library.configured(library.project_of(ctrl.wd)):
+            ui.notify("저장 위치가 지정돼 있지 않습니다 — 홈의 '프로젝트' 또는 '저장 위치'에서 폴더를 고르세요.",
+                      type="warning")
             return
         try:
             saved = await ng_run.io_bound(library.export_paper, ctrl.wd)
@@ -2991,12 +3334,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ui.notify("저장됨 · " + " · ".join(str(p) for p in saved), type="positive")
 
     def library_button() -> None:
-        """저장 위치가 지정돼 있을 때만 보이는 '폴더로 저장' 버튼."""
-        if not library.configured():
+        """저장 위치(프로젝트 폴더 또는 공통)가 정해져 있을 때만 보이는 '폴더로 저장' 버튼."""
+        pid = library.project_of(ctrl.wd)
+        if not library.configured(pid):
             return
-        dests = " · ".join(str(d) for d in (library.dir_for(k) for k in library.KINDS) if d)
+        dests = " · ".join(str(d) for d in library.dirs_for(pid).values() if d)
+        # 프로젝트에 속한 논문은 '어느 묶음의 폴더로 가는지'가 먼저 궁금하다 → 이름을 앞에 붙인다.
+        tip = f"프로젝트: {projects.name_of(pid)} → {dests}" if pid else f"저장 위치: {dests}"
         ui.button("폴더로 저장", icon="drive_file_move", on_click=save_to_library) \
-            .props("flat dense no-caps color=grey-8").tooltip(f"저장 위치: {dests}")
+            .props("flat dense no-caps color=grey-8").tooltip(tip)
 
     # 내보내기 형식 드롭다운 — 변환·번역·뷰어 탭 다운로드 옆에 두되 전역 설정(config)을 그대로 쓴다.
     # 공유 refreshable이라 한 탭에서 바꾸면 다른 탭·홈의 선택도 같은 값으로 동기화된다.
@@ -3128,6 +3474,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         # ---------- 1단계: 변환 ----------
         with ui.tab_panel(step_convert).classes("p-0"):
             with ui.splitter(value=46).classes("w-full").style("height: calc(100vh - 108px)") as sp1:
+                side_state["splitter"] = sp1
+                sp1.on_value_change(
+                    lambda e: side_state.update(width=e.value) if e.value > 1 else None)
                 with sp1.before:
                     with ui.column().classes(_panel + " md4-scroll").style(_scroll):
                         ui.button("레이아웃 자동 수정", icon="auto_fix_high", on_click=open_fix_dialog) \
@@ -3209,7 +3558,12 @@ _HOME_CSS = """
 .md4-pincard { box-shadow: inset 3px 0 0 #2383e2 !important; }
 .md4-listcap { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; color: #9a968e;
   display: flex; align-items: center; gap: 4px; padding: 2px 2px 0; }
+/* 프로젝트 전환 줄 — 칩이 많아지면 줄바꿈해서 가로 스크롤을 만들지 않는다 */
+.md4-projbar { flex-wrap: wrap; row-gap: 4px; padding: 6px 16px 0; }
+.md4-projchip .q-btn__content { gap: 6px; flex-wrap: nowrap; }
+.md4-projchip-off { border: 1px solid rgba(0,0,0,.12); }
 @media (prefers-color-scheme: dark) {
+  .md4-projchip-off { border-color: rgba(255,255,255,.18); }
   .md4-hint { border-color: #464646; }
   .md4-dropwrap:hover .md4-hint { background: rgba(35,131,226,.14); }
 }
@@ -3253,7 +3607,8 @@ def save_source(data: bytes, filename: str, upload_dir: Path) -> Path:
 def convert_source(src_path: Path, backend: str, ocr: bool = False, flavor: str | None = None) -> WorkDir:
     """이미 저장된 원본 파일을 변환 (백그라운드 스레드에서 호출). 결과 .md4는 원본 옆 폴더에.
 
-    LLM 키가 있으면 앞부분(저자·서지) 정규화에 LLM을 쓴다(포맷에 강함). 없으면 규칙 폴백.
+    LLM 키가 있으면 앞부분(저자·서지) 정규화와 수식(크롭 그림 → LaTeX)에 LLM을 쓴다.
+    없으면 각각 규칙 폴백 / 크롭 그림 그대로.
     en.md는 범용(canonical)으로 저장하고, 뷰어별 형식(Notion/Obsidian)은 다운로드 시 변환한다
     (flavor 인자는 하위호환용으로 남겨두나 조립엔 영향 없음).
     """
@@ -3277,7 +3632,7 @@ def save_and_convert(
     return convert_source(save_source(data, filename, upload_dir), backend, ocr, flavor)
 
 
-_QUEUE_ACTIVE = ("pending", "extracting", "cite", "glossary", "meta")
+_QUEUE_ACTIVE = ("pending", "extracting", "cite", "glossary", "meta", "bib")
 
 
 async def _process_queue(state: dict) -> None:
@@ -3314,7 +3669,15 @@ async def _process_queue(state: dict) -> None:
                     # 서지에서 폴더·PDF 이름 자동 정리 (이름 규칙 [output].naming)
                     wd = await run.io_bound(_auto_rename, wd, state["upload_dir"])
                     item["wd_root"] = str(wd.root)
-                # 전역 '저장 위치'가 지정돼 있으면 결과 마크다운을 거기에 쌓는다 (리네임 후 최종 이름으로)
+                # 올릴 때 고른 프로젝트에 배정한다 — 이름 정리(리네임) 뒤라야 최종 폴더에 적히고,
+                # 자동 저장보다 앞이라야 그 프로젝트의 폴더로 쌓인다. (AI 키와는 무관한 단계)
+                if item.get("project"):
+                    await run.io_bound(set_project, wd.root, item["project"])
+                # 서지를 온라인으로 보강 — .bib 항목이 정확해지고 인용이 링크가 된다.
+                # auto_export 앞이라야 그 정확한 항목이 references.bib에 쌓인다.
+                item["status"], item["since"] = "bib", time.monotonic()
+                item["boost"] = await run.io_bound(_auto_bibsource, wd)
+                # '저장 위치'가 지정돼 있으면 결과 마크다운을 거기에 쌓는다 (리네임 후 최종 이름으로)
                 await run.io_bound(library.auto_export, wd)
                 item["status"], item["done_at"] = "done", time.monotonic()
             except Exception as ex:  # noqa: BLE001 — 항목 실패가 큐 전체를 막지 않게
@@ -3324,6 +3687,197 @@ async def _process_queue(state: dict) -> None:
 
 
 _LIB_LABEL = {"en": "영어 마크다운", "ko": "한국어 마크다운", "pdf": "PDF 원본"}
+
+
+def _any_library_dirs() -> bool:
+    """내보낼 곳이 하나라도 있는지 — 공통 저장 위치 또는 폴더를 정한 프로젝트.
+
+    프로젝트마다 폴더를 정해 쓰면 공통 설정은 비어 있을 수 있다. 그때 '폴더를 먼저 지정하세요'로
+    막으면 실제로는 갈 곳이 있는 논문까지 못 내보낸다.
+    """
+    return library.configured() or any(projects.has_dirs(p["id"]) for p in projects.all_projects())
+
+
+def build_project_settings(state: dict, on_change) -> None:  # noqa: ANN001 — () -> None
+    """홈 왼쪽 '프로젝트 설정' 패널 — **지금 고른 프로젝트 하나**의 이름·폴더·개별 설정.
+
+    프로젝트를 고르고 새로 만드는 일은 위쪽 헤더의 프로젝트 줄이 맡는다. 여기는 '고른 묶음이
+    어떤 묶음인지'만 다룬다 — 만들기 입력이 두 군데 있으면 어느 쪽이 지금 쓰는 것인지 헷갈린다.
+
+    폴더 하나만 고르면 그 안에 종류별 자리(루트·ko/·pdf/·references.bib)가 자동으로 잡힌다.
+    """
+    from nicegui import ui
+
+    from md4paper.ui import folder_dialog
+    from md4paper.workdir import recent_workdirs
+
+    can_pick = folder_dialog.available() or desktop.active()  # 앱 창은 자체 대화상자를 갖는다
+    opened = {"v": False}  # 패널을 다시 그려도(프로젝트를 바꿔도) 펼친 상태는 유지한다
+
+    def _no_dialog(btn) -> None:  # noqa: ANN001 — ui.button
+        btn.disable()
+        btn.tooltip("이 환경에선 폴더 대화상자를 열 수 없습니다 — 경로를 직접 입력하세요")
+
+    def count_of(pid: str) -> int:
+        """이 프로젝트의 논문 편수 — 목록을 한 번만 훑는다."""
+        return sum(1 for r in recent_workdirs(state["upload_dir"], limit=100_000, include_hidden=True)
+                   if projects.normalize(r["project"]) == pid)
+
+    def save_name(pid: str, value: str) -> None:
+        """이름 바꾸기 — 값이 그대로면 저장하지 않는다(blur마다 파일을 쓰지 않게)."""
+        if projects.clean_name(value) == projects.name_of(pid):
+            return
+        if not projects.rename(pid, value):
+            panel.refresh()  # 빈 이름 등 — 입력을 저장된 이름으로 되돌림
+            return
+        panel.refresh()
+        on_change()
+
+    def save_root(pid: str, path: str | None) -> None:
+        raw = str(path).strip() if path else ""
+        new = Path(raw).expanduser() if raw else None
+        if projects.root_of(pid) == new:
+            return
+        projects.set_root(pid, raw or None)  # ko/·pdf/ 자리까지 만들어 준다
+        panel.refresh()
+        on_change()
+        name = projects.name_of(pid)
+        ui.notify(f"'{name}' 폴더 → {new}" if new
+                  else f"'{name}' 폴더 해제됨 — 공통 저장 위치에 쌓입니다.",
+                  type="positive" if new else "info")
+
+    async def pick_root(pid: str) -> None:
+        cur = projects.root_of(pid) or state["upload_dir"]
+        picked = await desktop.choose_folder(f"'{projects.name_of(pid)}' 프로젝트 폴더 선택", str(cur))
+        if picked:  # 취소면 조용히 원래 값 유지
+            save_root(pid, picked)
+
+    def confirm_delete(pid: str, n: int) -> None:
+        """묶음만 지우고 논문·파일은 남긴다 — 되돌릴 수 없는 건 '배정'뿐이라 그것만 확인받는다."""
+        name = projects.name_of(pid)
+
+        def do_delete() -> None:
+            dlg.close()
+            # 배정을 먼저 지운다 — 프로젝트가 사라진 뒤엔 어느 논문이 속했는지 알 방법이 없다.
+            for r in recent_workdirs(state["upload_dir"], limit=100_000, include_hidden=True):
+                if projects.normalize(r["project"]) == pid:
+                    set_project(r["root"], None)
+            projects.delete(pid)  # 지운 게 고른 프로젝트였으면 active는 '모든 프로젝트'로 돌아간다
+            panel.refresh()
+            on_change()
+            ui.notify(f"'{name}' 프로젝트를 지웠습니다" + (f" · {n}편은 미분류" if n else ""),
+                      type="positive")
+
+        with ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:420px"):
+            ui.label(f"'{name}' 프로젝트를 지울까요?").classes("font-bold")
+            ui.label(f"그 논문 {n}편은 미분류가 됩니다 — 폴더와 파일은 그대로 둡니다.") \
+                .classes("text-xs text-gray-500")
+            with ui.row().classes("justify-end w-full items-center gap-2"):
+                ui.button("취소", on_click=dlg.close).props("flat")
+                ui.button("프로젝트 삭제", icon="delete", on_click=do_delete) \
+                    .props("unelevated no-caps color=negative")
+        dlg.open()
+
+    def save_setting(pid: str, key: str, value) -> None:  # noqa: ANN001
+        """프로젝트 설정 지정/해제 — value가 None이면 전역 설정을 따르게 된다."""
+        projects.set_setting(pid, key, value)
+        panel.refresh()
+        on_change()
+
+    def project_overrides(pid: str) -> None:
+        """이 프로젝트만 다르게 쓸 설정 — 저장·출력에 관한 것만.
+
+        기본은 **전역 따름**이고, 바꾼 항목만 프로젝트에 저장된다. 그래서 전역 설정을 고치면
+        따로 정하지 않은 프로젝트들은 저절로 따라온다(설정을 두 군데 관리하지 않게).
+        """
+        own = projects.settings_of(pid)
+        with ui.expansion(f"이 프로젝트만 다르게 ({len(own)}개 지정됨)" if own else "이 프로젝트만 다르게",
+                          icon="tune", value=False).classes("w-full").props("dense"):
+            ui.label("정하지 않은 항목은 전역 설정을 그대로 따릅니다.") \
+                .classes("text-xs text-gray-400")
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                ui.label("이름 규칙").classes("text-xs w-20 shrink-0")
+                nm = ui.input(value=own.get("naming", ""),
+                              placeholder=f"전역 따름 ({config.resolve_naming_template()})") \
+                    .props("dense outlined").classes("flex-grow min-w-0")
+                nm.on("blur", lambda _, p=pid, i=nm: save_setting(p, "naming",
+                                                                  (i.value or "").strip() or None))
+            with ui.row().classes("items-center gap-3 w-full"):
+                ui.label("내보내기").classes("text-xs w-20 shrink-0")
+                ui.select({"": f"전역 따름 ({_EXPORT_TARGET[config.resolve_export_target()]})",
+                           **_EXPORT_TARGET},
+                          value=own.get("export_target", ""),
+                          on_change=lambda e, p=pid: save_setting(p, "export_target", e.value or None)) \
+                    .props("dense outlined").classes("flex-grow")
+            # (설정 키, 라벨, 전역값을 읽는 함수) — 켜짐/꺼짐 세 갈래 스위치로 같은 모양이다
+            _TOGGLES = (("bibtex", "references.bib도 함께 쌓기", config.resolve_library_bibtex),
+                        ("auto", "변환·번역이 끝나면 자동 저장", config.resolve_library_auto),
+                        ("bib_lookup", "변환 직후 서지를 온라인 보강", config.resolve_bib_lookup))
+            for key, text, global_value in _TOGGLES:
+                with ui.row().classes("items-center gap-3 w-full no-wrap"):
+                    glob = global_value()
+                    ui.select({"": f"전역 따름 ({'켜짐' if glob else '꺼짐'})",
+                               "on": "켜짐", "off": "꺼짐"},
+                              value="" if key not in own else ("on" if own[key] else "off"),
+                              on_change=lambda e, p=pid, k=key: save_setting(
+                                  p, k, None if not e.value else e.value == "on")) \
+                        .props("dense outlined").classes("w-44 shrink-0")
+                    ui.label(text).classes("text-xs text-gray-500")
+
+    # 고른 프로젝트가 바뀌면 제목까지 달라져야 하므로 expansion째로 다시 그린다(펼침은 opened로 유지).
+    @ui.refreshable
+    def panel() -> None:
+        pid = projects.assign_target()  # 실제 프로젝트를 고른 경우에만 (모든 프로젝트·미분류는 '')
+        ex = ui.expansion(f"프로젝트 설정 — {projects.name_of(pid)}" if pid else "프로젝트 설정",
+                          icon="folder_special", value=opened["v"]).classes("w-full").props("dense")
+        ex.on_value_change(lambda e: opened.__setitem__("v", bool(e.value)))
+        # 위 프로젝트 줄의 톱니 단추가 이 패널을 펼친다 (고른 묶음 ↔ 그 묶음의 설정을 잇는다).
+        state["open_project_settings"] = lambda: (opened.__setitem__("v", True), ex.open())
+        with ex:
+            if not pid:
+                ui.label("위쪽 프로젝트 줄에서 프로젝트를 하나 고르면 그 묶음의 이름·폴더·설정이 "
+                         "여기 나옵니다.").classes("text-xs text-gray-500")
+                return
+            root = projects.root_of(pid)
+            n = count_of(pid)
+            ui.label("폴더 하나만 정하면 그 안에 영어 마크다운·ko/·pdf/·references.bib가 자동으로 "
+                     "자리를 잡습니다.").classes("text-xs text-gray-500")
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                ui.label("이름").classes("text-xs w-12 shrink-0")
+                nm = ui.input(value=projects.name_of(pid)).props("dense outlined") \
+                    .classes("flex-grow min-w-0")
+                nm.on("blur", lambda _, p=pid, i=nm: save_name(p, i.value))
+                nm.on("keydown.enter", lambda _, p=pid, i=nm: save_name(p, i.value))
+                ui.label(f"{n}편").classes("text-xs text-gray-500 shrink-0")
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                ui.label("폴더").classes("text-xs w-12 shrink-0")
+                rt = ui.input(value=str(root or ""), placeholder="폴더를 고르거나 경로를 붙여넣으세요") \
+                    .props("dense outlined").classes("flex-grow min-w-0")
+                rt.on("blur", lambda _, p=pid, i=rt: save_root(p, (i.value or "").strip() or None))
+                rt.on("keydown.enter", lambda _, p=pid, i=rt: save_root(p, (i.value or "").strip() or None))
+                btn = ui.button(icon="folder_open", on_click=lambda _, p=pid: pick_root(p)) \
+                    .props("dense outline").tooltip("폴더 선택 대화상자 열기")
+                if not can_pick:
+                    _no_dialog(btn)
+                clear = ui.button(icon="close", on_click=lambda _, p=pid: save_root(p, None)) \
+                    .props("flat dense round size=sm color=grey").tooltip("이 폴더 지정 해제")
+                clear.set_visibility(root is not None)
+            if root is not None:  # 폴더 하나가 어떻게 펼쳐지는지 그대로 보여 준다
+                ui.label(f"{root}  ·  ko/  ·  pdf/  ·  references.bib") \
+                    .classes("text-xs text-gray-400 break-all")
+            else:
+                ui.label("폴더 미지정 — 공통 저장 위치에 쌓입니다.").classes("text-xs text-gray-400")
+            project_overrides(pid)
+            with ui.row().classes("items-center w-full no-wrap q-mt-xs"):
+                ui.space()
+                ui.button("이 프로젝트 삭제", icon="delete",
+                          on_click=lambda _, p=pid, c=n: confirm_delete(p, c)) \
+                    .props("flat dense no-caps size=sm color=grey") \
+                    .tooltip("프로젝트만 지우기 (논문·폴더는 그대로)")
+
+    panel()
+    # 프로젝트를 고르거나 만들거나 옮기면 이 패널도 같이 갱신된다 (헤더 줄이 부른다).
+    state["project_rows_refresh"] = panel.refresh
 
 
 def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: ANN001 — () -> None
@@ -3382,8 +3936,20 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
             ui.label("두 폴더가 같아서 파일 이름 뒤에 .en / .ko를 붙여 구분합니다.") \
                 .classes("text-xs text-orange-600")
 
+    async def pick_one_folder() -> None:
+        """폴더 하나 → en/ko/pdf 세 칸을 한꺼번에 (프로젝트 폴더와 똑같은 배치)."""
+        cur = library.dir_for("en") or state["upload_dir"]
+        picked = await desktop.choose_folder("공통 저장 폴더 선택 (영어는 루트 · 번역 ko/ · PDF pdf/)", str(cur))
+        if not picked:
+            return
+        for which, path in projects.layout(picked).items():
+            config.set_library_dir(which, str(path))
+        projects.ensure_layout(picked)
+        lib_rows.refresh()
+        ui.notify(f"저장 위치 → {picked} (영어는 루트 · 번역 ko/ · PDF pdf/)", type="positive")
+
     async def export_all() -> None:
-        if not library.configured():
+        if not _any_library_dirs():
             ui.notify("먼저 폴더를 지정하세요.", type="warning")
             return
         roots = [r["root"] for r in recent_workdirs(state["upload_dir"], limit=1000)]
@@ -3435,27 +4001,88 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
         naming_rows.refresh()
         ui.notify(f"이름 규칙 저장됨 · 예: {paper_meta.naming_preview()}", type="positive")
 
-    async def enrich_now() -> None:
-        """연도·venue가 빈 논문만 온라인 서지에서 채우고, 바뀌면 이름까지 정리."""
-        from md4paper import enrich
-        from md4paper.workdir import recent_workdirs
+    # 보강 범위 — 사용자가 여기서 직접 고른다. 홈 목록의 필터를 따라가게 했더니 '지금 무엇을
+    # 보강하려는지'가 화면에 안 보여서, 버튼 옆에 프로젝트를 명시적으로 고르게 했다.
+    from md4paper import enrich as _enrich_mod
 
-        enrich_btn.props("loading")
+    enrich_scope = {"pid": projects.active() if projects.active() not in
+                    (projects.ALL, projects.NONE) else _enrich_mod.ALL}
+
+    # 진행 상황은 **평범한 dict로만** 주고받는다. NiceGUI 위젯을 워커 스레드에서 직접 고치면
+    # 브라우저로 밀어 주는 시점이 한참 뒤라 화면이 멈춘 것처럼 보인다(실측: 0/74에서 7분 동안
+    # 멈춰 있다가 1/74로 튐). 그래서 워커는 dict만 쓰고, 화면은 아래 ui.timer가 갱신한다.
+    enrich_state = {"stop": False, "running": False, "n": 0, "total": 0,
+                    "label": "", "current": ""}
+
+    def enrich_paint() -> None:
+        """진행 상황 dict → 위젯 (메인 스레드에서만 불린다)."""
+        if not enrich_state["running"]:
+            return
+        total = enrich_state["total"] or 1
+        enrich_bar.set_value(enrich_state["n"] / total)
+        tail = f" · {enrich_state['current'][:34]}" if enrich_state["current"] else ""
+        enrich_label.set_text(f"{enrich_state['label']} · "
+                              f"{enrich_state['n']}/{enrich_state['total']}편{tail}")
+
+    ui.timer(0.3, enrich_paint)
+
+    async def enrich_now() -> None:
+        """서지 정보를 온라인에서 보강 — 빈 연도·학회, 출판 기록(.bib), 참고문헌 DOI를 한 번에.
+
+        범위는 **위에서 고른 프로젝트**다. 논문마다 API를 여러 번 두드려 편당 몇 초에서 몇십 초가
+        걸리므로 진행률을 보여 주고 언제든 멈출 수 있게 한다.
+        """
+        from md4paper import enrich, library
+
+        if enrich_state["running"]:
+            return
+        pid = enrich_scope["pid"]
+        roots = enrich.project_roots(pid, state["upload_dir"])
+        label = "모든 프로젝트" if pid == enrich.ALL else projects.name_of(pid)
+        if not roots:
+            ui.notify(f"{label}에 속한 논문이 없습니다.", type="info")
+            return
+        enrich_state.update(stop=False, running=True, n=0, total=len(roots),
+                            label=label, current="")
+        enrich_btn.set_visibility(False)
+        enrich_progress.set_visibility(True)
+        enrich_paint()
+
+        def tick(n: int, root, got: dict) -> None:  # noqa: ANN001
+            # 워커 스레드 — dict만 만진다 (위젯은 ui.timer가 메인 스레드에서 갱신)
+            enrich_state["n"] = n
+            enrich_state["current"] = Path(root).stem
+
+        counts = {}
         try:
-            roots = [r["root"] for r in recent_workdirs(state["upload_dir"], limit=100_000,
-                                                        include_hidden=True)]
-            counts = await run.io_bound(enrich.enrich_many, roots,
-                                        mailto=config.resolve_enrich_mailto() or None)
+            counts = await run.io_bound(
+                enrich.enrich_many, roots, mailto=config.resolve_enrich_mailto() or None,
+                on_progress=tick, should_stop=lambda: enrich_state["stop"])
             renamed = 0
-            if counts["papers"]:
+            if counts.get("papers"):
                 renamed = (await run.io_bound(paper_meta.apply_naming, state["upload_dir"]))["renamed"]
+            if library.configured(pid if pid != enrich.ALL else None):
+                await run.io_bound(library.export_many, roots)
         finally:
-            enrich_btn.props(remove="loading")
-        msg = (f"{counts['checked']}편 확인 · {counts['papers']}편 보강"
-               f" (연도 {counts.get('year', 0)} · 학회 {counts.get('venue', 0)})")
+            enrich_state.update(running=False, current="")
+            enrich_progress.set_visibility(False)
+            enrich_btn.set_visibility(True)
+        if not counts:
+            ui.notify("보강을 시작하지 못했습니다 — 로그를 확인해 주세요.", type="negative")
+            return
+        msg = (f"{counts['checked']}/{counts['total']}편 확인 · {counts['papers']}편 보강 "
+               f"(연도 {counts.get('year', 0)} · 학회 {counts.get('venue', 0)} · "
+               f"출판 기록 {counts['records']} · 참고문헌 DOI {counts['refs_filled']}건)")
         if renamed:
             msg += f" · 이름 {renamed}편 정리"
-        ui.notify(msg, type="positive" if counts["papers"] else "info", timeout=6000)
+        if counts["stopped"]:
+            msg = "중지했습니다 — " + msg + " (여기까지는 저장됐습니다)"
+        ui.notify(msg, type="warning" if counts["stopped"] else
+                  ("positive" if counts["papers"] else "info"), timeout=8000)
+        if counts["retracted"]:  # 철회된 논문을 인용한 채 제출하는 일은 없어야 한다
+            names = ", ".join(Path(r).stem for r in counts["retracted"][:5])
+            ui.notify(f"⚠ 출판사가 철회(retracted)한 논문 {len(counts['retracted'])}편: {names}",
+                      type="negative", timeout=0, close_button="닫기")
         on_workspace_change()
 
     async def apply_naming_now() -> None:
@@ -3485,12 +4112,30 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
     with ui.expansion("저장 위치 — 변환한 논문을 모아둘 폴더", icon="folder_open",
                       value=False).classes("w-full").props("dense"):
         ui.label("변환·번역이 끝난 마크다운(원하면 원본 PDF도)을 고른 폴더에 쌓습니다. 영어·한국어·PDF를 "
-                 "각각 다른 폴더로 보낼 수 있어요 (예: Obsidian 볼트의 Papers/EN, Papers/KO, Papers/PDF).") \
+                 "각각 다른 폴더로 보낼 수 있어요 (예: Obsidian 볼트의 Papers/EN, Papers/KO, Papers/PDF). "
+                 "여기는 모든 논문이 함께 쓰는 공통 자리입니다 — 프로젝트에 폴더를 정해 두면 그 논문은 그 폴더로 "
+                 "가고, 프로젝트가 없거나 폴더를 안 정한 논문만 이곳으로 옵니다.") \
             .classes("text-xs text-gray-500")
         lib_rows()
+        with ui.row().classes("items-center gap-2"):
+            one_btn = ui.button("폴더 하나로 정리", icon="create_new_folder", on_click=pick_one_folder) \
+                .props("dense outline no-caps") \
+                .tooltip("폴더 하나를 고르면 영어는 루트, 번역은 ko/, PDF는 pdf/로 자동 배치합니다")
+            if not can_pick:
+                _no_dialog(one_btn)
         ui.switch("변환·번역이 끝나면 자동으로 저장", value=config.resolve_library_auto(),
                   on_change=lambda e: config.set_section_value("library", "auto", e.value)) \
             .props("dense").tooltip("끄면 아래 버튼이나 논문 화면에서 직접 내보낼 때만 저장합니다")
+        ui.switch("BibTeX(references.bib)도 함께 쌓기", value=config.resolve_library_bibtex(),
+                  on_change=lambda e: config.set_section_value("library", "bibtex", e.value)) \
+            .props("dense").tooltip("논문마다 항목 하나가 저장 위치의 references.bib에 덧붙습니다 — "
+                                    "인용할 때 그대로 복사해 붙이도록. 서지 정보가 없는 논문은 건너뜁니다.")
+        ui.switch("변환이 끝나면 서지를 온라인에서 보강", value=config.resolve_bib_lookup(),
+                  on_change=lambda e: config.set_section_value("library", "bib_lookup", e.value)) \
+            .props("dense").tooltip("논문 API(Semantic Scholar→Crossref)에서 출판 기록을 받아 "
+                                    ".bib 항목을 정확하게 만들고, 참고문헌의 빈 DOI를 채워 인용을 "
+                                    "링크로 만듭니다. 편당 십몇 초가 더 걸리고, 논문 제목만 전송합니다. "
+                                    "끄면 나중에 '서지 정보 보강' 버튼으로 언제든 할 수 있습니다.")
         with ui.row().classes("items-center gap-2"):
             export_btn = ui.button("이미 변환한 논문도 지금 내보내기", icon="drive_file_move",
                                    on_click=export_all).props("dense outline no-caps")
@@ -3504,8 +4149,25 @@ def build_location_settings(state: dict, on_workspace_change) -> None:  # noqa: 
                 .tooltip("이미 변환한 논문의 폴더·PDF·저장 위치 사본 이름을 지금 규칙으로 맞춥니다")
             enrich_btn = ui.button("서지 정보 보강", icon="travel_explore",
                                    on_click=lambda: enrich_now()).props("dense outline no-caps") \
-                .tooltip("연도·학회가 비어 있는 논문을 공개 서지 API(OpenAlex·Crossref)에서 찾아 채웁니다 — "
-                         "논문 제목만 전송하고, 제목이 일치할 때만 채택합니다")
+                .tooltip("고른 프로젝트의 논문에 대해: 빈 연도·학회를 채우고, 출판 기록을 받아 그 "
+                         "프로젝트 폴더의 references.bib를 정확하게 만들고, 참고문헌의 빈 DOI를 "
+                         "채워 인용을 링크로 만듭니다. 제목만 전송합니다.")
+            ui.select({_enrich_mod.ALL: "모든 프로젝트", **projects.options(with_none=True)},
+                      value=enrich_scope["pid"],
+                      on_change=lambda e: enrich_scope.update(pid=e.value)) \
+                .props("dense outlined").classes("w-44") \
+                .tooltip("보강할 범위 — 이 프로젝트의 논문만 확인하고 그 폴더의 references.bib를 갱신합니다")
+        # 진행률 + 중지 — 편당 몇 초에서 몇십 초라 스피너만으로는 얼마나 남았는지 알 수 없다
+        with ui.column().classes("w-full gap-1") as enrich_progress:
+            with ui.row().classes("items-center gap-2 w-full"):
+                enrich_label = ui.label("").classes("text-xs text-gray-500 grow")
+                ui.button("중지", icon="stop_circle",
+                          on_click=lambda: (enrich_state.update(stop=True),
+                                            enrich_label.set_text("이 논문까지만 마치고 멈춥니다…"))) \
+                    .props("dense flat no-caps color=negative") \
+                    .tooltip("논문 하나를 끝낸 자리에서 멈춥니다 — 여기까지 보강한 내용은 저장됩니다")
+            enrich_bar = ui.linear_progress(value=0, show_value=False).props("rounded")
+        enrich_progress.set_visibility(False)
         ui.label("논문 폴더·원본 PDF·저장 위치의 md/PDF가 모두 이 규칙의 이름을 씁니다 — "
                  "이름이 같아야 md에서 PDF를 바로 찾을 수 있어요.").classes("text-xs text-gray-400")
         ui.separator().classes("q-my-xs")
@@ -3533,10 +4195,12 @@ def build_home(state: dict) -> None:
     from md4paper.workdir import delete_workdir, recent_workdirs, set_hidden
 
     backend_ready = bool(available_backends())
-    search_state = {"q": "", "sort": "recent", "show_hidden": False}
+    # 고른 프로젝트는 목록 필터 + 새로 올릴 논문의 소속 — 앱을 다시 켜도 같은 묶음을 보게 기억한다.
+    search_state = {"q": "", "sort": "recent", "show_hidden": False, "project": projects.active()}
     selected: set[str] = set()  # 다중 선택된 워크디렉토리 root (문자열)
     _PHASE_ICON = {"pending": "schedule", "extracting": "sync", "cite": "sync",
-                   "glossary": "sync", "meta": "sync", "done": "check_circle", "failed": "error"}
+                   "glossary": "sync", "meta": "sync", "bib": "sync",
+                   "done": "check_circle", "failed": "error"}
     _AI_PHASES = ("cite", "glossary", "meta")
 
     # ===== 오른쪽 리스트 헬퍼 =====
@@ -3586,11 +4250,23 @@ def build_home(state: dict) -> None:
                 .classes("text-xs text-gray-500")
             # 저장 위치 사본은 작업 폴더 밖(사용자 볼트)이라, 안 지우면 고아로 남는다 → 기본 켬.
             # 볼트를 건드리는 게 싫으면 끄고 지울 수 있게 체크박스로 노출한다.
-            lib_dirs = [str(d) for d in (library.dir_for(k) for k in library.KINDS) if d]
+            # 사본이 어디 있는지는 그 논문의 프로젝트가 정한다 — 공통 폴더만 보여 주면 엉뚱한 경로가 뜬다.
+            pid = projects.normalize(item.get("project"))
+            lib_dirs = [str(d) for d in library.dirs_for(pid).values() if d]
             drop_lib = ui.checkbox("저장 위치의 사본도 함께 삭제", value=True) \
                 .props("dense").classes("text-sm") if lib_dirs else None
             for d in dict.fromkeys(lib_dirs):  # 어느 폴더가 지워지는지 경로를 그대로 (중복 제거)
                 ui.label(d).classes("text-xs text-gray-400 ml-8 break-all leading-tight")
+            if library.bib_path(pid) is not None:
+                ui.label("references.bib의 이 논문 항목도 함께 지웁니다.") \
+                    .classes("text-xs text-gray-400 ml-8 leading-tight")
+            # 실제 삭제(delete_workdir → remove_stem_everywhere)는 공통 + **모든** 프로젝트 폴더를
+            # 훑는다 — 프로젝트를 옮겨 다닌 논문의 옛 사본까지 정리하기 위해서다. 위에 그 논문의
+            # 현재 폴더만 적어 두면 목록에 없던 폴더의 파일이 사라진 것처럼 보이므로 미리 밝힌다.
+            if lib_dirs and any(projects.has_dirs(pr["id"]) for pr in projects.all_projects()
+                                if pr["id"] != pid):
+                ui.label("전에 다른 프로젝트에 넣어 뒀다면 그 폴더에 남은 사본도 함께 정리합니다.") \
+                    .classes("text-xs text-gray-400 ml-8 leading-tight")
 
             def do_delete() -> None:
                 ok = delete_workdir(item["root"], ws(),
@@ -3646,13 +4322,120 @@ def build_home(state: dict) -> None:
         await desktop.deliver(name, data)
 
     async def save_bulk_to_library() -> None:
-        """선택한 논문들을 전역 저장 위치(영어·한국어 폴더)로 내보내기."""
-        if not library.configured():
-            ui.notify("저장 위치가 지정돼 있지 않습니다 — 왼쪽 '저장 위치'에서 폴더를 고르세요.", type="warning")
+        """선택한 논문들을 각자의 자리(프로젝트 폴더 > 공통 저장 위치)로 내보내기."""
+        if not _any_library_dirs():
+            ui.notify("저장 위치가 지정돼 있지 않습니다 — 왼쪽 '프로젝트' 또는 '저장 위치'에서 폴더를 고르세요.",
+                      type="warning")
             return
         ok, failed = await run.io_bound(library.export_many, [Path(p) for p in selected])
         ui.notify(f"{ok}편 저장됨" + (f" · {failed}편 실패" if failed else ""),
                   type="positive" if ok else "warning")
+
+    def _refresh_project_views() -> None:
+        """프로젝트가 달라진 뒤 — 전환 줄·목록·드롭존 안내·왼쪽 설정 패널을 함께 맞춘다."""
+        project_bar.refresh()  # 먼저 — 지워진 프로젝트를 보고 있었으면 '모든 프로젝트'로 되돌린다
+        recent_list.refresh()
+        dropzone_caption.refresh()
+        refresh_rows = state.get("project_rows_refresh")
+        if refresh_rows:
+            refresh_rows()
+
+    def pick_project(pid: str) -> None:
+        """프로젝트 고르기 — 목록 필터·새 논문의 소속·왼쪽 설정 패널이 한 번에 따라온다."""
+        search_state["project"] = pid
+        projects.set_active(pid)  # 다음 실행에도 같은 묶음을 보게
+        _refresh_project_views()
+
+    def open_new_project(after=None, activate: bool = True) -> None:  # noqa: ANN001 — async 콜백
+        """새 프로젝트 — 이름 한 줄이면 끝. 폴더는 선택이고 나중에 정해도 된다.
+
+        만드는 길은 이 대화상자 하나뿐이다(헤더의 '새 프로젝트'와 목록 칩의 '새 프로젝트 만들기…'가
+        같은 것을 연다) — 만들기 입력이 여러 군데 있으면 무엇이 다른지 매번 따져 보게 된다.
+        """
+        from md4paper.ui import folder_dialog
+
+        can_pick = folder_dialog.available() or desktop.active()
+
+        async def pick() -> None:
+            picked = await desktop.choose_folder("새 프로젝트 폴더 선택", str(ws()))
+            if picked:
+                root_in.value = str(picked)
+
+        async def make() -> None:
+            proj = projects.create(name_in.value, (root_in.value or "").strip() or None)
+            dlg.close()
+            if activate:  # 만들자마자 그 묶음을 보고, 새 논문도 그리로 들어가게
+                pick_project(proj["id"])
+            else:
+                _refresh_project_views()
+            ui.notify(f"'{proj['name']}' 프로젝트를 만들었습니다"
+                      + ("" if (root_in.value or "").strip() else " — 폴더는 나중에 정해도 됩니다."),
+                      type="positive")
+            if after is not None:
+                await after(proj)
+
+        with ui.dialog() as dlg, ui.card().classes("gap-2").style("min-width:400px"):
+            ui.label("새 프로젝트").classes("font-bold")
+            name_in = ui.input(placeholder="예: 튜터 챗봇 서베이") \
+                .props("dense outlined autofocus").classes("w-full")
+            name_in.on("keydown.enter", make)
+            ui.label("폴더 (선택) — 나중에 정해도 됩니다.").classes("text-xs text-gray-500 q-mt-sm")
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                root_in = ui.input(placeholder="비워 두면 공통 저장 위치에 쌓입니다") \
+                    .props("dense outlined").classes("flex-grow min-w-0")
+                root_in.on("keydown.enter", make)
+                btn = ui.button(icon="folder_open", on_click=pick).props("dense outline") \
+                    .tooltip("폴더 선택 대화상자 열기")
+                if not can_pick:
+                    btn.disable()
+                    btn.tooltip("이 환경에선 폴더 대화상자를 열 수 없습니다 — 경로를 직접 입력하세요")
+            with ui.row().classes("justify-end w-full items-center gap-2"):
+                ui.button("취소", on_click=dlg.close).props("flat")
+                ui.button("만들기", icon="add", on_click=make).props("unelevated no-caps color=primary")
+        dlg.open()
+
+    async def move_to(root: Path, value: str) -> None:
+        """논문 하나를 다른 프로젝트로 — 배정만 바꾸지 않고 저장 위치의 사본까지 따라가게 한다."""
+        target = "" if value == projects.NONE else value
+        moved = await run.io_bound(library.reassign, WorkDir(Path(root)), target)
+        _refresh_project_views()
+        ui.notify(f"'{projects.name_of(target)}'(으)로 옮겼습니다"
+                  + (f" · 사본 {len(moved)}개" if moved else ""), type="positive")
+
+    async def move_bulk(value: str) -> None:
+        target = "" if value == projects.NONE else value
+        roots = [Path(p) for p in selected]
+        if not roots:
+            ui.notify("선택된 논문이 없습니다.", type="warning")
+            return
+        copies = 0
+        for root in roots:
+            copies += len(await run.io_bound(library.reassign, WorkDir(root), target))
+        _refresh_project_views()
+        ui.notify(f"{len(roots)}편을 '{projects.name_of(target)}'(으)로 옮겼습니다"
+                  + (f" · 사본 {copies}개" if copies else ""), type="positive")
+
+    def new_project_for(root: Path) -> None:
+        """목록 카드에서 바로 묶음을 만들고 그 논문을 옮긴다 — 만들기 대화상자는 하나를 쓴다.
+
+        보고 있던 필터는 건드리지 않는다(activate=False) — 논문 한 편을 옮기려던 참인데 목록이
+        통째로 새 프로젝트로 좁혀지면 방금 보던 자리를 잃는다.
+        """
+        async def move_it(proj: dict) -> None:
+            await move_to(root, proj["id"])
+
+        open_new_project(after=move_it, activate=False)
+
+    def project_menu(root: Path, pid: str) -> None:
+        """프로젝트 고르기 메뉴 — 목록 카드의 칩과 선택 툴바가 같은 항목을 쓴다."""
+        with ui.menu():
+            for value, label in projects.options(with_none=True).items():
+                here = (value == projects.NONE) if not pid else (value == pid)
+                item = ui.menu_item(("✓ " if here else "") + label,
+                                    on_click=lambda _, v=value: move_to(root, v))
+                item.props("dense" + (" disable" if here else ""))
+            ui.separator()
+            ui.menu_item("새 프로젝트 만들기…", on_click=lambda _: new_project_for(root)).props("dense")
 
     @ui.refreshable
     def sel_bar() -> None:
@@ -3662,7 +4445,12 @@ def build_home(state: dict) -> None:
             ui.label(f"{len(selected)}개 선택").classes("text-sm font-semibold text-primary")
             ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")).props("dense outline")
             ui.button("한국어 zip", icon="download", on_click=lambda: download_bulk("ko")).props("dense outline")
-            if library.configured():
+            mv = ui.button("프로젝트로 이동", icon="folder_special").props("dense outline no-caps") \
+                .tooltip("선택한 논문을 한 묶음으로 — 저장 위치의 사본도 함께 옮깁니다")
+            with mv, ui.menu():
+                for value, label in projects.options(with_none=True).items():
+                    ui.menu_item(label, on_click=lambda _, v=value: move_bulk(v)).props("dense")
+            if _any_library_dirs():
                 ui.button("폴더로 저장", icon="drive_file_move", on_click=save_bulk_to_library) \
                     .props("dense outline").tooltip("저장 위치로 내보내기")
             ui.space()
@@ -3677,10 +4465,64 @@ def build_home(state: dict) -> None:
         search_state["show_hidden"] = not search_state["show_hidden"]
         recent_list.refresh()
 
+    def open_settings() -> None:
+        """왼쪽 '프로젝트 설정' 패널 펼치기 — state는 창끼리 공유하므로 이미 닫힌 창의 패널을
+        가리키고 있을 수 있다. 그때는 조용히 넘긴다(단추 하나 때문에 화면이 깨지지 않게)."""
+        opener = state.get("open_project_settings")
+        if not opener:
+            return
+        try:
+            opener()
+        except RuntimeError:  # 다른 창에서 이미 사라진 패널
+            pass
+
+    # 프로젝트 전환 줄 — 홈에서 가장 먼저 눈에 들어와야 하는 것이라 헤더(양쪽 단 위)에 둔다.
+    # 프로젝트를 만들거나 지우거나 논문을 옮기면 칩과 편수가 함께 달라지므로 통째로 다시 그린다.
+    @ui.refreshable
+    def project_bar() -> None:
+        opts = projects.options(with_all=True)
+        if search_state["project"] not in opts:  # 보고 있던 프로젝트가 지워졌으면 전체로
+            search_state["project"] = projects.ALL
+        cur = search_state["project"]
+        # 편수는 목록을 한 번만 훑어 모은다 (칩마다 폴더를 다시 읽지 않게).
+        n_by_pid: dict[str, int] = {}
+        total = 0
+        for r in recent_workdirs(ws(), limit=100_000, include_hidden=True):
+            n_by_pid[projects.normalize(r["project"])] = \
+                n_by_pid.get(projects.normalize(r["project"]), 0) + 1
+            total += 1
+
+        def chip(value: str, label: str, n: int) -> None:
+            on = value == cur
+            b = ui.button(on_click=lambda _, v=value: pick_project(v)) \
+                .props("no-caps dense rounded " + ("unelevated color=primary" if on else "flat color=grey-8")) \
+                .classes("md4-projchip" + ("" if on else " md4-projchip-off"))
+            with b:
+                ui.label(label).classes("text-sm")
+                ui.label(str(n)).classes("text-xs opacity-60")
+
+        with ui.row().classes("md4-projbar items-center justify-center gap-1 w-full"):
+            chip(projects.ALL, projects.ALL_LABEL, total)
+            for p in projects.all_projects():
+                chip(p["id"], p["name"], n_by_pid.get(p["id"], 0))
+            chip(projects.NONE, projects.NONE_LABEL, n_by_pid.get("", 0))
+            ui.button("새 프로젝트", icon="add", on_click=lambda: open_new_project()) \
+                .props("dense outline no-caps rounded color=primary").classes("q-ml-sm") \
+                .tooltip("이름만 정하면 만들어집니다 — 폴더는 나중에 정해도 됩니다")
+            if projects.assign_target():  # 실제 프로젝트를 고른 경우에만 그 묶음의 설정으로 간다
+                ui.button(icon="settings", on_click=open_settings) \
+                    .props("flat dense round size=sm color=grey") \
+                    .tooltip(f"'{projects.name_of(cur)}' 설정 — 이름·폴더·이 프로젝트만 다르게")
+        ui.label("고른 프로젝트로 목록을 거르고, 새로 올리는 논문도 그 프로젝트로 들어갑니다.") \
+            .classes("text-xs text-gray-400")
+
     @ui.refreshable
     def recent_list() -> None:
         # 사용자가 숨긴 논문은 기본적으로 빼고, '숨긴 논문 보기'를 켰을 때만 함께 보여준다.
-        items = list(recent_workdirs(ws(), include_hidden=True))
+        # limit을 크게 주는 이유: 기본값(20)이면 21편째부터는 검색·프로젝트 필터에 아예 걸리지
+        # 않아 "그 프로젝트에 논문이 없다"고 보이고, 구역 머리글의 편수도 왼쪽 프로젝트 패널과
+        # 어긋난다. 목록을 묶어 보는 기능은 논문이 많아질 때 쓰는 것이라 여기서 잘라선 안 된다.
+        items = list(recent_workdirs(ws(), limit=100_000, include_hidden=True))
         n_hidden = sum(1 for r in items if r["hidden"])
         show_hidden = search_state["show_hidden"]
         if not show_hidden:
@@ -3696,6 +4538,12 @@ def build_home(state: dict) -> None:
         q = (search_state["q"] or "").strip().lower()
         if q:
             items = [r for r in items if q in _haystack(r)]  # 제목·저자·venue·연도 검색
+        # 고른 프로젝트만 (미분류는 배정이 없거나 지워진 프로젝트를 가리키는 논문)
+        pid_filter = search_state["project"]
+        if pid_filter == projects.NONE:
+            items = [r for r in items if not projects.normalize(r["project"])]
+        elif pid_filter:
+            items = [r for r in items if projects.normalize(r["project"]) == pid_filter]
         srt = search_state["sort"]
         if srt == "name":
             items.sort(key=lambda r: r["title"].lower())
@@ -3715,9 +4563,20 @@ def build_home(state: dict) -> None:
                       icon="visibility" if show_hidden else "visibility_off",
                       on_click=toggle_hidden_view).props("flat dense no-caps size=sm color=grey")
         if not items:
-            ui.label("검색 결과가 없습니다." if q else "아직 변환한 논문이 없습니다. 왼쪽에서 PDF를 올리세요.") \
-                .classes("text-xs text-gray-400")
-            if not q and not n_hidden:
+            # 비어 있는 이유를 갈라 준다 — 프로젝트를 골라 비었을 때 '작업 폴더를 바꾸라'고
+            # 안내하면 엉뚱한 곳을 만지게 된다(방금 만든 프로젝트는 당연히 비어 있다).
+            pfilter = search_state["project"]
+            if q:
+                msg = "검색 결과가 없습니다."
+            elif pfilter == projects.NONE:
+                msg = "미분류 논문이 없습니다 — 모든 논문이 프로젝트에 들어가 있습니다."
+            elif pfilter:
+                msg = (f"'{projects.name_of(pfilter)}' 프로젝트에 아직 논문이 없습니다 — "
+                       "다른 프로젝트의 카드에서 프로젝트 칩을 눌러 옮기거나, 이 상태로 PDF를 올리세요.")
+            else:
+                msg = "아직 변환한 논문이 없습니다. 왼쪽에서 PDF를 올리세요."
+            ui.label(msg).classes("text-xs text-gray-400")
+            if not q and not n_hidden and not pfilter:
                 # 다른 폴더에서 변환해 둔 논문이 안 보이는 것일 수 있다 — 실행 방식에 따라 작업 폴더
                 # 기본값이 달랐다. 어느 폴더를 보고 있는지와 바꾸는 길을 같이 알려 준다.
                 ui.label(f"보고 있는 작업 폴더: {ws()}").classes("text-xs text-gray-400 break-all")
@@ -3726,17 +4585,17 @@ def build_home(state: dict) -> None:
             return
         now = time.monotonic()
         new_roots = state.get("recent_new", {})
-        for idx, r in enumerate(items):
-            # 고정 구역과 그 아래 목록을 작은 머리글로 갈라 준다 (구역이 있을 때만)
-            if pinned and idx == 0:
-                with ui.element("div").classes("md4-listcap"):
-                    ui.icon("push_pin", size="12px").classes("text-primary")
-                    ui.label(f"고정한 논문 {len(pinned)}편")
-            if pinned and idx == len(pinned):
-                with ui.element("div").classes("md4-listcap q-mt-sm"):
-                    ui.label("모든 논문")
+
+        def cap(text: str, icon: str = "", spaced: bool = True) -> None:
+            with ui.element("div").classes("md4-listcap" + (" q-mt-sm" if spaced else "")):
+                if icon:
+                    ui.icon(icon, size="12px").classes("text-primary")
+                ui.label(text)
+
+        def card(r: dict) -> None:
             is_new = (now - new_roots.get(str(r["root"]), 0)) < 10  # 방금 완료 → 하이라이트
             unopened = not r.get("opened")  # 한 번도 리뷰를 안 연 논문
+            pid = projects.normalize(r["project"])
             bib = _bib_line(r)
             with ui.card().classes("w-full q-pa-sm" + (" md4-recent-new" if is_new else "")
                                    + (" md4-pincard" if r["pinned"] else "")):
@@ -3768,6 +4627,13 @@ def build_home(state: dict) -> None:
                             if r["hidden"]:
                                 ui.badge("숨김", color="grey").props("outline")
                             ui.label(_relative_time(r["mtime"])).classes("text-xs text-gray-400")
+                    # 소속 프로젝트 = 이 논문의 저장 폴더까지 정하는 값이라 카드에서 바로 바꾼다.
+                    chip = ui.button(projects.name_of(pid), icon="folder_special") \
+                        .props("flat dense no-caps size=sm "
+                               + ("color=primary" if pid else "color=grey-5")).classes("shrink-0")
+                    chip.tooltip("프로젝트 옮기기 — 저장 위치의 사본도 함께 옮깁니다")
+                    with chip:
+                        project_menu(r["root"], pid)
                     # 고정 = 목록 맨 위 칩 + 리뷰 헤더 탭. 자주 오가는 논문을 매번 찾지 않도록.
                     ui.button(icon="push_pin", on_click=lambda _, item=r: toggle_pin(item)) \
                         .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-5")) \
@@ -3790,6 +4656,34 @@ def build_home(state: dict) -> None:
                             .props("flat dense round size=sm color=grey").classes("shrink-0") \
                             .tooltip("목록에서 숨기기 / 파일 삭제")
 
+        # '모든 프로젝트'로 볼 때만 고정 구역 아래를 묶음별 구역으로 갈라 준다. 한 프로젝트를
+        # 골라 본다면 목록 전체가 이미 그 묶음이라 머리글이 같은 말을 반복할 뿐이다.
+        groups: list[tuple[str, list[dict]]] = []
+        if pid_filter == projects.ALL and projects.all_projects():
+            by_pid: dict[str, list[dict]] = {}
+            for r in rest:
+                by_pid.setdefault(projects.normalize(r["project"]), []).append(r)
+            for proj in projects.all_projects():  # 만든 순서대로
+                rows = by_pid.get(proj["id"])
+                if rows:
+                    groups.append((f"{proj['name']} {len(rows)}편", rows))
+            if by_pid.get(""):  # 미분류는 맨 끝
+                groups.append((f"{projects.NONE_LABEL} {len(by_pid[''])}편", by_pid[""]))
+        if pinned:
+            cap(f"고정한 논문 {len(pinned)}편", icon="push_pin", spaced=False)
+            for r in pinned:
+                card(r)
+        if groups:
+            for gi, (label, rows) in enumerate(groups):
+                cap(label, icon="folder_special", spaced=bool(pinned) or gi > 0)
+                for r in rows:
+                    card(r)
+        else:
+            if pinned and rest:
+                cap("모든 논문")
+            for r in rest:
+                card(r)
+
     # ===== 왼쪽 업로드/큐 =====
     async def handle(e) -> None:  # noqa: ANN001 — NiceGUI upload 이벤트 (파일마다 발화)
         fname = e.file.name
@@ -3802,6 +4696,8 @@ def build_home(state: dict) -> None:
         state["queue"].append({
             "name": fname, "src_path": str(src), "pages": pages,
             "backend": DEFAULT_BACKEND, "ocr": ocr.value,
+            # 올릴 때 고른 묶음을 항목에 새겨 둔다 — 변환 도중 필터를 바꿔도 이 논문의 소속은 그대로.
+            "project": projects.assign_target(),
             "status": "pending", "error": "", "garbled": 0, "since": 0.0, "done_at": 0.0,
         })
         queue_panel.refresh()
@@ -3830,8 +4726,21 @@ def build_home(state: dict) -> None:
                 sub = f"③ 용어집 만드는 중… (AI) {el}초"
             elif st == "meta":
                 sub = f"④ 서지 정보 추출 중… (AI) {el}초"
+            elif st == "bib":
+                sub = f"⑤ 서지 정보 보강 중… (온라인) {el}초"
             elif st == "done":
                 sub = "완료 → 오른쪽 '변환한 논문'에서 열기"
+                boost = it.get("boost") or {}
+                bits = []
+                if boost.get("record"):
+                    bits.append("출판 기록")
+                filled = (boost.get("refs") or {}).get("filled") or 0
+                if filled:
+                    bits.append(f"참고문헌 DOI {filled}건")
+                if bits:
+                    sub += " · 서지 " + "·".join(bits)
+                if boost.get("retracted"):  # 철회 논문은 조용히 넘기면 안 된다
+                    sub = "⚠ 철회된 논문입니다 — 인용 전 확인하세요 · " + sub
             else:
                 sub = f"실패: {it['error']}"[:80]
             color = "text-green-600" if st == "done" else ("text-red-500" if st == "failed" else "text-primary")
@@ -3853,6 +4762,13 @@ def build_home(state: dict) -> None:
     @ui.refreshable
     def dropzone_caption() -> None:  # 작업 폴더는 '저장 위치'에서 바뀔 수 있으므로 갱신 가능하게
         ui.label(f"논문별 세부 설정은 변환 후 화면에서. 작업 폴더: {ws()}").classes("text-xs text-gray-400")
+        target = projects.assign_target()
+        if target:  # 올리기 전에 '어느 묶음으로 들어가는지'를 알 수 있게
+            ui.label(f"새 논문은 '{projects.name_of(target)}' 프로젝트로 들어갑니다 "
+                     "(위 프로젝트 줄에서 바꿉니다).").classes("text-xs text-primary")
+        else:
+            ui.label("새 논문은 미분류로 들어갑니다 — 위 프로젝트 줄에서 프로젝트를 고르면 그리로 "
+                     "들어갑니다.").classes("text-xs text-gray-400")
 
     def poll() -> None:  # 큐 진행 갱신 + 전체 처리 완료(또는 실패) 시에만 목록에 등장 + 하이라이트
         q = state["queue"]
@@ -3890,8 +4806,10 @@ def build_home(state: dict) -> None:
     with ui.column().classes("items-center gap-0 w-full q-pt-sm"):
         ui.label("md4paper").classes("text-2xl font-bold")
         ui.label("논문 PDF를 헤더 정렬 마크다운 + 한국어 번역으로.").classes("text-xs text-gray-500")
+        # 프로젝트 전환 줄 — 왼쪽(올리기)과 오른쪽(목록) 둘 다에 걸리는 선택이라 양쪽 위에 둔다.
+        project_bar()
 
-    with ui.splitter(value=42).classes("w-full").style("height: calc(100vh - 72px)") as sp:
+    with ui.splitter(value=42).classes("w-full").style("height: calc(100vh - 132px)") as sp:
         # ---- 왼쪽: 업로드 · 설정 · 진행상황 ----
         with sp.before, ui.column().classes("p-4 gap-3 w-full md4-scroll").style("height:100%; overflow-y:auto"):
             _kstat = config.key_status()
@@ -4066,7 +4984,11 @@ def build_home(state: dict) -> None:
                 ui.switch("참고문헌에 DOI/arXiv 링크 달기", value=config.resolve_reference_links(),
                           on_change=lambda e: save_global("cite", "reference_links", e.value, "참고문헌 링크"))
 
-            # 저장 위치 — 변환한 논문(영어·한국어 마크다운)이 쌓일 폴더 + 작업 폴더
+            # 프로젝트 — 논문 묶음 + 묶음마다 폴더 하나 (저장 위치보다 위: 이게 먼저 정해질 자리다)
+            build_project_settings(
+                state, lambda: (project_bar.refresh(), recent_list.refresh(),
+                                dropzone_caption.refresh()))
+            # 저장 위치 — 프로젝트가 없거나 폴더를 안 정한 논문이 쌓일 공통 폴더 + 작업 폴더
             build_location_settings(
                 state, lambda: (dropzone_caption.refresh(), recent_list.refresh()))
 
@@ -4106,6 +5028,8 @@ def build_home(state: dict) -> None:
                 def on_sort(e) -> None:  # noqa: ANN001
                     search_state["sort"] = e.value
                     recent_list.refresh()
+                # 프로젝트 고르기는 위 헤더의 전환 줄이 맡는다 (목록 안에 있으면 '올리기'와
+                # 상관없는 목록 전용 필터처럼 보인다).
                 ui.select({"recent": "최근순", "name": "제목순", "year": "연도순", "translated": "번역됨 먼저"},
                           value="recent", on_change=on_sort).props("dense outlined").classes("w-32")
             sel_bar()  # 다중 선택 시 일괄 다운로드 툴바

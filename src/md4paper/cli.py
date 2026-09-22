@@ -9,7 +9,7 @@ from pathlib import Path
 
 import click
 
-from md4paper import config, pipeline
+from md4paper import config, pipeline, projects
 from md4paper.extract import BACKENDS, DEFAULT_BACKEND, ExtractError
 from md4paper.ir import Flavor
 from md4paper.review import manifest as manifest_io
@@ -120,7 +120,300 @@ def workspace(path: Path | None) -> None:
     click.echo(f"작업 폴더 설정됨: {config.resolve_workspace()}")
 
 
+# --- project --------------------------------------------------------------
+
+# 폴더 하나를 정하면 그 안에 자리가 잡힌다 — 어디로 가는지 보여줄 때 쓰는 라벨.
+_KIND_LABEL = {"en": "영어 마크다운", "ko": "번역", "pdf": "원본 PDF"}
+
+# assign/export/bib에서 "미분류"를 가리키는 말들 (프로젝트 이름 대신 쓸 수 있게)
+_NONE_WORDS = {"none", "미분류", projects.NONE}
+
+
+def _is_none_ref(text: str) -> bool:
+    """프로젝트 이름 자리에 '미분류'(배정 해제)를 준 것인지."""
+    return str(text or "").strip().casefold() in {w.casefold() for w in _NONE_WORDS}
+
+
+def _find_project(text: str) -> dict:
+    """이름이나 id로 프로젝트 하나 — 정확한 id → 정확한 이름 → 대소문자 무시 부분일치.
+
+    이름을 다 적지 않아도 되게 부분일치까지 받되, 여럿에 맞으면 고르지 않고 후보를 보여 준다.
+    """
+    key = str(text or "").strip()
+    items = projects.all_projects()
+    if not items:
+        raise click.ClickException("프로젝트가 없습니다. 만들기: md4paper project add <이름>")
+    for p in items:
+        if p["id"] == key:
+            return p
+    hits = [p for p in items if p["name"] == key]
+    if not hits and key:
+        low = key.casefold()
+        hits = [p for p in items if low in p["name"].casefold()]
+    if len(hits) == 1:
+        return hits[0]
+    if not hits:
+        raise click.ClickException(f"'{key}'에 맞는 프로젝트가 없습니다 — 목록: md4paper project")
+    names = ", ".join(f"{p['name']} ({p['id']})" for p in hits)
+    raise click.ClickException(f"'{key}'에 맞는 프로젝트가 여럿입니다: {names}")
+
+
+def _as_arg(name: str) -> str:
+    """안내 문구에 넣을 이름 — 공백이 있으면 따옴표를 씌워 그대로 붙여 쓸 수 있게."""
+    return f'"{name}"' if any(c.isspace() for c in name) else name
+
+
+def _echo_layout(root) -> None:  # noqa: ANN001 — Path | str
+    """폴더 하나 안에 잡히는 자리를 보여 준다 (지정 직후·조회 때 같은 모양으로)."""
+    from md4paper.bibtex import BIB_NAME
+
+    spots = projects.layout(root)
+    for which in projects.KINDS:
+        click.echo(f"  {_KIND_LABEL[which]}: {spots[which]}")
+    click.echo(f"  BibTeX: {spots['en'] / BIB_NAME}")
+
+
+def _paper_counts() -> dict[str, int]:
+    """{프로젝트 id: 논문 수} — 미분류는 빈 문자열 키. 없어진 배정은 미분류로 센다."""
+    from md4paper.workdir import recent_workdirs
+
+    counts: dict[str, int] = {}
+    rows = recent_workdirs(config.resolve_workspace(), limit=100_000, include_hidden=True)
+    for row in rows:
+        pid = projects.normalize(row.get("project"))
+        counts[pid] = counts.get(pid, 0) + 1
+    return counts
+
+
+def _project_roots(pid: str) -> list[Path]:
+    """그 프로젝트(빈 문자열이면 미분류)에 속한 작업 디렉토리들."""
+    from md4paper.workdir import recent_workdirs
+
+    rows = recent_workdirs(config.resolve_workspace(), limit=100_000, include_hidden=True)
+    return [r["root"] for r in rows if projects.normalize(r.get("project")) == pid]
+
+
+@cli.group("project", invoke_without_command=True)
+@click.pass_context
+def project_group(ctx: click.Context) -> None:
+    """프로젝트 조회/설정 — 논문 묶음. 묶음마다 폴더 하나를 정하면 그 안이 저절로 정리된다."""
+    if ctx.invoked_subcommand is not None:
+        return
+    counts = _paper_counts()
+    items = projects.all_projects()
+    picked = projects.active()
+    for p in items:
+        root = projects.root_of(p["id"])
+        where = str(root) if root is not None else "폴더 미지정 → 공통 저장 위치"
+        star = click.style("*", fg="green") if p["id"] == picked else " "
+        click.echo(f"{star} {p['name']} ({p['id']}) · {where} · {counts.get(p['id'], 0)}편")
+    if not items:
+        click.echo("프로젝트 없음 — 모든 논문이 공통 저장 위치에 쌓입니다.")
+    click.echo(f"  {projects.NONE_LABEL}: {counts.get('', 0)}편"
+               + ("  *" if picked == projects.NONE else ""))
+    click.echo('만들기: md4paper project add "튜터 챗봇 서베이" --dir ~/Vault/Tutor')
+    if items:
+        click.echo("고르기: md4paper project use 튜터 · 옮기기: md4paper project assign 튜터 <논문>.md4")
+
+
+@project_group.command("add")
+@click.argument("name")
+@click.option("--dir", "root", type=click.Path(path_type=Path), default=None,
+              help="이 프로젝트가 쓸 폴더 하나 (그 안에 ko/·pdf/ 자리가 잡힌다)")
+def project_add(name: str, root: Path | None) -> None:
+    """프로젝트 만들기 — --dir로 폴더까지 정하면 그 안에 자리를 잡아 둔다."""
+    proj = projects.create(name, str(root) if root else None)
+    click.echo(f"만들었습니다: {proj['name']} ({proj['id']})")
+    if root is None:
+        arg = _as_arg(proj["name"])
+        click.echo("폴더 미지정 → 공통 저장 위치를 씁니다. "
+                   f"정하기: md4paper project dir {arg} ~/Vault/논문")
+        return
+    click.echo(f"폴더: {projects.root_of(proj['id'])}")
+    _echo_layout(root)
+
+
+@project_group.command("rm")
+@click.argument("name_or_id")
+@click.option("--yes", is_flag=True, help="확인 없이 삭제")
+def project_rm(name_or_id: str, yes: bool) -> None:
+    """프로젝트 삭제 — 그 논문들은 미분류가 된다. 폴더·파일은 그대로 둔다."""
+    from md4paper.workdir import set_project
+
+    proj = _find_project(name_or_id)
+    roots = _project_roots(proj["id"])
+    if not yes:
+        click.echo(f"'{proj['name']}' 삭제 — 논문 {len(roots)}편이 미분류가 됩니다 "
+                   "(폴더·파일은 그대로).")
+        if not click.confirm("계속할까요?", default=False):
+            click.echo("취소됨.")
+            return
+    cleared = sum(1 for root in roots if set_project(root, None))
+    projects.delete(proj["id"])
+    click.echo(f"삭제됨: {proj['name']} — 논문 {cleared}편 배정 해제")
+    click.echo("폴더와 그 안의 파일은 지우지 않았습니다 — 필요하면 직접 정리하세요.")
+
+
+@project_group.command("set")
+@click.argument("name_or_id")
+@click.argument("key", required=False)
+@click.argument("value", required=False)
+@click.option("--unset", is_flag=True, help="이 설정을 해제 (전역 설정을 따르게 된다)")
+def project_set(name_or_id: str, key: str | None, value: str | None, unset: bool) -> None:
+    """프로젝트마다 다르게 쓸 설정 — 저장·출력에 관한 것만.
+
+    \b
+      naming         파일·폴더 이름 규칙   예: {year}_{author}_{title}
+      export_target  내보내기 형식         universal | notion | obsidian
+      bibtex         references.bib 쌓기   on | off
+      auto           변환 후 자동 저장     on | off
+
+    KEY를 생략하면 지금 무엇이 지정돼 있는지 보여 준다. 정하지 않은 항목은 전역 설정을 따른다.
+    """
+    proj = _find_project(name_or_id)
+    pid = proj["id"]
+    if not key:
+        own = projects.settings_of(pid)
+        click.echo(f"{proj['name']} — 이 프로젝트만 다르게 쓰는 설정 {len(own)}개")
+        for k in projects.SETTINGS:
+            if k in own:
+                click.echo(f"  {k:<14} {own[k]}")
+            else:
+                click.echo(click.style(f"  {k:<14} (전역 따름)", fg="bright_black"))
+        click.echo(f'변경: md4paper project set {_as_arg(proj["name"])} export_target obsidian')
+        return
+    if key not in projects.SETTINGS:
+        raise click.ClickException(f"'{key}'는 프로젝트 설정이 아닙니다 — {', '.join(projects.SETTINGS)}")
+    if unset or value is None:
+        projects.set_setting(pid, key, None)
+        click.echo(f"{proj['name']}: {key} 해제됨 → 전역 설정을 따릅니다.")
+        return
+    if key in ("bibtex", "auto"):
+        low = value.strip().lower()
+        if low not in ("on", "off", "true", "false", "1", "0"):
+            raise click.ClickException(f"{key}는 on 또는 off — 받은 값: {value}")
+        parsed = low in ("on", "true", "1")
+    elif key == "export_target":
+        if value not in config.EXPORT_TARGETS:
+            raise click.ClickException(f"내보내기 형식은 {' | '.join(config.EXPORT_TARGETS)}")
+        parsed = value
+    else:  # naming — 템플릿이 말이 되는지 먼저 본다
+        err = config.naming_template_error(value)
+        if err:
+            raise click.ClickException(err)
+        parsed = value
+    projects.set_setting(pid, key, parsed)
+    click.echo(f"{proj['name']}: {key} = {parsed}")
+
+
+@project_group.command("dir")
+@click.argument("name_or_id")
+@click.argument("path", required=False, type=click.Path(path_type=Path))
+@click.option("--off", is_flag=True, help="폴더 지정 해제 (공통 저장 위치로 되돌림)")
+def project_dir(name_or_id: str, path: Path | None, off: bool) -> None:
+    """프로젝트 폴더 조회/설정 — 폴더 하나만 정하면 종류별 자리가 그 안에 잡힌다."""
+    proj = _find_project(name_or_id)
+    if off:
+        projects.set_root(proj["id"], None)
+        click.echo(f"{proj['name']}: 폴더 해제됨 → 공통 저장 위치 (md4paper library)")
+        return
+    if path is None:
+        root = projects.root_of(proj["id"])
+        if root is None:
+            click.echo(f"{proj['name']}: 폴더 미지정 → 공통 저장 위치를 씁니다.")
+            click.echo(f"변경: md4paper project dir {_as_arg(proj['name'])} ~/Vault/논문")
+            return
+        click.echo(f"{proj['name']}: {root}")
+        _echo_layout(root)
+        return
+    projects.set_root(proj["id"], str(path))
+    click.echo(f"{proj['name']} 폴더: {projects.root_of(proj['id'])}")
+    _echo_layout(path)
+    click.echo(f"기존 논문도 이 자리로: md4paper project export {_as_arg(proj['name'])}")
+
+
+@project_group.command("use")
+@click.argument("name_or_id", required=False)
+@click.option("--none", "pick_none", is_flag=True, help="미분류 — 새 논문을 프로젝트에 넣지 않는다")
+@click.option("--all", "pick_all", is_flag=True, help="모든 프로젝트 — 홈 목록 필터를 푼다")
+def project_use(name_or_id: str | None, pick_none: bool, pick_all: bool) -> None:
+    """새 논문이 들어갈(그리고 홈에서 걸러 볼) 프로젝트 고정."""
+    if pick_none and pick_all:
+        raise click.UsageError("--none과 --all은 함께 쓸 수 없습니다.")
+    if pick_all or pick_none:
+        projects.set_active(projects.NONE if pick_none else projects.ALL)
+    elif name_or_id:
+        projects.set_active(projects.NONE if _is_none_ref(name_or_id)
+                            else _find_project(name_or_id)["id"])
+    picked = projects.active()
+    if picked == projects.ALL:
+        click.echo(f"현재: {projects.ALL_LABEL} — 새 논문은 미분류로 들어갑니다.")
+    elif picked == projects.NONE:
+        click.echo(f"현재: {projects.NONE_LABEL} — 새 논문은 프로젝트에 넣지 않습니다.")
+    else:
+        click.echo(f"현재: {projects.name_of(picked)} ({picked}) — 새 논문이 이 프로젝트로 들어갑니다.")
+    if not (pick_all or pick_none or name_or_id):
+        click.echo("변경: md4paper project use 튜터 · 해제: md4paper project use --all")
+
+
+@project_group.command("assign")
+@click.argument("name_or_id")
+@click.argument("workdirs", nargs=-1, required=True,
+                type=click.Path(exists=True, file_okay=False, path_type=Path))
+def project_assign(name_or_id: str, workdirs: tuple[Path, ...]) -> None:
+    """논문(.md4 폴더)을 그 프로젝트로 옮긴다 — 저장 위치 사본도 새 자리로 따라간다.
+
+    NAME_OR_ID에 'none'(미분류)을 주면 배정을 해제한다.
+    """
+    from md4paper import library
+
+    pid = "" if _is_none_ref(name_or_id) else _find_project(name_or_id)["id"]
+    label = projects.name_of(pid)
+    moved = files = 0
+    for path in workdirs:
+        wd = WorkDir(path)
+        before = library.project_of(wd)
+        written = library.reassign(wd, pid)
+        if library.project_of(wd) == before:
+            click.echo(f"  {path.stem}: 이미 {label}")
+            continue
+        moved += 1
+        files += len(written)
+        click.echo(f"  {path.stem} → {label}"
+                   + (f" · 사본 {len(written)}개" if written else " (저장 위치 미설정 — 사본 없음)"))
+    click.echo(f"{moved}편 옮김" + (f" · 사본 {files}개 새 자리로" if files else ""))
+
+
+@project_group.command("export")
+@click.argument("name_or_id")
+def project_export(name_or_id: str) -> None:
+    """그 프로젝트 논문 전부를 저장 위치로 내보내기 (폴더를 새로 정한 뒤에 쓴다)."""
+    from md4paper import library
+
+    pid = "" if _is_none_ref(name_or_id) else _find_project(name_or_id)["id"]
+    label = projects.name_of(pid)
+    roots = _project_roots(pid)
+    if not roots:
+        click.echo(f"{label}에 속한 논문이 없습니다.")
+        return
+    if not library.configured(pid or None):
+        # 미분류 논문은 프로젝트가 없으니 `project dir`로 정할 수 없다(그 명령은 실패한다).
+        # 그 경우는 공통 저장 위치를 가리켜야 한다.
+        how = (f"md4paper project dir {_as_arg(label)} ~/Vault/논문" if pid
+               else "md4paper library --root ~/Papers")
+        click.echo(f"{label}의 저장 위치가 없습니다 — 정하기: {how}")
+        return
+    ok, failed = library.export_many(roots)
+    click.echo(f"{label}: {ok}편 내보냄" + (f" · {failed}편 실패" if failed else ""))
+    for which in projects.KINDS:
+        d = library.dir_for(which, pid or None)
+        if d is not None:
+            click.echo(f"  {_KIND_LABEL[which]}: {d}")
+
+
 @cli.command("library")
+@click.option("--root", "root_dir", type=click.Path(path_type=Path), default=None,
+              help="공통 저장 위치를 폴더 하나로 정리 (en은 루트, 번역은 ko/, PDF는 pdf/)")
 @click.option("--en", "en_dir", type=click.Path(path_type=Path), default=None,
               help="영어 마크다운을 쌓을 폴더")
 @click.option("--ko", "ko_dir", type=click.Path(path_type=Path), default=None,
@@ -129,12 +422,22 @@ def workspace(path: Path | None) -> None:
               help="원본 PDF 사본을 쌓을 폴더 (md와 같은 기준명)")
 @click.option("--off", "which_off", type=click.Choice(["en", "ko", "pdf", "all"]), default=None,
               help="지정 해제")
+@click.option("--bibtex/--no-bibtex", "bibtex_on", default=None,
+              help="references.bib 자동 정리 (기본: 함)")
 @click.option("--export", "export_all", is_flag=True, help="작업 폴더의 논문을 지금 전부 내보내기")
-def library_cmd(en_dir: Path | None, ko_dir: Path | None, pdf_dir: Path | None,
-                which_off: str | None, export_all: bool) -> None:
+def library_cmd(root_dir: Path | None, en_dir: Path | None, ko_dir: Path | None,
+                pdf_dir: Path | None, which_off: str | None, bibtex_on: bool | None,
+                export_all: bool) -> None:
     """저장 위치 조회/설정 — 변환한 논문의 마크다운·PDF가 쌓일 폴더 (종류별 따로)."""
     from md4paper import library
 
+    # --root가 먼저 — 폴더 하나로 세 종류를 정한 뒤, 뒤따르는 --en/--ko/--pdf가 개별로 덮어쓴다.
+    if root_dir is not None:
+        for which, path in projects.layout(root_dir).items():
+            config.set_library_dir(which, str(path))
+        projects.ensure_layout(root_dir)
+        click.echo(f"공통 저장 위치: {Path(root_dir).expanduser()}")
+        _echo_layout(root_dir)
     for which, path in (("en", en_dir), ("ko", ko_dir), ("pdf", pdf_dir)):
         if path is not None:
             config.set_library_dir(which, str(path))
@@ -143,52 +446,168 @@ def library_cmd(en_dir: Path | None, ko_dir: Path | None, pdf_dir: Path | None,
         for which in (library.KINDS if which_off == "all" else (which_off,)):
             config.set_library_dir(which, None)
             click.echo(f"{which} 저장 위치 해제됨")
+    if bibtex_on is not None:
+        config.set_section_value("library", "bibtex", bibtex_on)
+        click.echo(f"BibTeX 정리: {'켜짐' if bibtex_on else '꺼짐'}")
     if export_all:
         from md4paper.workdir import recent_workdirs
 
         roots = [r["root"] for r in recent_workdirs(config.resolve_workspace(), limit=1000)]
         ok, failed = library.export_many(roots)
         click.echo(f"{ok}편 내보냄" + (f" · {failed}편 실패" if failed else ""))
-    if en_dir is None and ko_dir is None and pdf_dir is None and not which_off and not export_all:
+    if (root_dir is None and en_dir is None and ko_dir is None and pdf_dir is None
+            and not which_off and bibtex_on is None and not export_all):
         for which in library.KINDS:
             cur = config.resolve_library_dir(which)
             click.echo(f"{which}: {cur if cur else '미설정'}")
         click.echo(f"자동 저장: {'켜짐' if config.resolve_library_auto() else '꺼짐'}")
+        bib = library.bib_path()
+        on = config.resolve_library_bibtex()
+        click.echo(f"BibTeX 정리: {'켜짐' if on else '꺼짐'}"
+                   + (f" → {bib}" if bib is not None else " (쌓을 폴더 없음)"))
         click.echo("변경: md4paper library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF")
+        click.echo("한 폴더로 정리: md4paper library --root ~/Papers")
+        if projects.all_projects():
+            click.echo("프로젝트별 저장 위치는 md4paper project")
+
+
+@cli.command("bib")
+@click.option("--project", "project_ref", default=None, help="이 프로젝트의 논문만 (이름이나 id)")
+@click.option("--all", "do_all", is_flag=True, help="공통 + 모든 프로젝트의 논문 전부")
+def bib_cmd(project_ref: str | None, do_all: bool) -> None:
+    """저장 위치의 references.bib를 다시 채운다 — 논문 하나에 항목 하나, 같은 키는 갈아치운다.
+
+    기본은 지금 고른 프로젝트(md4paper project use), 고른 게 없으면 미분류 논문이 대상이다.
+    **네트워크를 쓰지 않는다** — 받아 둔 출판 기록이 있으면 그걸로, 없으면 PDF에서 읽은 값으로
+    항목을 만든다. 정확한 항목을 받아 오려면 먼저 `md4paper enrich --all`.
+    """
+    from md4paper import bibtex, library
+    from md4paper.workdir import recent_workdirs
+
+    if not config.resolve_library_bibtex():
+        click.echo("BibTeX 정리가 꺼져 있습니다 — 켜기: md4paper library --bibtex")
+        return
+    if project_ref and do_all:
+        raise click.UsageError("--project와 --all은 함께 쓸 수 없습니다.")
+    rows = recent_workdirs(config.resolve_workspace(), limit=100_000, include_hidden=True)
+    if do_all:
+        picked, label = None, "전체"
+    else:
+        if project_ref:
+            picked = "" if _is_none_ref(project_ref) else _find_project(project_ref)["id"]
+        else:
+            picked = projects.assign_target()  # 고른 게 실제 프로젝트일 때만, 아니면 미분류
+        label = projects.name_of(picked)
+        rows = [r for r in rows if projects.normalize(r.get("project")) == picked]
+    if not rows:
+        click.echo(f"{label}에 속한 논문이 없습니다.")
+        return
+    click.echo(f"대상: {label} · {len(rows)}편")
+
+    done = skipped = 0
+    written: list[Path] = []  # 프로젝트마다 .bib가 달라 여러 곳이 될 수 있다 (순서 유지)
+    for row in rows:
+        out = library.export_bib(WorkDir(row["root"]))
+        if out is None:
+            skipped += 1
+            continue
+        done += 1
+        if out not in written:
+            written.append(out)
+    click.echo(f"{done}편 반영" + (f" · {skipped}편 건너뜀 (서지 정보 없음)" if skipped else ""))
+    for path in written:
+        click.echo(f"  {path} — 항목 {len(bibtex.keys_in(path))}개")
+    if not written and library.bib_path(picked or None) is None:
+        click.echo("쌓을 .bib 자리가 없습니다 — 저장 위치부터: md4paper library --root ~/Papers")
+    if any(not WorkDir(r["root"]).bib_source_json.exists() for r in rows):
+        click.echo("출판 기록이 없는 논문이 있습니다 — 정확한 항목: md4paper enrich --all")
 
 
 @cli.command("enrich")
 @click.argument("workdir", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
-@click.option("--all", "do_all", is_flag=True, help="작업 폴더의 모든 논문을 보강")
+@click.option("--project", "project_ref", default=None, help="이 프로젝트의 논문만 (이름이나 id)")
+@click.option("--all", "do_all", is_flag=True, help="프로젝트 상관없이 작업 폴더 전체")
 @click.option("--mailto", default=None, help="서지 API polite pool 연락처 (config [enrich].mailto에 저장)")
 @click.option("--rename/--no-rename", default=True, help="보강 후 이름 규칙으로 정리 (기본: 함)")
-def enrich_cmd(workdir: Path | None, do_all: bool, mailto: str | None, rename: bool) -> None:
-    """비어 있는 연도·venue를 공개 서지 API(OpenAlex·Crossref)로 채운다.
+@click.option("--max-lookups", default=60, show_default=True,
+              help="논문 하나당 참고문헌을 한 건씩 찾아볼 최대 개수")
+def enrich_cmd(workdir: Path | None, project_ref: str | None, do_all: bool, mailto: str | None,
+               rename: bool, max_lookups: int) -> None:
+    """서지 정보를 온라인에서 보강한다 — 논문 하나에 대해 세 가지를 한 번에.
 
-    논문 제목만 전송하며, 제목이 충분히 일치할 때만 채택한다(오매치 방지). PDF에서 읽은 값은 덮어쓰지 않는다.
+    \b
+    1. 비어 있는 연도·학회를 채운다 (paper_meta — 목록·검색·파일명이 쓰는 값)
+    2. 출판 기록을 받아 references.bib 항목을 정확하게 만든다 (DOI·페이지·출판사)
+    3. 참고문헌 목록의 빈 DOI를 채워 인용을 링크로 만든다
+
+    범위는 **지금 고른 프로젝트**(md4paper project use)가 기본이다 — 한 번에 한 묶음을 손보는 게
+    보통이라 전체를 훑으면 예전 프로젝트까지 API를 두드리게 된다. 중간에 Ctrl+C로 멈춰도
+    그때까지 보강한 것은 저장돼 있다.
     """
-    from md4paper import enrich, paper_meta
-    from md4paper.workdir import recent_workdirs
+    from md4paper import enrich, library, paper_meta
 
     if mailto:
         config.set_section_value("enrich", "mailto", mailto)
     contact = config.resolve_enrich_mailto() or None
-    if not workdir and not do_all:
-        raise click.UsageError("WORKDIR을 주거나 --all을 쓰세요.")
+    if sum(bool(x) for x in (workdir, project_ref, do_all)) > 1:
+        raise click.UsageError("WORKDIR · --project · --all 중 하나만 쓰세요.")
     ws = config.resolve_workspace()
-    roots = ([r["root"] for r in recent_workdirs(ws, limit=100_000, include_hidden=True)]
-             if do_all else [workdir])
+    if workdir:
+        roots, label = [workdir], Path(workdir).stem
+    elif do_all:
+        roots, label = enrich.project_roots(enrich.ALL, ws), "전체"
+    else:
+        pid = ("" if _is_none_ref(project_ref) else _find_project(project_ref)["id"]) \
+            if project_ref else projects.assign_target()
+        roots, label = enrich.project_roots(pid, ws), projects.name_of(pid)
+    if not roots:
+        click.echo(f"{label}에 속한 논문이 없습니다.")
+        return
+    click.echo(f"대상: {label} · {len(roots)}편 — 제목만 전송합니다. (Ctrl+C로 중지)")
 
-    def show(n: int, root: Path, filled: list) -> None:  # noqa: ANN001
-        if filled:
-            click.echo(f"  [{n}] {Path(root).stem}: {', '.join(filled)} 채움")
+    lines: list[str] = []
 
-    counts = enrich.enrich_many(roots, mailto=contact, on_progress=show)
-    click.echo(f"{counts['checked']}편 확인 · {counts['papers']}편 보강 "
-               f"(연도 {counts.get('year', 0)} · venue {counts.get('venue', 0)})")
+    def show(n: int, root: Path, got: dict) -> None:
+        bits = []
+        if got["fields"]:
+            bits.append(", ".join(got["fields"]) + " 채움")
+        if got["record"]:
+            bits.append("출판 기록")
+        if got["refs"].get("filled"):
+            bits.append(f"참고문헌 DOI {got['refs']['filled']}건")
+        if bits:
+            lines.append(f"  {Path(root).stem}: {' · '.join(bits)}")
+
+    counts = {}
+    try:
+        with click.progressbar(length=len(roots), label="보강 중", show_pos=True) as bar:
+            def tick(n: int, root: Path, got: dict) -> None:
+                show(n, root, got)
+                bar.update(1)
+
+            counts = enrich.enrich_many(roots, mailto=contact, on_progress=tick,
+                                        max_lookups=max_lookups)
+    except KeyboardInterrupt:
+        click.echo("\n중지했습니다 — 그때까지 보강한 내용은 저장돼 있습니다.")
+        return
+    for line in lines:
+        click.echo(line)
+    click.echo(f"\n{counts['checked']}편 확인 · {counts['papers']}편 보강")
+    click.echo(f"  연도 {counts.get('year', 0)} · 학회 {counts.get('venue', 0)} "
+               f"· 출판 기록 {counts['records']} · 참고문헌 DOI {counts['refs_filled']}건")
+    if counts["refs_skipped"]:
+        click.echo(f"  참고문헌 {counts['refs_skipped']}건은 한도로 건너뜀 (늘리려면 --max-lookups)")
+    if counts["retracted"]:  # 철회된 논문을 인용한 채 제출하는 일은 없어야 한다
+        click.echo(click.style(f"\n⚠ 출판사가 철회(retracted)한 논문 {len(counts['retracted'])}편:",
+                               fg="red", bold=True))
+        for root in counts["retracted"]:
+            click.echo(f"    {Path(root).stem}")
     if rename and counts["papers"]:
         r = paper_meta.apply_naming(ws)
         click.echo(f"이름 정리: {r['renamed']}편 변경")
+    if library.configured():
+        ok, failed = library.export_many(roots)
+        click.echo(f"저장 위치 반영: {ok}편" + (f" · 실패 {failed}편" if failed else ""))
 
 
 @cli.command("naming")
@@ -249,8 +668,11 @@ def keys_list() -> None:
          "미지정 시 config 기본값.",
 )
 @click.option("--review", is_flag=True, help="구조 감지 후 에디터로 매니페스트 리뷰")
+@click.option("--formulas/--no-formulas", default=True,
+              help="수식 크롭 그림을 LLM으로 읽어 LaTeX로 (기본 켬). 끄면 그림 그대로 둔다.")
 def convert(
     source: Path, out: Path | None, backend: str, ocr: bool, flavor: str | None, review: bool,
+    formulas: bool,
 ) -> None:
     """PDF(또는 .md) → 헤더 정렬 마크다운 (Stage 1-4)."""
     wd = WorkDir.for_pdf(source, out)
@@ -277,6 +699,23 @@ def convert(
         fm_provider = config.build_provider()
     except RuntimeError:
         click.echo(click.style("참고: LLM 키 없음 — 저자 정리는 규칙 기반으로만 합니다.", fg="yellow"))
+
+    # 수식: 크롭 그림 → LaTeX. frontmatter보다 먼저 (둘 다 raw.md를 고친다).
+    n_formulas = meta.get("formulas") or 0
+    if n_formulas and formulas and fm_provider is not None:
+        with click.progressbar(length=n_formulas, label=f"수식 {n_formulas}개 읽는 중") as bar:
+            fx = pipeline.run_formulas(
+                wd, provider=fm_provider, on_progress=lambda done, tot: bar.update(1))
+        click.echo(f"수식 {fx.get('converted', 0)}/{fx.get('total', n_formulas)}개를 LaTeX로 변환")
+        if fx.get("failed"):
+            click.echo(click.style(
+                f"  {fx['failed']}개는 변환 실패 — 크롭 그림으로 남겼습니다 "
+                f"({wd.extract_images}).", fg="yellow"))
+    elif n_formulas:
+        why = "LLM 키 없음" if fm_provider is None else "--no-formulas"
+        click.echo(click.style(
+            f"참고: 수식 {n_formulas}개를 그림으로 두었습니다 ({why}).", fg="yellow"))
+
     fm = pipeline.run_frontmatter(wd, provider=fm_provider)
     if fm.get("changed"):
         click.echo("앞부분(저자·서지) 정리 완료")

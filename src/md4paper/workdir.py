@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # 단계 순서 — 앞 단계가 바뀌면 뒤 단계 완료 표시가 무효화된다.
-STAGES = ("extract", "structure", "assemble", "cite", "translate")
+STAGES = ("extract", "formulas", "structure", "assemble", "cite", "translate")
 
 
 def hash_bytes(data: bytes) -> str:
@@ -92,6 +92,13 @@ class WorkDir:
         return self.root / "paper_meta.json"  # 논문 서지(제목·저자·연도·venue) — 목록 표시·검색·정렬
 
     @property
+    def bib_source_json(self) -> Path:
+        # 논문 API에서 받아 온 출판 기록(§bibsource) — BibTeX 항목의 원본.
+        # paper_meta.json과 따로 두는 이유: 이건 **외부에서 받은 것**이라 지우고 다시 받으면
+        # 그만이고, PDF에서 읽은 값(paper_meta)을 덮어써 원본을 잃는 일이 없어야 한다.
+        return self.root / "bib_source.json"
+
+    @property
     def authors_json(self) -> Path:
         # 구조화된 저자(이름·이메일·소속) — 표기(author_parts) 변경 시 LLM 재호출 없이 재렌더용
         return self.extract / "authors.json"
@@ -100,6 +107,11 @@ class WorkDir:
     def footnotes_json(self) -> Path:
         # 각주 {번호: 내용} — 본문 위첨자 링크(#fn-N) 호버 툴팁용
         return self.extract / "footnotes.json"
+
+    @property
+    def formulas_json(self) -> Path:
+        """수식 레코드 (크롭 그림·PDF 원문·식 번호·확정된 LaTeX) — 수식 단계의 캐시이자 근거."""
+        return self.extract / "formulas.json"
 
     @property
     def headings_json(self) -> Path:
@@ -225,7 +237,9 @@ def delete_workdir(root: Path, workspace: Path, *, with_library: bool = True) ->
     if with_library:
         from md4paper import library  # 지연 임포트 — library가 workdir를 임포트한다(순환 방지)
 
-        library.remove_stem(root.stem)  # 라이브러리 파일명은 논문 폴더 이름(root.stem)
+        # 라이브러리 파일명은 논문 폴더 이름(root.stem). 프로젝트를 옮겨 다녔다면 옛 프로젝트
+        # 폴더에도 사본이 있을 수 있고, 원본이 사라진 뒤엔 어디였는지 알 수 없다 → 전부 훑는다.
+        library.remove_stem_everywhere(root.stem)
     shutil.rmtree(root, ignore_errors=True)
     # 논문별 전용 하위 폴더(<이름>/<이름>.md4)면 남은 원본 PDF 등 잔여물까지 폴더째 정리한다.
     # (예전엔 '비었을 때만' 지워서 원본 PDF가 남아 폴더가 남았다.) 단, 다른 논문(.md4)이
@@ -364,6 +378,41 @@ def set_pinned(root: Path, pinned: bool = True) -> bool:
     return True
 
 
+def set_project(root: Path, project_id: str | None) -> bool:
+    """이 논문이 속한 프로젝트를 status.json에 적는다 (None이면 미분류로).
+
+    프로젝트 id를 논문 쪽에 두는 이유: 목록을 훑을 때 한 번에 읽히고(status.json은 작다),
+    프로젝트 설정 파일이 사라지거나 손으로 지워져도 논문이 사라지지 않는다.
+    고정과 마찬가지로 '작업'이 아니므로 폴더 수정시각은 되돌려 최근순 목록을 흔들지 않는다.
+    """
+    wd = WorkDir(Path(root))
+    if not wd.root.is_dir():
+        return False
+    try:
+        before = wd.root.stat()
+        status = wd.load_status()
+        if project_id:
+            status["project"] = str(project_id)
+        else:
+            status.pop("project", None)
+        wd.save_status(status)
+        try:
+            os.utime(wd.root, (before.st_atime, before.st_mtime))
+        except OSError:
+            pass
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def project_of(root: Path) -> str:
+    """이 논문에 적힌 프로젝트 id (없으면 빈 문자열). 없어진 프로젝트인지까지는 안 본다."""
+    try:
+        return str(WorkDir(Path(root)).load_status().get("project") or "")
+    except (OSError, ValueError):
+        return ""
+
+
 def is_pinned(root: Path) -> bool:
     """이 논문이 고정돼 있는지 — 그 논문의 status.json만 본다.
 
@@ -426,7 +475,8 @@ def _title_of(md4: Path) -> str:
 def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = False) -> list[dict]:
     """작업 폴더에서 유효한 .md4 작업 디렉토리를 최근 수정순으로.
 
-    반환 항목: {name, root(Path), title, authors, year, venue, has_ko, opened, hidden, pinned, mtime}
+    반환 항목: {name, root(Path), title, authors, year, venue, has_ko, opened, hidden, pinned,
+    project, mtime}
     서지(authors/year/venue)는 paper_meta.json(LLM 추출)이 있으면 채우고, 없으면 빈 값.
     사용자가 숨긴 논문(status.json의 hidden)은 include_hidden일 때만 포함한다.
     고정한 논문(pinned)은 최근 limit 편 밖으로 밀려나도 목록에 남는다 — 고정의 뜻이 그것이다.
@@ -454,12 +504,14 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
                 pass
         opened = hidden = False
         pinned_at = 0.0
+        project = ""
         st_path = md4 / "status.json"
         if st_path.exists():
             try:
                 st = json.loads(st_path.read_text(encoding="utf-8"))
                 opened, hidden = bool(st.get("opened_at")), bool(st.get("hidden"))
                 pinned_at = float(st.get("pinned_at") or 0.0)
+                project = str(st.get("project") or "")
             except (OSError, ValueError, TypeError):
                 pass
         if hidden and not include_hidden:
@@ -476,6 +528,7 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
             "hidden": hidden,  # 사용자가 목록에서 감춘 논문 (파일은 그대로)
             "pinned": bool(pinned_at),  # 사용자가 위에 고정한 논문
             "pinned_at": pinned_at,     # 고정한 순서 (탭·칩 정렬용)
+            "project": project,         # 속한 프로젝트 id ("" = 미분류; 없어진 id는 UI가 미분류로)
             "mtime": md4.stat().st_mtime,
         })
     found.sort(key=lambda d: d["mtime"], reverse=True)

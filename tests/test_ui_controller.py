@@ -389,6 +389,49 @@ def test_section_map_anchors_align_with_headings(ctrl):
     assert anchors  # 최소 하나
 
 
+def test_anchors_do_not_shift_source_line_numbers(ctrl):
+    """앵커를 심어도 헤더의 줄 번호가 원문 그대로여야 한다.
+
+    분할 편집은 프리뷰 줄 N을 에디터 줄 N에 대응시킨다. 앵커를 별도 줄로 끼우면 헤더 개수만큼
+    (코퍼스 최대 261줄) 밀려서 싱크가 통째로 어긋난다 — 그래서 헤더 줄 **끝에** 붙인다.
+    """
+    import re
+
+    from md4paper.ui.app import anchored_markdown
+
+    en = ctrl.en_markdown()
+    out = anchored_markdown(en, ctrl.section_map(), None, jump=True)
+    head = re.compile(r"^#{1,6}\s")
+    assert [i for i, ln in enumerate(en.splitlines()) if head.match(ln)] == \
+           [i for i, ln in enumerate(out.splitlines()) if head.match(ln)]
+    assert len(out.splitlines()) == len(en.splitlines())
+
+
+def test_save_en_markdown_is_atomic(ctrl):
+    """en.md 쓰기는 임시 파일 + os.replace — 반쯤 쓴 파일이 남으면 그 논문이 통째로 깨진다.
+
+    분할 편집은 저장을 자주 부르고 같은 논문을 창 여럿에서 열 수 있어서 창이 그만큼 넓다.
+    """
+    import os
+
+    real_replace = os.replace
+    seen: list[tuple[str, str]] = []
+
+    def spy(src, dst, *a, **kw):  # noqa: ANN001
+        seen.append((str(src), str(dst)))
+        return real_replace(src, dst, *a, **kw)
+
+    os.replace = spy
+    try:
+        ctrl.save_en_markdown("# 새 내용\n\n본문\n")
+    finally:
+        os.replace = real_replace
+
+    assert ctrl.en_markdown() == "# 새 내용\n\n본문\n"
+    assert any(dst.endswith("paper.en.md") for _, dst in seen), "en.md가 제자리에서 쓰였다"
+    assert not list(ctrl.wd.out.glob("*.tmp*")), "임시 파일이 남았다"
+
+
 
 def test_title_excluded_from_translate_tree_and_toggled_separately(ctrl):
     """논문 제목은 섹션 트리(체크박스)가 아니라 별도 토글로 다룬다."""

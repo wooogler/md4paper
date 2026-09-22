@@ -174,6 +174,23 @@ def _check_kind(which: str) -> str:
     return which
 
 
+def project_setting(project: str | None, key: str):  # noqa: ANN201
+    """프로젝트가 따로 정해 둔 값 (없으면 None). 순환 import를 피해 여기서 늦게 가져온다.
+
+    `projects`가 `config`를 import하므로 반대 방향은 함수 안에서만 한다.
+    """
+    if not project:
+        return None
+    try:
+        from md4paper import projects
+    except ImportError:  # pragma: no cover — 설치가 깨진 경우
+        return None
+    try:
+        return projects.setting(project, key)
+    except (ValueError, OSError):
+        return None
+
+
 def resolve_library_dir(which: str) -> Path | None:
     """변환한 논문의 결과물이 쌓일 폴더: config [library].en_dir / ko_dir / pdf_dir. 미설정이면 None.
 
@@ -190,12 +207,27 @@ def set_library_dir(which: str, path: str | None) -> None:
     set_section_value("library", f"{_check_kind(which)}_dir", value or None)
 
 
-def resolve_library_auto() -> bool:
-    """변환·번역이 끝나면 라이브러리 폴더에 자동으로 쌓을지: config [library].auto > True.
+def resolve_library_auto(project: str | None = None) -> bool:
+    """변환·번역이 끝나면 라이브러리 폴더에 자동으로 쌓을지: 프로젝트 설정 > [library].auto > True.
 
     폴더를 지정했다는 것 자체가 '거기 모으고 싶다'는 뜻이므로 기본은 켜짐. 끄면 수동 내보내기만.
     """
+    own = project_setting(project, "auto")
+    if own is not None:
+        return _as_bool(own, True)
     return _as_bool(load_config().get("library", {}).get("auto"), True)
+
+
+def resolve_library_bibtex(project: str | None = None) -> bool:
+    """저장 위치에 references.bib도 함께 쌓을지: 프로젝트 설정 > [library].bibtex > True.
+
+    논문마다 BibTeX 항목 하나가 그 폴더의 references.bib에 덧붙는다(§bibtex) — 인용할 때
+    그대로 복사해 붙일 수 있게. 서지 정보가 없는 논문은 조용히 건너뛴다.
+    """
+    own = project_setting(project, "bibtex")
+    if own is not None:
+        return _as_bool(own, True)
+    return _as_bool(load_config().get("library", {}).get("bibtex"), True)
 
 
 # --- 파일 이름 규칙 — 논문 폴더·PDF·저장 위치 사본의 기준명 템플릿 ---
@@ -227,12 +259,31 @@ def resolve_enrich_mailto() -> str:
     return str(load_config().get("enrich", {}).get("mailto") or "").strip()
 
 
-def resolve_naming_template() -> str:
-    """논문 파일·폴더 이름 규칙: config [output].naming > 기본 {year}_{title}_{author}.
+def resolve_bib_lookup(project: str | None = None) -> bool:
+    """변환이 끝나면 논문 API로 서지를 보강할지: 프로젝트 설정 > config [library].bib_lookup > True.
+
+    켜져 있으면 변환 직후 `enrich.boost_workdir`가 한 번 돈다 — 출판 기록을 받아 .bib 항목을
+    정확하게 만들고(§bibsource) 참고문헌의 빈 DOI를 채워 인용을 링크로 만든다(§cite.resolve).
+
+    기본을 켬으로 둔 이유: 변환은 이미 몇 분이 걸리는 작업이라 여기에 십몇 초가 더 붙는 건
+    체감되지 않는데, 꺼 두면 **논문을 올린 시점에는 .bib이 부실하고** 사용자가 나중에 그걸
+    따로 고쳐야 한다는 걸 알기 어렵다. 네트워크가 없거나 느린 환경에서만 끄면 된다
+    (꺼도 변환 자체는 그대로 되고, 나중에 `md4paper enrich`로 언제든 보강할 수 있다).
+    """
+    own = project_setting(project, "bib_lookup")
+    if own is not None:
+        return _as_bool(own, True)
+    return _as_bool(load_config().get("library", {}).get("bib_lookup"), True)
+
+
+def resolve_naming_template(project: str | None = None) -> str:
+    """논문 파일·폴더 이름 규칙: 프로젝트 설정 > [output].naming > 기본 {year}_{title}_{author}.
 
     저장된 값이 잘못됐으면(수동 편집 등) 조용히 기본 규칙으로 폴백한다.
     """
-    raw = str(load_config().get("output", {}).get("naming") or "").strip()
+    raw = str(project_setting(project, "naming") or "").strip()
+    if not (raw and naming_template_error(raw) is None):
+        raw = str(load_config().get("output", {}).get("naming") or "").strip()
     return raw if raw and naming_template_error(raw) is None else DEFAULT_NAMING
 
 
@@ -244,13 +295,17 @@ def resolve_flavor(cli_flavor: str | None = None) -> str:
     return cfg.get("output", {}).get("flavor", DEFAULT_FLAVOR)
 
 
-_EXPORT_TARGETS = ("universal", "notion", "obsidian")
+EXPORT_TARGETS = ("universal", "notion", "obsidian")
+_EXPORT_TARGETS = EXPORT_TARGETS  # 예전 이름 (모듈 안에서만 쓰던 것)
 
 
-def resolve_export_target() -> str:
-    """마크다운 내보내기 형식: config [output].export_target > universal(범용).
+def resolve_export_target(project: str | None = None) -> str:
+    """마크다운 내보내기 형식: 프로젝트 설정 > [output].export_target > universal(범용).
 
     en.md는 범용으로 저장하고 다운로드 시 이 값으로 변환한다(이미지 임베드·인용 표기). 마지막 선택을 기억."""
+    own = str(project_setting(project, "export_target") or "")
+    if own in _EXPORT_TARGETS:
+        return own
     val = str(load_config().get("output", {}).get("export_target", "universal"))
     return val if val in _EXPORT_TARGETS else "universal"
 

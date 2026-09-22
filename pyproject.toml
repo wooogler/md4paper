@@ -23,11 +23,16 @@ dependencies = [
     "openai>=2.0",
     "anthropic>=0.40",
     "google-genai>=1.0",
+    # BibTeX 생성·검증 — 저장 위치의 references.bib에 쌓는 항목을 직접 문자열로 짜지 않는다.
+    # 이스케이프(&, %, _, 악센트)·직렬화·되읽기 검증을 이 라이브러리에 맡긴다 (순수 파이썬, MIT).
+    "bibtexparser>=1.4",
 ]
 
 [project.optional-dependencies]
-# 로컬 웹 UI (latex2mathml: ui.markdown의 latex 수식 렌더)
-ui = ["nicegui>=3.14", "watchfiles>=0.21", "latex2mathml>=3.77"]
+# 로컬 웹 UI (latex2mathml: 수식 → MathML 렌더)
+# mdit-py-plugins: 변환 탭 프리뷰의 $...$ 수식(dollarmath). markdown-it-py만 끌고 오는데
+# 그건 이미 필수 의존성이라 새로 받는 것이 사실상 없다.
+ui = ["nicegui>=3.14", "watchfiles>=0.21", "latex2mathml>=3.77", "mdit-py-plugins>=0.4"]
 # 참고문헌 enrichment
 enrich = ["httpx>=0.27"]
 # 데스크톱 앱 창 (pywebview) — `md4paper ui --native`, `md4paper app`가 만드는 런처가 쓴다

@@ -71,7 +71,7 @@ HTML = """
         if (!n.nodeValue) return NodeFilter.FILTER_REJECT;
         var p = n.parentElement;
         // 앱 크롬(헤더 탭·찾기 바)은 건너뛴다 — 늘 붙어 있어 스크롤할 자리가 없고 개수만 부풀린다.
-        if (!p || p.closest('#md4-find, header, script, style, noscript, textarea')) return NodeFilter.FILTER_REJECT;
+        if (!p || p.closest('#md4-find, header, script, style, noscript, textarea, .cm-editor')) return NodeFilter.FILTER_REJECT;
         // 숨은 탭 패널·접힌 패널: display 뿐 아니라 visibility·opacity로 감춘 것도 제외한다.
         var shown = p.checkVisibility
           ? p.checkVisibility({visibilityProperty: true, opacityProperty: true})

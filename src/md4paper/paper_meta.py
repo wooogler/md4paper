@@ -152,7 +152,8 @@ def _camel_fallback(title: str) -> str:
     return "".join(w[:1].upper() + w[1:] for w in words[:5])[:28]
 
 
-def folder_base(meta: dict | PaperMeta, template: str | None = None) -> str:
+def folder_base(meta: dict | PaperMeta, template: str | None = None,
+                project: str | None = None) -> str:
     """서지 + 이름 규칙 → 폴더/파일 기준명. 규칙은 config [output].naming (기본 {year}_{title}_{author}).
 
     조각: {year} 연도 · {title} 제목 약칭(CamelCase) · {author} 1저자 성 · {venue} 학회(영숫자만).
@@ -162,7 +163,7 @@ def folder_base(meta: dict | PaperMeta, template: str | None = None) -> str:
     from md4paper import config
 
     d = meta.model_dump() if isinstance(meta, PaperMeta) else dict(meta)
-    tpl = template or config.resolve_naming_template()
+    tpl = template or config.resolve_naming_template(project)
     short = re.sub(r"[^A-Za-z0-9]", "", d.get("short_title") or "") or _camel_fallback(d.get("title") or "")
     if "{title}" in tpl and not short:
         return ""
@@ -217,7 +218,8 @@ def apply_naming(workspace) -> dict:  # noqa: ANN001 — Path | str
     for r in recent_workdirs(ws, limit=100_000, include_hidden=True):
         wd = WorkDir(r["root"])
         meta = load(wd)
-        base = folder_base(meta) if meta else ""
+        project = library.project_of(wd)  # 이름 규칙은 프로젝트마다 다를 수 있다
+        base = folder_base(meta, project=project) if meta else ""
         if not base:
             counts["no_meta"] += 1
             continue
@@ -227,10 +229,11 @@ def apply_naming(workspace) -> dict:  # noqa: ANN001 — Path | str
             counts["unchanged"] += 1
             continue
         counts["renamed"] += 1
-        if library.configured():  # 저장 위치 사본도 새 이름으로 (자동 저장 꺼져 있어도 — 명시적 정리 동작)
+        project = library.project_of(new_wd)
+        if library.configured(project):  # 저장 위치 사본도 새 이름으로 (자동 저장이 꺼져 있어도 — 명시적 정리)
             try:
                 library.export_paper(new_wd)
-                library.remove_stem(old_stem)
+                library.remove_stem(old_stem, project)  # 옛 이름 사본은 그 논문의 프로젝트 폴더에서
             except OSError:
                 pass  # 사본 정리 실패가 리네임 자체를 막지 않게
     return counts

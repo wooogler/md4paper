@@ -701,3 +701,38 @@ def test_join_key_survives_entity_escaping():
     from md4paper.extract.docling_backend import _join_key
 
     assert _join_key("p &lt; 0.001") == _join_key("p < 0.001")
+
+
+def test_apply_footnotes_skips_digits_inside_a_number():
+    """'11,579'의 11은 각주 마커가 아니다 — 자릿수 구분 쉼표·소수점 뒤는 한 수의 일부다.
+
+    제목("Analysis of 11,579 … Sessions")과 초록("across 1,300 repositories")에 위첨자 각주
+    링크가 박히던 자리. 번호를 잘못 써 버리면 그 각주의 **진짜** 자리는 영영 링크되지 않는다.
+    """
+    from md4paper.extract.docling_backend import _apply_footnotes
+
+    md = (
+        "## Analysis of 11,579 Real-World Sessions\n\n"
+        "We analyzed 11,579 sessions across 1,300 repositories, yielding "
+        "κ = 0 . 669 agreement.\n\n"
+        "GitHub Copilot (Chat) 1 and Cursor 2 are IDE-native.\n"
+    )
+    out, _ = _apply_footnotes(md, ["1 https://example.com/copilot", "2 https://cursor.com/"])
+
+    assert "Analysis of 11,579 Real-World Sessions" in out  # 제목은 그대로
+    assert "across 1,300 repositories" in out
+    assert "0 . 669" in out
+    # 아낀 번호는 진짜 자리에 붙는다
+    assert 'Copilot (Chat) <sup class="md-fn"><a href="#fn-1">1</a></sup>' in out
+    assert 'Cursor <sup class="md-fn"><a href="#fn-2">2</a></sup>' in out
+
+
+def test_apply_footnotes_skips_section_numbers_and_labels():
+    """헤딩의 절 번호와 '(Finding 3)' 같은 자체 번호 라벨은 각주가 아니다."""
+    from md4paper.extract.docling_backend import _apply_footnotes
+
+    md = "## 3 Introduction\n\nWe saw this (Finding 3) and later cited it. 3\n"
+    out, _ = _apply_footnotes(md, ["3 https://example.com/c"])
+
+    assert "## 3 Introduction" in out and "(Finding 3)" in out
+    assert 'it. <sup class="md-fn"><a href="#fn-3">3</a></sup>' in out

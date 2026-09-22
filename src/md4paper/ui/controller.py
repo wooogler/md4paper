@@ -375,8 +375,18 @@ class UIController:
 
         재조립은 raw.md에서 en.md를 다시 만들므로 이 편집을 덮어쓴다 → 플래그로 경고한다.
         """
+        import os
+
         self.wd.out.mkdir(parents=True, exist_ok=True)
-        self.wd.en_md.write_text(text, encoding="utf-8")
+        # 임시 파일에 쓰고 갈아끼운다 — status.json과 같은 이유다(workdir.save_status 참고).
+        # 같은 논문을 창 여럿에서 열 수 있고, 분할 편집은 저장을 자주 부르므로 반쯤 쓴 en.md가
+        # 남을 창이 그만큼 넓어진다. os.replace는 원자적이라 최악이 '한쪽이 덮이는' 정도로 끝난다.
+        tmp = self.wd.en_md.with_suffix(f".md.tmp{os.getpid()}")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, self.wd.en_md)
+        finally:
+            tmp.unlink(missing_ok=True)
         status = self.wd.load_status()
         status["manual_edit"] = True
         self.wd.save_status(status)

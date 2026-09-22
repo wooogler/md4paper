@@ -44,3 +44,28 @@ class AnthropicProvider(Provider):
         if parsed is None:
             raise RuntimeError("Anthropic 구조화 출력 파싱 실패 (거부 또는 스키마 불일치)")
         return parsed
+
+    def parse_image(
+        self, system: str, user: str, images: list[bytes], schema: type[T],
+        *, max_tokens: int = 4096,
+    ) -> T:
+        import base64
+
+        content: list[dict] = [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                         "data": base64.b64encode(png).decode("ascii")}}
+            for png in images
+        ]
+        content.append({"type": "text", "text": user})
+        resp = self._client.messages.parse(
+            model=self.model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": content}],
+            output_format=schema,
+        )
+        self._track(resp)
+        parsed = resp.parsed_output
+        if parsed is None:
+            raise RuntimeError("Anthropic 구조화 출력 파싱 실패 (거부 또는 스키마 불일치)")
+        return parsed

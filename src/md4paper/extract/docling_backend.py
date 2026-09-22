@@ -11,6 +11,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from md4paper.extract import formulas as formula_regions
 from md4paper.extract.reading_order import export_geometry, repair_reading_order
 from md4paper.extract.text_clean import ExtractError, rewrite_image_refs
 from md4paper.workdir import WorkDir
@@ -266,6 +267,13 @@ _FN_PARSE_RE = re.compile(r"^\s*(\d{1,3})[.\s]+(.*)$", re.DOTALL)
 _REFS_HDR_RE = re.compile(r"^#{1,6}\s+(references|bibliography|참고문헌)\b", re.I)
 # 본문 마커 후보: '앞글자 + 공백 + 1~2자리 숫자' 뒤에 공백/여는괄호/문장부호/끝.
 _FN_MARK_RE = re.compile(r"(?P<pre>\S)[ ](?P<num>\d{1,2})(?=[ \n)(]|[.,;]|$)")
+# 마커 뒤가 한 수의 나머지인 경우 — 자릿수 구분 쉼표나 소수점. "of 11,579 Sessions"의 11은
+# 각주 11이 아니라 11,579의 앞 두 자리다(제목·초록에 위첨자 링크가 박히던 원인).
+# 위첨자였다면 뒤에 곧바로 같은 수의 나머지가 붙을 수 없다.
+_NUM_TAIL_RE = re.compile(r"^[.,]\d")
+# 헤딩 줄은 통째로 제외 — "## 1 Introduction"의 1은 절 번호이지 각주 마커가 아니다.
+# (번호를 하나 아껴 주면 그 번호가 이런 자리로 흘러가므로, 숫자 판정과 함께 막아야 한다.)
+_HDR_LINE_RE = re.compile(r"#{1,6}\s")
 # 숫자가 각주가 아니라 그림·표·절 참조인 경우(제외). 마커 앞 단어가 이런 라벨이면 링크하지 않는다.
 _FN_ABBR = frozenset({
     "vol", "fig", "figure", "figs", "table", "tab", "eq", "eqn", "equation", "sec", "section",
@@ -273,6 +281,9 @@ _FN_ABBR = frozenset({
     "study", "round", "wave", "day", "week", "item", "rq", "q", "algorithm", "alg", "def", "thm",
     "theorem", "lemma", "corollary", "version", "v", "article", "art", "line", "row", "col",
     "column", "page", "pages", "footnote", "note", "n", "eg", "ie", "cf", "vs",
+    # 논문이 스스로 번호를 붙여 부르는 것들 — "(Finding 11)"의 11은 각주가 아니다.
+    "finding", "findings", "observation", "observations", "insight", "insights",
+    "hypothesis", "requirement", "goal", "principle", "stage", "iteration",
 })
 
 
@@ -315,6 +326,10 @@ def _linkify_footnote_markers(body: str, ids: set[int]) -> str:
             return m.group(0)
         pre = m.group("pre")
         if pre.isdigit() or pre in ",[/-–—":  # 인용 대괄호·범위·큰 수 내부
+            return m.group(0)
+        if _NUM_TAIL_RE.match(body[m.end():m.end() + 2]):  # 11,579 / 0.669 — 한 수의 일부
+            return m.group(0)
+        if _HDR_LINE_RE.match(body, body.rfind("\n", 0, m.start()) + 1):  # 헤딩의 절 번호
             return m.group(0)
         # 마커 앞 단어(라벨) 확인 — Figure/Table/Vol. 등이면 그림·표·권 참조이므로 제외
         wm = re.search(r"([A-Za-z]+)\.?$", body[max(0, m.start() - 24):m.start() + 1])
@@ -984,6 +999,12 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
     except Exception:  # noqa: BLE001 — 기하 실패가 추출 전체를 막지 않게
         geom = None
     join_stats: dict = {"joins_made": 0, "joins_refused": 0, "geometry": geom is not None}
+    # 수식: Docling이 `<!-- formula-not-decoded -->`로 버리는 자리를 그림 + 원문으로 건진다.
+    # **문서가 확정된 뒤**(드롭·읽기 순서 복원 완료) 세어야 k번째 아이템 ↔ k번째 표식이 맞는다.
+    try:
+        formula_recs = formula_regions.collect(result.document, source, wd.extract_images)
+    except Exception:  # noqa: BLE001 — 수식 크롭 실패가 추출 전체를 막지 않게
+        formula_recs = []
     wd.extract.mkdir(parents=True, exist_ok=True)
     wd.frontmatter_txt.write_text("\n".join(boilerplate), encoding="utf-8")  # 서지(venue/연도) 추출용
     pictures = list(getattr(result.document, "pictures", []))  # 아티팩트 파일명 인덱스와 매핑
@@ -1027,6 +1048,10 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         md = _place_captions(md, _collect_captions(result.document), page_by_name)
         md = _drop_figure_text(md)  # 그림 안 차트 제목·축 이름이 헤더로 오분류된 것 제거(래스터에 이미 있음)
 
+    # 수식 표식 → 크롭 그림 참조. 캡션 짝짓기·그림 텍스트 제거가 **끝난 뒤** 바꾼다 —
+    # 먼저 그림이 되면 이 줄이 옆 캡션을 가로채거나 인접 헤더를 지우는 근거가 된다.
+    md = formula_regions.place(md, formula_recs)
+    n_formulas = formula_regions.save(formula_recs, wd.formulas_json)
     md = _unheader_captions(md)  # 헤더로 오분류된 'Table N:/Figure N:' 캡션을 캡션 문단으로 (이미지 유무 무관)
     md = _delist_headers(md)  # 불릿으로 시작하는 잘못 승격된 헤더를 리스트 항목으로 (목록 일관성)
     wd.raw_md.write_text(md, encoding="utf-8")
@@ -1036,6 +1061,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         "images": len(mapping) // 2 if mapping else 0,
         "line_numbers_dropped": line_numbers,
         "running_heads_dropped": run_heads,
+        "formulas": n_formulas,
         **order_meta,
         **join_stats,
     }

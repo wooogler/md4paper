@@ -75,3 +75,28 @@ def metadata(src) -> dict:  # noqa: ANN001
     """PDF 내장 메타데이터 (Title/Author/CreationDate/ModDate 등)."""
     with open_document(src) as doc:
         return doc.get_metadata_dict() or {}
+
+
+def render_region_png(  # noqa: ANN001
+    src, page: int, rect: tuple[float, float, float, float], zoom: float = 3.0,
+) -> bytes | None:
+    """페이지의 한 영역만 PNG로 잘라낸다 (좌상단 원점 pt). 범위 밖이면 None.
+
+    pdfium의 `crop`은 좌표가 아니라 **각 변에서 잘라낼 여백**(left, bottom, right, top)이다.
+    수식은 원문에서도 작아서 zoom을 페이지 렌더(1.5)보다 높게 잡는다 — 첨자·위첨자가
+    LLM 입력에서 뭉개지면 그게 곧 오독이 된다.
+    """
+    import io
+
+    left, top, right, bottom = rect
+    with open_document(src) as doc:
+        if not (0 <= page < len(doc)):
+            return None
+        pg = doc[page]
+        width, height = pg.get_size()
+        crop = (max(0.0, left), max(0.0, height - bottom), max(0.0, width - right), max(0.0, top))
+        if width - crop[0] - crop[2] <= 1 or height - crop[1] - crop[3] <= 1:
+            return None  # 빈 영역 — pdfium이 여기서 에러를 낸다
+        buf = io.BytesIO()
+        pg.render(scale=zoom, crop=crop).to_pil().save(buf, format="PNG")
+        return buf.getvalue()

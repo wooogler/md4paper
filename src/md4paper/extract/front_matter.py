@@ -127,6 +127,95 @@ def _is_affiliation(block: str) -> bool:
     return bool(_EMAIL_RE.search(s)) and ("," in s or bool(_ADDR_HINT_RE.search(s)))
 
 
+# --- 본문 뒤로 밀려난 저자 조각 되찾기 -------------------------------------
+# 다열 저자 그리드를 추출기가 열 우선으로 읽으면 마지막 열(이름·소속·이메일)이 초록·CCS를 지나
+# **본문 첫 문단 뒤**까지 밀려난다. LLM은 그 블록을 저자로 지목할 수 있지만, 지목만 믿고 통째로
+# 옮기면 본문 문단을 도둑질할 수 있다. 그래서 코드가 블록 내용으로 한 번 더 판정한다:
+# 사람 이름 / 소속·주소 한 줄 / 이메일 줄만 되찾고, 나머지는 본문에 그대로 둔다.
+_CONTACT_MAX = 160   # 저자 칸 한 줄의 현실적 상한 — 이보다 길면 본문이 이어 붙은 것이다
+_PROSE_TAIL_MIN = 40  # 이만큼 되면 "꼬리"가 아니라 본문 문장이다 (이메일 뒤 잔여분 판정)
+_MAX_AUTHOR_PULL = 12  # 본문 뒤에서 되찾을 저자 조각 수 상한 — 오판했을 때 피해를 제한
+_AUTHOR_SCAN = 24      # 본문 시작 뒤로 저자 조각을 찾아볼 최대 거리(블록 수)
+
+
+def _is_author_cell(text: str) -> bool:
+    """저자 그리드의 한 칸인지 — 이름·소속·이메일만 있고 **문장이 아니다**.
+
+    이메일이 들어 있다는 것만으로는 부족하다("참가자는 study@x.edu로 연락했다"도 통과한다).
+    이메일을 지우고 남은 것이 문장이면 본문이고, 소속 표지나 사람 이름이면 저자 칸이다.
+    """
+    disp, _ = _disp_url(text.strip())  # 마크다운 링크는 표시 텍스트로
+    rest = _EMAIL_RE.sub(" ", disp).strip(" ,;·")
+    if _TERMINAL_RE.search(rest) or ". " in rest:
+        return False
+    if not rest:
+        return True  # 이메일만 있는 줄
+    return bool(_ADDR_HINT_RE.search(rest) or _is_person(rest))
+
+
+def _author_meta_span(block: str) -> tuple[str, str] | None:
+    """본문 뒤 블록을 (되찾을 저자 메타, 본문에 남길 나머지)로 가른다. 저자 메타가 아니면 None.
+
+    단 경계에서 저자 칸과 본문 문단이 **한 블록으로 이어 붙는** 일이 있다
+    ("University of X City, ST, USA a@x.edu for designing more effective …").
+    그때는 마지막 이메일까지를 저자 메타로 떼고 뒤의 산문은 본문에 되돌린다 —
+    통째로 끌어오면 본문 문장이 앞부분으로 사라지고, 통째로 두면 소속 조각이 서론에 남는다.
+    """
+    s = block.strip()
+    if "\n" in s:
+        return None  # 여러 줄 블록은 저자 칸이 아니다
+    h = _heading(s)
+    if h:
+        return (s, "") if _is_person(h[1]) else None
+    if _is_person(s):  # 이름만 있는 줄 (ORCID 링크 포함)
+        return (s, "")
+    if len(s) <= _CONTACT_MAX:
+        return (s, "") if _is_author_cell(s) else None
+    # 길다 = 본문 문단이 이어 붙었다. 마지막 이메일 뒤를 본문으로 되돌린다.
+    marks = list(_EMAIL_RE.finditer(s))
+    if not marks:
+        return None
+    head, rest = s[:marks[-1].end()].strip(), s[marks[-1].end():].strip()
+    if len(head) > _CONTACT_MAX or not _is_author_cell(head):
+        return None
+    if len(rest) < _PROSE_TAIL_MIN or _EMAIL_RE.search(rest):
+        return None  # 짧은 꼬리는 메타의 일부(괄호·구두점)이지 본문 문장이 아니다
+    return head, rest
+
+
+def _author_tail_end(blocks: list[str], body_start: int) -> int:
+    """본문 시작 뒤에 흩어진 저자 조각의 마지막 위치+1 — LLM에 보여줄 창을 여기까지 넓힌다.
+
+    창이 좁으면 마지막 저자가 LLM에 **아예 보이지 않아** 조용히 누락된다(지목할 수 없는 건
+    되찾을 수도 없다). 저자처럼 읽히는 블록이 없으면 body_start를 그대로 돌려주므로,
+    정상 논문에서는 창이 넓어지지 않고 이 경로가 통째로 no-op이 된다.
+    """
+    last = body_start
+    for i in range(body_start, min(len(blocks), body_start + _AUTHOR_SCAN)):
+        if _author_meta_span(blocks[i]) is not None:
+            last = i + 1
+    return last
+
+
+# 앞부분에 실리는 인용 상용구("A, B, and C. 2026. 제목. In …") — 저자 **순서**의 유일한 평문 근거다.
+# 다열 그리드를 열 우선으로 읽힌 페이지에서는 블록 순서도 LLM 판단도 순서를 틀리는데, 이 줄은
+# 논문이 스스로 적어 둔 순서라 맞다. 모든 저자 이름이 한 블록에 다 있을 때만 쓴다(부분 근거는 안 쓴다).
+def _citation_order(entries: list[AuthorEntry], blocks: list[str]) -> list[AuthorEntry] | None:
+    """저자 전원이 한 블록에 나열된 인용 줄을 찾아 그 등장 순서로 세운다. 없으면 None."""
+    if len(entries) < 2:
+        return None
+    keys = [_alnum(e.name) for e in entries]
+    if len(set(keys)) != len(keys) or any(not k for k in keys):
+        return None
+    for block in blocks:
+        flat = _alnum(block)
+        at = [flat.find(k) for k in keys]
+        if any(p < 0 for p in at) or len(set(at)) != len(at):
+            continue
+        return [entries[i] for i in sorted(range(len(entries)), key=lambda i: at[i])]
+    return None
+
+
 def _is_biblio_junk(block: str) -> bool:
     """서지 상용구(허가문·저작권·ISBN·DOI·venue) — 각주 기호로 시작해도 주석이 아니라 상용구다.
 
@@ -388,7 +477,13 @@ def _valid(layout: FrontMatterLayout, n_front: int, n_blocks: int) -> bool:
         return False
     if layout.body_start > _MAX_FRONT:
         return False
-    if not layout.authors or not all(ok(i) and i < layout.body_start for i in layout.authors):
+    # 저자도 본문 시작 **뒤**에 있을 수 있다 — 다열 저자 그리드의 마지막 칸(이름·소속·이메일)이
+    # 본문 첫 문단 뒤로 밀려나는 조판이 흔하다. 그걸 이유로 레이아웃 전체를 버리면 제목·저자 라벨까지
+    # 함께 버려져 규칙 폴백으로 떨어졌고, 첫 페이지가 통째로 깨졌다(authors.json도 안 생겼다).
+    # 섹션과 같은 규칙으로 본다: LLM에 보여준 창(n_front) 안이고, 본문 시작 블록 자체는 아닐 것.
+    # 실제로 앞으로 되찾을지는 _author_meta_span이 블록 내용으로 다시 판정한다(거부가 아니라 절단).
+    if not layout.authors or not all(ok(i) and i < n_front and i != layout.body_start
+                                     for i in layout.authors):
         return False
     # 섹션은 본문 시작 뒤에 있어도 된다(단 뒤집힘) — 단, LLM에 보여준 창(n_front) 안이어야 하고
     # 본문 시작 블록 자체는 옮길 수 없다.
@@ -511,9 +606,13 @@ def _build_llm(provider: Provider, md: str, parts: list[str] | None,
     # LLM이 title 인덱스를 짚어주므로, 앞부분 어딘가에 헤더가 하나라도 있으면 진행한다.
     if not blocks or not any(_heading(b) for b in blocks[:_MAX_FRONT]):
         return None
-    # LLM에 보낼 앞부분 범위 (본문 시작 추정 + 여유, 상한 캡)
+    # LLM에 보낼 앞부분 범위 (본문 시작 추정 + 여유, 상한 캡). 본문 시작 뒤로 흩어진 저자
+    # 조각이 있으면 거기까지 창을 넓힌다 — 창 밖의 저자는 지목될 수 없고, 지목되지 않으면
+    # 되찾을 수도 없다(마지막 열 저자가 통째로 누락되던 원인).
     approx = _find_body_start(blocks) or _MAX_FRONT
-    n_front = min(len(blocks), max(approx + _BODY_LOOKAHEAD, 8), _MAX_FRONT + _BODY_LOOKAHEAD)
+    tail = _author_tail_end(blocks, approx)
+    n_front = min(len(blocks), max(approx + _BODY_LOOKAHEAD, tail, 8),
+                  _MAX_FRONT + _BODY_LOOKAHEAD + _AUTHOR_SCAN)
     try:
         layout = _llm_layout(provider, blocks, n_front, trust_order)
     except Exception:  # noqa: BLE001 — 실패 시 폴백
@@ -522,19 +621,43 @@ def _build_llm(provider: Provider, md: str, parts: list[str] | None,
         return None
 
     out = [blocks[layout.title]]
+    # 본문 뒤로 밀려난 저자 조각 — LLM 지목 + 코드 판정을 **둘 다** 통과한 것만 되찾는다.
+    # 본문 문단이 이어 붙은 블록은 저자 메타만 떼고 산문은 본문에 되돌린다(author_rest).
+    author_pull: list[int] = []
+    author_rest: dict[int, str] = {}
+    author_text: dict[int, str] = {}
+    for i in sorted(set(layout.authors)):
+        if i <= layout.body_start:
+            continue
+        span = _author_meta_span(blocks[i])
+        if span is None or len(author_pull) >= _MAX_AUTHOR_PULL:
+            continue
+        author_pull.append(i)
+        author_text[i] = span[0]
+        if span[1]:
+            author_rest[i] = span[1]
+    pulled_authors = set(author_pull)
+    author_idx = [i for i in layout.authors if i < layout.body_start or i in pulled_authors]
     # 저자: LLM이 저자별로 재구성한 authors_detail이 원문 근거를 통과하면 일관된 형식으로 렌더,
     # 아니면(검증 실패·미제공) 기존처럼 원본 블록을 그대로 내보낸다(환각 없는 보수적 폴백).
-    author_src = "\n\n".join(blocks[i] for i in layout.authors)
+    author_src = "\n\n".join(author_text.get(i, blocks[i]) for i in author_idx)
     grounded = _grounded_authors(layout.authors_detail, author_src, trust_order) or []
+    if grounded:
+        # 열 우선으로 읽힌 그리드에서는 블록 순서도 LLM 판단도 순서를 틀린다. 앞부분에 인용
+        # 상용구가 있으면 논문이 스스로 적어 둔 저자 순서가 거기 있다 — 그게 유일한 평문 근거다.
+        ordered = _citation_order(
+            grounded, [b for j, b in enumerate(blocks[:n_front]) if j not in set(author_idx)])
+        if ordered is not None:
+            grounded = ordered
     if grounded:
         out.append(_render_authors_detail(grounded, parts))
     else:
         author_lines: list[str] = []
-        for i in layout.authors:
-            author_lines.extend(_author_lines(blocks[i]))
+        for i in author_idx:
+            author_lines.extend(_author_lines(author_text.get(i, blocks[i])))
         if author_lines:
             out.append("\n\n".join(author_lines))
-    seen = {layout.title, *layout.authors}
+    seen = {layout.title, *(i for i in layout.authors if i < layout.body_start), *pulled_authors}
     # 저자 주석(∗ …)은 라벨 유무와 무관하게 저자 바로 뒤에 붙인다 — 추출 단계가 앵커로 표시해 둔다.
     for i in range(min(layout.body_start, len(blocks))):
         if i not in seen and _is_author_note(blocks[i]):
@@ -551,8 +674,15 @@ def _build_llm(provider: Provider, md: str, parts: list[str] | None,
             seen.add(i)
     # 본문은 원본 순서 그대로. 단이 뒤집혀 본문 뒤로 밀려났던 front matter 블록(위에서 이미
     # 앞으로 옮긴 것)만 제외한다 — 그대로 두면 Abstract가 Introduction 중간에 또 나온다.
-    out.extend(b for j, b in enumerate(blocks[layout.body_start:], layout.body_start)
-               if j not in pulled)
+    # 저자 조각도 마찬가지로 빼되, 본문 문단이 이어 붙어 있던 블록은 그 산문만 되돌린다.
+    for j in range(layout.body_start, len(blocks)):
+        if j in pulled:
+            continue
+        if j in pulled_authors:
+            if j in author_rest:
+                out.append(author_rest[j])
+            continue
+        out.append(blocks[j])
     if ops is not None:  # 조용한 이동을 남기지 않는다 — 무엇을 몇 개 끌어올렸는지 기록
         order = sorted(pulled)
         runs: list[int] = []
@@ -566,6 +696,9 @@ def _build_llm(provider: Provider, md: str, parts: list[str] | None,
         ops["pull_runs"] = runs
         ops["pulled_heads"] = [blocks[i].strip()[:60] for i in order]
         ops["sections_after_body"] = sum(1 for i in layout.sections if i > layout.body_start)
+        ops["authors_after_body"] = sum(1 for i in layout.authors if i > layout.body_start)
+        ops["authors_pulled"] = author_pull
+        ops["authors_split"] = sorted(author_rest)
     text = "\n\n".join(out)
     return (text + "\n" if md.endswith("\n") else text), grounded
 

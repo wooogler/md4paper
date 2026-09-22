@@ -6,6 +6,7 @@ marker는 이미지를 `![](path)`로, 캡션을 인접한 텍스트 줄로 낸�
 
 from __future__ import annotations
 
+import os
 import re
 
 from md4paper.ir import FigurePair
@@ -73,6 +74,8 @@ def find_pairs(lines: list[str]) -> list[FigurePair]:
         if not m:
             continue
         path = m.group(1)
+        if os.path.basename(path).startswith("formula-"):
+            continue  # 수식 크롭은 그림이 아니다 — 짝지으면 옆 그림의 캡션을 가로챈다
         pair = FigurePair(
             kind="table" if "table" in path.lower() else "figure",
             image_path=path,

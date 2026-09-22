@@ -40,6 +40,22 @@ def _clean_heading_prefs():
 
 
 @pytest.fixture(autouse=True)
+def _clean_projects():
+    """프로젝트 목록도 전역 파일(projects.json)이라 테스트마다 비운다.
+
+    (한 테스트가 만든 프로젝트가 남아 있으면 다음 테스트의 저장 위치 해석이 그 프로젝트
+    폴더로 새어 나간다 — library.dir_for가 프로젝트를 먼저 보기 때문.)
+    """
+    from md4paper import projects
+
+    if projects.PROJECTS_PATH.exists():
+        projects.PROJECTS_PATH.unlink()
+    yield
+    if projects.PROJECTS_PATH.exists():
+        projects.PROJECTS_PATH.unlink()
+
+
+@pytest.fixture(autouse=True)
 def _clean_config():
     """config.toml(키·Global 기본설정)은 세션 공유 CONFIG_DIR에 쌓이므로 테스트마다 비운다.
 
@@ -52,3 +68,13 @@ def _clean_config():
     yield
     if config.CONFIG_PATH.exists():
         config.CONFIG_PATH.unlink()
+
+
+@pytest.fixture(autouse=True)
+def _reset_bibsource_cooldown():
+    """레이트리밋에 걸린 출처 기억은 프로세스 전역이라 테스트 사이에 새어 나간다 — 매번 되살린다."""
+    from md4paper import bibsource
+
+    bibsource.reset_sources()
+    yield
+    bibsource.reset_sources()

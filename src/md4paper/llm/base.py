@@ -74,6 +74,17 @@ class Provider:
     def parse(self, system: str, user: str, schema: type[T], *, max_tokens: int = 4096) -> T:
         raise NotImplementedError
 
+    def parse_image(
+        self, system: str, user: str, images: list[bytes], schema: type[T],
+        *, max_tokens: int = 4096,
+    ) -> T:
+        """이미지 + 텍스트 → 구조화 출력. PNG 바이트만 받는다 (수식 크롭).
+
+        이미지를 텍스트 앞에 두는 것은 관례가 아니라 품질 문제다 — 지시문이 이미지 뒤에
+        와야 모델이 '무엇을 보고 무엇을 하라'는 순서로 읽는다.
+        """
+        raise NotImplementedError(f"{self.name} 어댑터는 이미지 입력을 지원하지 않습니다.")
+
     def cost(self) -> float:
         return cost_usd(self.model, self.usage)
 
@@ -103,6 +114,16 @@ class FakeProvider(Provider):
         if self._parse_fn is None:
             raise RuntimeError("FakeProvider에 parse_fn이 설정되지 않았습니다.")
         self.usage.add(len(system) + len(user), 0)
+        return self._parse_fn(system, user, schema)  # type: ignore[return-value]
+
+    def parse_image(
+        self, system: str, user: str, images: list[bytes], schema: type[T],
+        *, max_tokens: int = 4096,
+    ) -> T:
+        """이미지는 바이트 길이만 usage에 반영하고 parse_fn에 그대로 위임한다."""
+        if self._parse_fn is None:
+            raise RuntimeError("FakeProvider에 parse_fn이 설정되지 않았습니다.")
+        self.usage.add(len(system) + len(user) + sum(len(i) for i in images), 0)
         return self._parse_fn(system, user, schema)  # type: ignore[return-value]
 
 

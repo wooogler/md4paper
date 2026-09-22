@@ -233,6 +233,9 @@ cleanup).
 
 - Search **Converted papers** on the right by title, author, or venue, and click a card to pick up
   where you left off.
+- The select box above the list **filters down to one project**, or groups the whole list into
+  per-project sections. Click the **project chip** on a card to move that paper to another group and
+  the copies in your library folders (Markdown, images, PDF, bib entry) follow it.
 - Hit **📌 pin** on a card and that paper moves up into a **Pinned** group at the top of the list
   (marked with a blue edge). Switching the sort to most-recent or by-title doesn't move a pinned
   paper, and it **stays in the list even when it falls outside the 20 most recent**. The same paper
@@ -243,14 +246,18 @@ cleanup).
   away (only needed for translation and citations).
 - **Default conversion and translation settings** on the left are the defaults applied to papers
   you upload from now on.
+- **Projects** on the left is where you create a bundle of papers and give each bundle a folder —
+  see [Projects](#projects--keeping-papers-in-bundles) below.
 - **Library folders** on the left sets where converted papers accumulate — see
   [Library folders](#library-folders--collecting-converted-papers-in-one-place) below.
 - Check several papers in the list to **export** them as a single zip.
 - The trash icon on a card offers **hide from list** (files stay, the card is hidden) or **delete
   files** (permanently removes the working directory). Hidden papers come back any time via
   **show N hidden papers** above the list. Deleting files removes the whole paper folder — original
-  PDF, extraction cache, images — and also cleans up the copies in your library folders (uncheck the
-  box in the dialog to keep those; the dialog shows you exactly which folder paths will go).
+  PDF, extraction cache, images — and also cleans up the copies in your library folders, common
+  folder or project folder alike: the Markdown, the images, the PDF, and **that paper's entry in
+  `references.bib`** (uncheck the box in the dialog to keep those; the dialog shows you exactly which
+  folder paths will go).
 
 ### Several papers at once — header tabs and new windows
 
@@ -321,6 +328,12 @@ This is the **1 · Convert** tab at the top. Editing on the left, results on the
   (`Heading 1`–`6`), or pick `to body text` (demote a heading into a normal paragraph), `merge with
   above`, `delete entirely`, or `italic`. A `run-in` badge means a subheading that was inline with
   the body, as in "3.1.2 Title. Body text…"; a `title` badge marks the document title.
+- **Formulas** — the extractor (docling) locates every formula but leaves its contents empty. Left
+  alone, all that survives in the Markdown is an invisible comment, so the equation looks like it
+  vanished. Conversion therefore **crops each formula region out of the PDF as an image**, and — if
+  you have an LLM key — reads that image back into `$$…$$` LaTeX, equation number included as
+  `\tag{1}`. A formula the model cannot read stays as the cropped image, so either way nothing is
+  lost from the original.
 - **Author cleanup** — two-column PDFs jam authors, emails, and affiliations onto one line;
   conversion separates and tidies them per author (LLM labels + code reassembly if you have a key,
   rule-based otherwise). The eight authors in the screenshot above are that result.
@@ -486,11 +499,152 @@ where you were reading.** Footnotes work the same way.
   figures.** The paper name is in the folder name so that images don't collide when you put many
   papers in one vault.
 
+## Projects — keeping papers in bundles
+
+Past twenty papers or so the list turns into one undifferentiated pile. A **project** is a
+compartment for splitting that pile up — a thesis survey, this semester's seminar, the study you are
+actually running — so the lists never mix. You create, rename, and delete them in the **Projects**
+panel on the left of the home screen.
+
+Pick **one folder** per project and the places inside it are laid out for you. There is no need to
+name a separate folder for English, Korean, and PDF.
+
+```
+<project folder>/2017_Attention_Vaswani.md          ← English Markdown at the root
+<project folder>/images/2017_Attention_Vaswani/     ← figures
+<project folder>/ko/2017_Attention_Vaswani.md       ← the translation
+<project folder>/pdf/2017_Attention_Vaswani.pdf     ← the original PDF
+<project folder>/references.bib                     ← BibTeX entries keep accumulating here
+```
+
+- The **Converted papers** list on the right can **filter down to a single project** with a select
+  box, or group everything into per-project sections.
+- Click the **project chip** on a card to move the paper, and **the copies in your library folders
+  move with it** — the Markdown, images, PDF, and `references.bib` entry are placed in the new folder
+  and cleaned out of the old one. No orphans left behind. (This happens even with auto-save off —
+  a copy you already exported sitting in the wrong folder is the worse outcome.)
+- Whichever project you have selected in the list is **where a newly uploaded paper goes**. The
+  dropzone names the project it is about to land in.
+- Papers with no project (**Unfiled**) and projects with no folder of their own go to the common
+  [Library folders](#library-folders--collecting-converted-papers-in-one-place) below.
+- Deleting a project leaves **the folder and the files alone**. The papers that were in it become
+  unfiled.
+
+### Per-project settings
+
+Expand **Override for this project** on a project row to set values that apply to that group only.
+
+| Setting | Example |
+|---|---|
+| Naming rule | `{year}_{author}_{title}` |
+| Export format | Universal · Notion · Obsidian |
+| Accumulate references.bib | on / off |
+| Auto-save after conversion | on / off |
+
+- Anything you don't set **follows the global setting** — it's an override, not a copy. Change a
+  global setting and every project that hasn't overridden it follows along, so you aren't
+  maintaining settings in two places.
+- Turning something off is not the same as leaving it unset. Switch BibTeX **off** for a project
+  and it stays off even when the global setting is on.
+- From the CLI: `md4paper project set NIRVANA export_target obsidian`, clear it with
+  `--unset`, or omit the KEY to see what's overridden.
+
+Translation register and extraction options stay global — duplicating the whole settings screen
+per project would only make it unclear where a given value came from.
+
+### BibTeX — references.bib accumulates
+
+One entry per paper is **appended** to `references.bib` in your library folder. Copy it straight into
+your manuscript's `.bib`, or take the whole file to Overleaf or Zotero.
+
+The cite key is the paper's base name, so it is **the same name** as the Markdown and PDF files —
+the `2017_Attention_Vaswani` in your notes and `\cite{2017_Attention_Vaswani}` can't drift apart.
+When the base name contains non-ASCII characters (Korean, say), those are dropped and a short hash is
+appended instead (`2024-d7606b`) — classic `bibtex` chokes on UTF-8 keys, and merely dropping the
+characters would make two different papers share one key.
+
+```bibtex
+@inproceedings{2017_Attention_Vaswani,
+  author    = {Vaswani, Ashish and Shazeer, Noam},
+  booktitle = {Advances in Neural Information Processing Systems},
+  title     = {{Attention Is All You Need}},
+  year      = {2017}
+}
+```
+
+- Exporting the same paper again doesn't add a second entry — **that entry is updated.** The file is
+  never re-serialized as a whole, so entries and comments you wrote by hand survive untouched.
+- **We don't build the strings ourselves.** Paper titles are full of `&`, `%`, `_`, and accented
+  characters, and hand-rolled escaping eventually breaks not your `\cite` but **the LaTeX build** —
+  which you usually find out the night before a deadline. So escaping and serialization are left to
+  [bibtexparser](https://github.com/sciunto-org/python-bibtexparser), and the entry we built is
+  **parsed back** to check that the key, type, and fields survive the round trip before anything is
+  written.
+- After writing, **the whole file is parsed again** to confirm the entry count didn't drop. If it
+  did, the file is **rolled back to what it was** — a bibliography you spent months on is not ours
+  to break.
+- A paper with no bibliographic info (no title) can't produce an entry, so it is skipped silently.
+  The feature itself has a switch — **also accumulate BibTeX (references.bib)** — in the
+  **Library folders** panel.
+
+#### Accurate entries are fetched from paper APIs
+
+What isn't on page 1 of the PDF, we can't invent — many papers print only a footer acronym like
+`CHI '24` for the venue, or nothing at all, and DOI, pages and publisher are never on page 1. So
+instead of assembling an entry, **we fetch the publication record.**
+
+**This runs once automatically at the end of every conversion**, so the very first
+`references.bib` you get is already accurate — no cleanup pass needed later. It is on by
+default; on a slow connection turn off *Enrich bibliography online after conversion* in the
+Library folders panel (it can also be set per project).
+
+For papers you converted earlier, press **Bibliographic enrichment** in the Library folders panel (or run `md4paper enrich`)
+and, for the papers **in the currently selected project**:
+
+1. **Ai2's Semantic Scholar** finds the paper by title — it still finds it when extraction
+   dropped a ligature and turned `Effect` into `Efect`.
+2. The resulting **DOI is handed to Crossref** for the publisher-registered entry.
+
+```bibtex
+@inproceedings{2024_HaLLMarkEffect_Hoque,
+  author    = {Hoque, Md Naimul and Mashiat, Tasfia and Ghai, Bhavya and ...},
+  booktitle = {Proceedings of the CHI Conference on Human Factors in Computing Systems},
+  doi       = {10.1145/3613904.3641895},
+  pages     = {1--15},
+  publisher = {ACM},
+  series    = {CHI '24},
+  title     = {{The HaLLMark Effect: Supporting Provenance and Transparent Use of ...}},
+  year      = {2024}
+}
+```
+
+- **The publisher's record wins for year, venue and title.** A paper read as 2008 from the PDF
+  turned out to be Flower & Hayes 1981, *College Composition & Communication* 32(4) 365–387.
+  `paper_meta.json` (which drives the list, search and filenames) is left alone — only the `.bib`
+  entry changes.
+- **Only adopted when it is the same paper.** Title similarity alone is not enough — we measured a
+  different paper scoring 0.96 with one word changed. So the **author surnames and year are
+  cross-checked**, and if no API is convincing, nothing changes (a wrong entry is worse than a
+  missing one).
+- **Only the title leaves your machine.** The body is never sent. The record is cached in the
+  paper's `bib_source.json`, so re-exporting uses no network.
+- Papers no API has (old scans and the like) keep the values read from the PDF.
+- `md4paper bib` uses **no network** — it just rewrites the `.bib` from what has been fetched.
+- **Scope is the selected project** (the same filter as the home list), because you usually work on
+  one group at a time and sweeping everything would hit the APIs for old projects too. Use
+  `md4paper enrich --all` for everything, or `--project <name>` for a different group.
+- **Progress is shown and you can stop at any time.** A paper takes seconds to tens of seconds (about
+  two minutes when it has 100 references). **Stop** finishes the current paper and halts; everything
+  enriched up to that point is already saved. The CLI shows a progress bar and honours Ctrl+C.
+
 ## Library folders — collecting converted papers in one place
 
 Instead of downloading and unzipping every time, you can have **Markdown land automatically in a
 folder you choose when conversion and translation finish**. Expand **Library folders** on the left
 of the home screen and click the **folder icon** to open the OS folder picker (or just paste a path).
+
+The folders you set here are the **common** ones — a paper in a project that has its own folder goes
+there, and everything else (unfiled papers, and projects without a folder) lands here.
 
 **English Markdown, Korean Markdown, and the original PDF can go to three different folders** — for
 example `Papers/EN`, `Papers/KO`, and `Papers/PDF` in an Obsidian vault. You can set only the ones
@@ -504,6 +658,9 @@ Papers/KO/2017_Attention_Vaswani.md          ← the translation, same name, dif
 Papers/PDF/2017_Attention_Vaswani.pdf        ← the original PDF under the same name → easy to find from the md
 ```
 
+- The **Organize into one folder** button applies the same layout projects use to the common place —
+  pick a single root and English Markdown goes to that root, translations to `ko/`, original PDFs to
+  `pdf/`. Use it when naming three folders separately is more bother than it's worth.
 - The format follows your **Export format** setting (Universal / Notion / Obsidian).
 - Exporting the same paper again **overwrites** — this collects papers, not versions.
 - Auto-save happens ① when conversion finishes ② when translation finishes ③ when you change the
@@ -530,10 +687,16 @@ and you can change it in the **Library folders** panel.
 The same settings from the terminal:
 
 ```bash
+uv run md4paper project                                   # list projects · which one is selected
+uv run md4paper project add "Tutor chatbot survey" --dir ~/Vault/Tutor
+uv run md4paper project use "Tutor chatbot survey"        # where new papers will go
+uv run md4paper project assign "Tutor chatbot" output/2017_.../2017_....md4
 uv run md4paper library                                   # show current library folders
 uv run md4paper library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF
+uv run md4paper library --root ~/Papers                   # common library as a single folder
 uv run md4paper library --export                          # export every converted paper
 uv run md4paper library --off all                         # turn it off
+uv run md4paper bib --all                                 # refill references.bib (queries paper APIs)
 uv run md4paper naming                                    # show the naming rule
 uv run md4paper naming "{author}{year}_{title}"           # change the rule
 uv run md4paper naming --apply                            # clean up existing paper and PDF names
@@ -583,6 +746,8 @@ models still work fine).
 
 **PDF → Markdown extraction costs $0.** Extraction is entirely local. The only things that cost
 money are reference parsing, glossary generation, translation, and questions to the viewer chatbot.
+Papers with equations add formula reading, at roughly $0.0005 per formula — a paper with 25 of them
+(TextGrad) measured **$0.012**. Papers without equations never make the call at all.
 
 **Measured**: *Attention Is All You Need* (15 pages, 49k characters of body text), the paper used
 for this README's screenshots, with **automatic glossary generation + full translation** on the
@@ -626,6 +791,8 @@ Guards against runaway spending:
 | Per-paper results | `<workfolder>/<name>/<name>.md4/` (extracted source, structure, translation, logs) |
 | Final Markdown | `<name>.md4/out/paper.en.md`, `paper.ko.md`, `out/images/` |
 | Library folders (optional) | a folder you choose, holding `<paper-name>.md` + `images/<paper-name>/` + `<paper-name>.pdf` — English, Korean, and PDF separately |
+| Project list | `~/.config/md4paper/projects.json` (project names and folders, plus the selected one) |
+| A paper's project | the `project` field in `<name>.md4/status.json` (a project id; empty means unfiled) |
 | Settings and API keys | `~/.config/md4paper/config.toml` (Windows: `C:\Users\<user>\.config\md4paper\config.toml`) |
 | Remembered heading decisions | `~/.config/md4paper/heading_prefs.json` |
 | Docling model cache | `~/.cache/huggingface` (Windows: `C:\Users\<user>\.cache\huggingface`) |
@@ -657,7 +824,9 @@ uv run md4paper glossary paper.md4/     # build the glossary before translating 
 uv run md4paper translate paper.md4/    # translate to Korean → paper.md4/out/paper.ko.md (LLM)
 uv run md4paper ui paper.md4/           # open this job in the web UI
 uv run md4paper workspace               # show / change the work folder
-uv run md4paper library                 # show / change library folders (English, Korean, PDF)
+uv run md4paper project                 # list projects; add · use · assign
+uv run md4paper library                 # show / change library folders (English, Korean, PDF); --root
+uv run md4paper bib --all               # refill references.bib (queries paper APIs)
 uv run md4paper naming                  # show / change the naming rule; --apply to clean up existing names
 uv run md4paper enrich --all            # fill empty years and venues from public bibliographic APIs
 uv run md4paper prefs list              # list remembered heading decisions
@@ -740,9 +909,9 @@ The design document and milestones are in [PLAN.md](PLAN.md) (Korean).
 [MIT](LICENSE). **AS-IS, no warranty** — see the warning section above.
 
 The dependencies are all permissive too — Docling, pydantic, NiceGUI (MIT); pypdfium2, click, httpx
-(BSD); PyTorch, OpenCV, the LLM SDKs (Apache-2.0); Pillow (HPND). **There are no copyleft (GPL/AGPL)
-dependencies.** (PyMuPDF (AGPL), previously used to render PDF pages, was replaced by pypdfium2,
-which does the same job.)
+(BSD); PyTorch, OpenCV, the LLM SDKs (Apache-2.0); Pillow (HPND); bibtexparser, which builds and
+verifies the BibTeX entries (MIT). **There are no copyleft (GPL/AGPL) dependencies.** (PyMuPDF
+(AGPL), previously used to render PDF pages, was replaced by pypdfium2, which does the same job.)
 
 Copyright in the **output** of conversion and translation belongs to the copyright holder of the
 original paper. Whether you may redistribute it is yours to check.

@@ -58,3 +58,27 @@ class GeminiProvider(Provider):
         if parsed is None:
             raise RuntimeError("Gemini 구조화 출력 파싱 실패 (거부 또는 스키마 불일치)")
         return parsed  # type: ignore[return-value]
+
+    def parse_image(
+        self, system: str, user: str, images: list[bytes], schema: type[T],
+        *, max_tokens: int = 4096,
+    ) -> T:
+        from google.genai import types
+
+        parts: list = [types.Part.from_bytes(data=png, mime_type="image/png") for png in images]
+        parts.append(user)
+        resp = self._client.models.generate_content(
+            model=self.model,
+            contents=parts,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                response_mime_type="application/json",
+                response_schema=schema,
+                max_output_tokens=max_tokens,
+            ),
+        )
+        self._track(resp)
+        parsed = resp.parsed
+        if parsed is None:
+            raise RuntimeError("Gemini 구조화 출력 파싱 실패 (거부 또는 스키마 불일치)")
+        return parsed  # type: ignore[return-value]

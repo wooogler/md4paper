@@ -28,6 +28,31 @@ def run_extract(
     return meta
 
 
+def run_formulas(wd: WorkDir, provider=None, force: bool = False, on_progress=None) -> dict:
+    """수식 크롭 그림 → LaTeX (LLM). raw.md의 `![formula-NN]` 줄을 `$$…$$`로 바꾼다.
+
+    **frontmatter보다 먼저** 돌린다: 두 단계 모두 raw.md를 고치는데, 뒤에 오는 쪽이 앞 단계의
+    출력 해시를 깨뜨려 (LLM을 쓰는) frontmatter를 공짜로 다시 돌게 만든다.
+
+    provider가 없으면 아무것도 안 한다 — 그래도 수식은 크롭 그림으로 본문에 남아 있어서,
+    이 단계를 건너뛴 문서와 못 돌린 문서가 똑같이 "그림으로 보이는" 상태가 된다.
+    """
+    from md4paper import formulas as formula_ocr
+
+    if provider is None:
+        return {"skipped": True, "reason": "provider 없음"}
+    records = formula_ocr.load(wd)
+    if not records:
+        return {"skipped": True, "total": 0}
+    h = hash_text(f"{len(records)}:{provider.model}:{''.join(r['id'] for r in records)}")
+    if not force and wd.is_fresh("formulas", h) and all(r.get("latex") for r in records):
+        return {"skipped": True, "total": len(records)}
+    summary = formula_ocr.run(wd, provider, force=force, on_progress=on_progress)
+    wd.mark_done("formulas", h, model=provider.model,
+                 converted=summary.get("converted", 0), failed=summary.get("failed", 0))
+    return summary
+
+
 def run_frontmatter(wd: WorkDir, provider=None, force: bool = False) -> dict:
     """앞부분(front matter) 정규화 — 흩어진 저자/저작권 조각 정리 후 raw.md 갱신.
 
@@ -61,7 +86,8 @@ def run_frontmatter(wd: WorkDir, provider=None, force: bool = False) -> dict:
     # 뒤집힘이 남은 첫 페이지에서는 원문 순서가 틀렸고, 되세우면 LLM의 맞은 답을 망가뜨린다.
     trust_order = _FRONT_PAGE not in suspect
     ops: dict = {"allow_pull": allow_pull, "trust_order": trust_order, "pulled": [],
-                 "pull_runs": [], "pulled_heads": [], "sections_after_body": 0}
+                 "pull_runs": [], "pulled_heads": [], "sections_after_body": 0,
+                 "authors_after_body": 0, "authors_pulled": [], "authors_split": []}
     new, authors = front_matter.normalize_authors(
         provider, raw, config.resolve_author_parts(), allow_pull, ops, trust_order)
     if new != raw:
@@ -167,11 +193,13 @@ def convert(
     flavor: Flavor = Flavor.STANDARD,
     provider=None,
 ) -> WorkDir:
-    """Stage 1-4 (리뷰 제외): extract → (front matter 정규화) → structure → assemble → paper.en.md.
+    """Stage 1-4 (리뷰 제외): extract → (수식 → 앞부분 정규화) → structure → assemble → paper.en.md.
 
-    provider가 있으면 앞부분 정규화에 LLM(라벨+재조립)을 쓴다. 없으면 규칙 폴백.
+    provider가 있으면 수식 LaTeX 변환과 앞부분 정규화에 LLM을 쓴다. 없으면 각각
+    크롭 그림 유지 / 규칙 폴백.
     """
     run_extract(source, wd, backend=backend, ocr=ocr)
+    run_formulas(wd, provider=provider)
     run_frontmatter(wd, provider=provider)
     run_structure(wd, flavor=flavor, provider=provider)
     run_assemble(wd)

@@ -33,10 +33,15 @@ _SECTION_HEADING_RE = re.compile(
     r"methods?|methodology|discussion|results|appendix|acknowledg\w*|preface)\b\s*$", re.I)
 
 
-def usable_title(title: str | None) -> bool:
-    """서지 조회에 쓸 만한 제목인지 (섹션 헤딩·너무 짧은 조각은 조회 자체를 막는다)."""
+def usable_title(title: str | None, *, min_words: int = MIN_TITLE_WORDS) -> bool:
+    """서지 조회에 쓸 만한 제목인지 (섹션 헤딩·너무 짧은 조각은 조회 자체를 막는다).
+
+    `min_words`를 낮출 수 있는 이유: 두 단어짜리 진짜 제목이 있다(실측: Risko & Gilbert의
+    "Cognitive Offloading"). 기본 3은 이 모듈의 게이트가 제목 유사도**만** 보기 때문에 두는
+    보수적인 값이고, 저자·연도로 교차 확인하는 쪽(§bibsource)은 2로 낮춰 부른다.
+    """
     t = re.sub(r"\s+", " ", str(title or "")).strip()
-    return (len(t) >= MIN_TITLE_LEN and len(t.split()) >= MIN_TITLE_WORDS
+    return (len(t) >= MIN_TITLE_LEN and len(t.split()) >= min_words
             and not _SECTION_HEADING_RE.match(t))
 
 # 논문 템플릿의 자리표시자 — 실제 학회·저널명이 아니다
@@ -201,24 +206,108 @@ def enrich_workdir(wd, *, mailto: str | None = None, client=None) -> list[str]: 
     return filled
 
 
-def enrich_many(roots, *, mailto: str | None = None, on_progress=None) -> dict:  # noqa: ANN001
-    """여러 논문을 순차 보강 (polite pool 예의상 간격을 둔다). 반환: 필드별 채운 수 + 논문 수."""
+def boost_workdir(wd, *, mailto: str | None = None, client=None,  # noqa: ANN001
+                  max_lookups: int = 60) -> dict:  # noqa: ANN001
+    """이 논문의 서지를 **온라인으로 할 수 있는 만큼** 좋게 만든다 — 세 가지를 한 번에.
+
+    예전에는 세 갈래가 따로 있었다(빈 연도·venue 채우기, 정확한 BibTeX 받기, 참고문헌 DOI 채우기).
+    사용자에게는 전부 "서지 정보를 온라인에서 보강한다" 하나이고, 셋 다 같은 API를 같은 순서로
+    두드리므로 **한 번에 묶는다** — 세 번 나눠 돌리면 레이트리밋에 세 번 부딪힐 뿐이다.
+
+    1. `paper_meta.json`의 **빈** 연도·venue 채우기 (여기, PDF가 진실원)
+    2. 출판 기록 받아 `bib_source.json`에 저장 (§bibsource — .bib 항목이 정확해진다)
+    3. `references.json`의 **빈** DOI·arXiv 채우기 (§cite.resolve — 인용이 링크가 된다)
+
+    반환: {"fields": [채운 paper_meta 필드], "record": bool, "refs": {…}, "retracted": bool}
+    """
+    from md4paper import bibsource
+    from md4paper.cite import resolve as cite_resolve
+
+    out: dict = {"fields": [], "record": False, "refs": {}, "retracted": False}
+    out["fields"] = enrich_workdir(wd, mailto=mailto, client=client)
+    try:
+        record = bibsource.update_workdir(wd, mailto=mailto, client=client)
+    except Exception:  # noqa: BLE001 — 한 단계가 죽어도 나머지는 해 둔다
+        record = None
+    out["record"] = record is not None
+    out["retracted"] = bool((record or {}).get("retracted"))
+    try:
+        out["refs"] = cite_resolve.update_workdir(wd, mailto=mailto, client=client,
+                                                  max_lookups=max_lookups)
+    except Exception:  # noqa: BLE001
+        out["refs"] = {}
+    return out
+
+
+ALL = "*"  # 모든 프로젝트를 뜻하는 표식. `projects.ALL`은 ''이라 '미분류'와 구별되지 않는다.
+
+
+def project_roots(project: str | None = None, workspace=None) -> list:  # noqa: ANN001
+    """이 프로젝트에 속한 논문들의 작업 디렉토리.
+
+    보강의 범위를 프로젝트로 잡는 이유: 사람은 한 번에 한 묶음을 손본다. 전체 작업 폴더를 훑으면
+    지금 쓰는 논문 20편을 고치려다 예전 프로젝트 100편까지 API를 두드리게 된다.
+
+    `project`: None이면 **홈에서 고른 프로젝트를 그대로 따른다**('모든 프로젝트'를 골라 뒀으면
+    전체, '미분류'면 미분류). `ALL`이면 전체, `""`나 `projects.NONE`이면 미분류, 그 밖에는 그 id.
+    """
+    from md4paper import config, projects
+    from md4paper.workdir import recent_workdirs
+
+    ws = workspace or config.resolve_workspace()
+    rows = recent_workdirs(ws, limit=100_000, include_hidden=True)
+    if project is None:  # 홈의 필터를 그대로 옮긴다
+        picked = projects.active()
+        project = ALL if picked == projects.ALL else \
+            ("" if picked == projects.NONE else picked)
+    if project == ALL:
+        return [r["root"] for r in rows]
+    want = "" if project in ("", projects.NONE) else projects.normalize(project)
+    return [r["root"] for r in rows if projects.normalize(r.get("project")) == want]
+
+
+class Stopped(Exception):
+    """사용자가 보강을 중간에 멈췄다 — 지금까지 한 것은 이미 저장돼 있다."""
+
+
+def enrich_many(roots, *, mailto: str | None = None, on_progress=None,  # noqa: ANN001
+                max_lookups: int = 60, should_stop=None) -> dict:  # noqa: ANN001
+    """여러 논문을 순차 보강 (polite pool 예의상 간격을 둔다). 반환: 무엇이 얼마나 좋아졌는지.
+
+    논문마다 `boost_workdir`의 세 단계를 모두 돈다. `should_stop()`이 참을 돌려주면 **논문 경계에서**
+    멈춘다 — 한 편의 중간에서 끊지 않으므로 반쯤 보강된 논문이 남지 않는다. 멈춰도 지금까지
+    보강한 것은 이미 파일에 저장돼 있고, 반환값의 `stopped`가 True가 된다.
+    """
     import time
 
     import httpx
 
     from md4paper.workdir import WorkDir
 
-    counts = {"papers": 0, "year": 0, "venue": 0, "checked": 0}
+    roots = list(roots)
+    counts = {"checked": 0, "total": len(roots), "papers": 0, "year": 0, "venue": 0,
+              "records": 0, "refs_filled": 0, "refs_skipped": 0, "retracted": [], "stopped": False}
     with httpx.Client(follow_redirects=True) as client:
         for root in roots:
+            if should_stop is not None and should_stop():
+                counts["stopped"] = True
+                break
             counts["checked"] += 1
-            filled = enrich_workdir(WorkDir(root), mailto=mailto, client=client)
-            if filled:
+            got = boost_workdir(WorkDir(root), mailto=mailto, client=client,
+                                max_lookups=max_lookups)
+            for f in got["fields"]:
+                counts[f] = counts.get(f, 0) + 1
+            counts["records"] += 1 if got["record"] else 0
+            counts["refs_filled"] += got["refs"].get("filled", 0)
+            counts["refs_skipped"] += got["refs"].get("skipped", 0)
+            if got["retracted"]:
+                counts["retracted"].append(str(root))
+            if got["fields"] or got["record"] or got["refs"].get("filled"):
                 counts["papers"] += 1
-                for f in filled:
-                    counts[f] = counts.get(f, 0) + 1
             if on_progress:
-                on_progress(counts["checked"], root, filled)
+                try:  # 표시가 실패해도 보강 자체는 계속된다 (UI 위젯 오류로 전체가 죽지 않게)
+                    on_progress(counts["checked"], root, got)
+                except Exception:  # noqa: BLE001
+                    pass
             time.sleep(0.15)  # 초당 10건 제한(polite pool) 아래로
     return counts

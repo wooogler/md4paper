@@ -42,3 +42,28 @@ class OpenAIProvider(Provider):
         if parsed is None:
             raise RuntimeError("OpenAI 구조화 출력 파싱 실패 (거부 또는 스키마 불일치)")
         return parsed
+
+    def parse_image(
+        self, system: str, user: str, images: list[bytes], schema: type[T],
+        *, max_tokens: int = 4096,
+    ) -> T:
+        import base64
+
+        content: list[dict] = [
+            {"type": "input_image",
+             "image_url": f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"}
+            for png in images
+        ]
+        content.append({"type": "input_text", "text": user})
+        resp = self._client.responses.parse(
+            model=self.model,
+            instructions=system,
+            input=[{"role": "user", "content": content}],
+            text_format=schema,
+            max_output_tokens=max_tokens,
+        )
+        self._track(resp)
+        parsed = resp.output_parsed
+        if parsed is None:
+            raise RuntimeError("OpenAI 구조화 출력 파싱 실패 (거부 또는 스키마 불일치)")
+        return parsed

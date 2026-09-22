@@ -581,3 +581,86 @@ def test_pullable_groups_by_index_not_listing_order():
     blocks[11] = "The abstract text continues here."
     assert fm._pullable(blocks, [10, 4, 11], 5, allow=True) == {10, 11}
     assert fm._pullable(blocks, [10, 4, 11], 5) == set()  # 게이트가 꺼져 있으면 그대로 no-op
+
+
+# --- 본문 뒤로 밀려난 저자 조각 되찾기 -------------------------------------
+# 다열 저자 그리드를 추출기가 열 우선으로 읽으면 마지막 열이 본문 첫 문단 뒤까지 밀려난다.
+# 이 페이지가 통째로 깨지던 조판(ACM 3열 그리드).
+SPILLED = (
+    "## A Large-Scale Behavioral Analysis\n\n"                               # 0 title
+    "## [Ningzhi Tang](https://orcid.org/1)\n\n"                             # 1
+    "University of Notre Dame Notre Dame, IN, USA ntang@nd.edu\n\n"          # 2
+    "## Abstract\n\n"                                                        # 3
+    "The abstract body is real content.\n\n"                                 # 4
+    "## 1 Introduction\n\n"                                                  # 5 body start
+    "IDE-integrated AI assistants have evolved beyond autocomplete.\n\n"     # 6 body
+    "## [Zihan Fang](https://orcid.org/2)\n\n"                               # 7 author, 본문 뒤
+    "Vanderbilt University Nashville, TN, USA\n\n"                           # 8 소속만
+    "[zihan.fang@vanderbilt.edu](mailto:zihan.fang@vanderbilt.edu)\n\n"      # 9 이메일만
+    "[Toby Jia-Jun Li](https://orcid.org/3)\n\n"                             # 10 이름만
+    "University of Notre Dame Notre Dame, IN, USA toby.j.li@nd.edu "         # 11 소속+본문 뭉침
+    "for designing more effective next-generation assistants. Currently, "
+    "the empirical evidence is constrained in two complementary ways.\n\n"
+    "First, existing studies lack either scale or ecological validity.\n"    # 12 body
+)
+_SPILLED_LAYOUT = FrontMatterLayout(
+    title=0, authors=[1, 2, 7, 8, 9, 10, 11], sections=[3, 4], body_start=5)
+
+
+def test_llm_layout_valid_with_authors_after_body_start():
+    """저자 블록이 본문 시작 뒤에 있다고 레이아웃 전체를 버리면 안 된다.
+
+    버리면 제목·저자 라벨까지 함께 버려져 규칙 폴백으로 떨어지고, 첫 페이지가 통째로
+    깨진 채(저자 흩어짐·소속 조각 잔류·authors.json 없음) 남았다.
+    """
+    assert fm._valid(_SPILLED_LAYOUT, 13, 13)
+
+
+def test_llm_pulls_spilled_authors_and_leaves_body_prose():
+    out = fm.normalize_llm(_fake(_SPILLED_LAYOUT), SPILLED)
+    front, body = out.split("## 1 Introduction")
+    for who in ("Ningzhi Tang", "Zihan Fang", "Toby Jia-Jun Li"):
+        assert who in front, who
+    # 저자 조각은 본문에서 사라지고
+    assert "zihan.fang@vanderbilt.edu" not in body
+    assert "toby.j.li@nd.edu" not in body
+    assert "Vanderbilt University" not in body
+    # 뭉쳐 있던 본문 문장은 본문에 그대로 남는다
+    assert "for designing more effective next-generation assistants." in body
+    assert "First, existing studies lack either scale" in body
+    assert "The abstract body is real content." in front
+
+
+def test_author_meta_span_splits_only_a_real_prose_tail():
+    """이메일 뒤 꼬리가 본문 문장일 때만 가른다 — 마크다운 링크 꼬리는 메타의 일부."""
+    assert fm._author_meta_span("## [Zihan Fang](https://orcid.org/2)") == (
+        "## [Zihan Fang](https://orcid.org/2)", "")
+    assert fm._author_meta_span("[a@b.edu](mailto:a@b.edu)")[1] == ""
+    head, rest = fm._author_meta_span(
+        "University of Notre Dame Notre Dame, IN, USA toby.j.li@nd.edu "
+        "for designing more effective next-generation assistants. Currently, the "
+        "empirical evidence is constrained in two complementary ways.")
+    assert head.endswith("toby.j.li@nd.edu") and rest.startswith("for designing")
+    # 본문 문단은 저자 메타가 아니다 (이메일이 나와도)
+    assert fm._author_meta_span(
+        "We asked participants to write to study@example.edu before the second session, "
+        "and then analyzed the resulting messages in detail across every condition.") is None
+    assert fm._author_meta_span("This shift indicates that conversational programming grows.") is None
+
+
+def test_author_tail_end_is_noop_on_a_clean_body():
+    blocks = fm._split_blocks(SPILLED)
+    assert fm._author_tail_end(blocks, 5) == 12          # 11번 블록까지 저자 조각
+    clean = ["## T", "Jane Doe, University X, jane@x.edu", "## 1 Introduction",
+             "Real body text that goes on and on about the method.", "More body text."]
+    assert fm._author_tail_end(clean, 2) == 2            # 넓히지 않는다
+
+
+def test_citation_line_fixes_column_major_author_order():
+    """열 우선으로 읽힌 그리드의 저자 순서는 인용 상용구 한 줄이 바로잡는다."""
+    from md4paper.ir import AuthorEntry
+
+    entries = [AuthorEntry(name=n) for n in ("Tang", "Xu", "McMillan", "Chen")]
+    cite = ["Tang, Chen, Xu, and McMillan. 2026. Programming by Chat. In ASE '26."]
+    assert [e.name for e in fm._citation_order(entries, cite)] == ["Tang", "Chen", "Xu", "McMillan"]
+    assert fm._citation_order(entries, ["Tang, Chen, and Xu. 2026."]) is None  # 전원이 없으면 안 쓴다
