@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 from md4paper.extract import formulas as formula_regions
+from md4paper.extract import spacing
 from md4paper.extract.reading_order import export_geometry, repair_reading_order
 from md4paper.extract.text_clean import ExtractError, rewrite_image_refs
 from md4paper.workdir import WorkDir
@@ -1031,6 +1032,18 @@ def _place_captions(
     return "\n".join(out)
 
 
+def _restore_heading_spaces(wd: WorkDir, ref) -> None:  # noqa: ANN001 — spacing.Reference
+    """headings.json의 헤딩 텍스트에도 공백 복원 — structure가 raw.md 헤딩과 텍스트로 맞춰 페이지를 찾는다."""
+    import json
+
+    if not wd.headings_json.exists():
+        return
+    items = json.loads(wd.headings_json.read_text(encoding="utf-8"))
+    for it in items:
+        it["text"] = spacing.restore_spaces(it.get("text") or "", ref)[0]
+    wd.headings_json.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _save_heading_pages(document, wd: WorkDir) -> int:  # noqa: ANN001 — DoclingDocument
     """헤더별 원본 PDF 페이지/세로위치를 저장 (섹션 클릭 → PDF 해당 페이지 대조용).
 
@@ -1111,6 +1124,11 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         md = _split_author_block(md)  # 2단 저자 블록(한 줄)을 저자별로 분리
         md = _strip_contact_footer(md)  # 본문에 흘러든 'Corresponding author' 연락처 블록 제거
         md = _join_broken_paragraphs(md, geom, join_stats)  # 컬럼/footer로 끊긴 문단 재결합(기하 확인)
+        # 붙어 나온 줄("BackgroundandRelatedWork") — 원본 텍스트 레이어의 띄어쓰기로 되돌린다
+        space_ref = spacing.Reference.from_pdf(source)
+        md, join_stats["spaces_restored"] = spacing.restore_spaces(md, space_ref)
+        if join_stats["spaces_restored"]:
+            _restore_heading_spaces(wd, space_ref)  # headings.json도 같은 텍스트로 (페이지 매칭 키)
         md = _place_author_notes(md, author_notes)  # 저자 주석(∗ …)은 앞부분에 (문서 끝 각주 아님)
         # 각주: 본문 마커를 위첨자 링크로, 내용은 문서 끝 목록 + 구조화 저장(호버 툴팁용)
         if footnotes:
