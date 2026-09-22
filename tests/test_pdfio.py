@@ -69,3 +69,57 @@ def test_concurrent_render_all_succeed(sample_pdf):
 
     assert len(pngs) == 24
     assert all(p is not None and p[:8] == b"\x89PNG\r\n\x1a\n" for p in pngs)
+
+
+def _hand_pdf(content: bytes) -> bytes:
+    """Helvetica 하나로 된 한 쪽짜리 PDF를 손으로 조립한다 (xref 오프셋 정확)."""
+    import io
+
+    objs = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] "
+        b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length %d >>stream\n" % len(content) + content + b"\nendstream",
+    ]
+    out = io.BytesIO()
+    out.write(b"%PDF-1.4\n")
+    offs = []
+    for i, o in enumerate(objs, 1):
+        offs.append(out.tell())
+        out.write(b"%d 0 obj\n" % i + o + b"\nendobj\n")
+    xref = out.tell()
+    out.write(b"xref\n0 %d\n0000000000 65535 f \n" % (len(objs) + 1))
+    for o in offs:
+        out.write(b"%010d 00000 n \n" % o)
+    out.write(b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objs) + 1, xref))
+    return out.getvalue()
+
+
+def test_superscript_marks_reads_raised_small_digits_only(tmp_path):
+    """위첨자 각주 마커(작고 올라간 숫자)만 잡는다 — 본문 크기의 '7', 아래첨자 H₂, 큰 수 11,579, 각주 정의 줄은 제외.
+
+    Docling은 위첨자를 평문으로 눕혀 "Cursor 2"와 "7 main categories"를 구분 못 한다. 원본 PDF의
+    글자 크기·기준선이 그 구분의 유일한 증거다.
+    """
+    pytest.importorskip("pypdfium2")
+    content = (
+        b"BT /F1 9 Tf 20 250 Td (IDE assistants such as GitHub Copilot and Cursor) Tj "
+        b"/F1 6.6 Tf 3 Ts (2) Tj 0 Ts /F1 9 Tf ( have evolved beyond autocomplete.) Tj ET\n"
+        b"BT /F1 9 Tf 20 230 Td (We found 7 main categories across 11,579 sessions and H) Tj "
+        b"/F1 6.6 Tf -2 Ts (2) Tj 0 Ts /F1 9 Tf (O molecules.) Tj ET\n"
+        b"BT /F1 5.5 Tf 20 20 Td (2 https://cursor.com/) Tj ET"
+    )
+    path = tmp_path / "sup.pdf"
+    path.write_bytes(_hand_pdf(content))
+
+    marks = pdfio.superscript_marks(path)
+
+    assert [m["num"] for m in marks] == [2]
+    assert marks[0]["before"].endswith("Cursor")
+    assert marks[0]["page"] == 1
+
+
+def test_superscript_marks_empty_on_pages_without_text(sample_pdf):
+    assert pdfio.superscript_marks(sample_pdf) == []

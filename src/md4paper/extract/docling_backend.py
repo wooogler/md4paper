@@ -309,15 +309,60 @@ def _split_at_references(md: str) -> tuple[str, str]:
     return md, ""
 
 
-def _linkify_footnote_markers(body: str, ids: set[int]) -> str:
+def _sup_link(num: int) -> str:
+    return f'<sup class="md-fn"><a href="#fn-{num}">{num}</a></sup>'
+
+
+def _mark_anchor_words(before: str) -> list[str]:
+    """PDF 위첨자 마커 앞 텍스트에서 본문을 뒤질 열쇠 후보(뒤 단어부터, 넉넉한 것 → 짧은 것)."""
+    before = re.sub(r"[\x00-\x1f]", "", before)  # pdfium이 줄바꿈 하이픈 자리에 두는 제어문자(\x02)
+    toks = before.split()
+    if not toks:
+        return []
+    last = toks[-1]
+    # "Kit10 and Amazon Kiro"처럼 앞 마커 숫자가 단어에 붙어 있으면 그 단어는 열쇠로 못 쓴다
+    cands = [" ".join(toks[-2:]), last] if len(toks) >= 2 and not re.search(r"\d$", toks[-2]) else [last]
+    stripped = last.strip("()[]{}.,;:'\"")
+    if stripped and stripped != last:
+        cands.append(stripped)
+    return [c for c in dict.fromkeys(cands) if c]
+
+
+def _linkify_by_evidence(body: str, ids: set[int], marks: list[dict]) -> str:
+    """PDF에서 읽은 위첨자 증거(글자 크기·기준선)로만 링크한다 — 텍스트 추측 없음.
+
+    마커마다 바로 앞 단어를 열쇠로 본문에서 "단어 + 공백 + 번호"를 찾아 그 한 자리만 바꾼다.
+    증거 없는 번호는 링크하지 않는다(내용은 목록에 남는다). "13 turns"의 13이 각주 13이 되고
+    진짜 자리 "GitHub 13"이 영영 비던 일이 여기서 끝난다.
+    """
+    used: set[int] = set()
+    for mk in marks:
+        num = mk["num"]
+        if num not in ids or num in used:
+            continue
+        for key in _mark_anchor_words(mk.get("before", "")):
+            pat = re.compile(re.escape(key) + r"[ ]+" + str(num) + r"(?=[ \n)(]|[.,;:]|$)")
+            m = pat.search(body)
+            if m:
+                body = body[:m.start()] + key + " " + _sup_link(num) + body[m.end():]
+                used.add(num)
+                break
+    return body
+
+
+def _linkify_footnote_markers(body: str, ids: set[int], marks: list[dict] | None = None) -> str:
     """본문의 각주 마커 숫자를 위첨자 링크(<sup><a href="#fn-N">N</a></sup>)로 바꾼다.
 
+    PDF 위첨자 증거(`marks`, pdfio.superscript_marks)가 있으면 그것만 믿는다. 없으면(텍스트
+    레이어 없음·pypdfium2 없음) 텍스트 휴리스틱으로 물러난다:
     보수적: 아는 각주 번호이고, 앞이 문장부호/단어 끝이며, 그림·표·절 참조 라벨 뒤가 아니고,
     대괄호 인용/연도/큰 수의 일부가 아닌 경우에만 링크. 애매하면 그대로 둔다(내용은 목록에 보존).
     각 번호는 첫 유효 출현 1회만 링크.
     """
     if not ids:
         return body
+    if marks:
+        return _linkify_by_evidence(body, ids, marks)
     used: set[int] = set()
 
     def repl(m: re.Match) -> str:
@@ -336,20 +381,67 @@ def _linkify_footnote_markers(body: str, ids: set[int]) -> str:
         if wm and wm.group(1).lower() in _FN_ABBR:
             return m.group(0)
         used.add(num)
-        return f'{pre} <sup class="md-fn"><a href="#fn-{num}">{num}</a></sup>'
+        return f"{pre} {_sup_link(num)}"
 
     return _FN_MARK_RE.sub(repl, body)
 
 
-def _apply_footnotes(md: str, footnotes: list[str]) -> tuple[str, dict[str, str]]:
+# 본문에 새어 든 각주 정의 — Docling이 URL 각주를 하이퍼링크 문단으로 export한 것.
+# "[3 https://techcrunch.com/…-cohort-](https://techcrunch.com/…full…)" 꼴(링크 텍스트는 줄 끝에서
+# 끊긴 URL, 링크 대상은 온전한 URL) 또는 맨 "3 https://…". 뒤따르는 같은 대상의 링크 문단은
+# 끊긴 URL의 나머지 줄이다.
+_LEAKED_FN_RE = re.compile(
+    r"^\[?(?P<num>\d{1,2})\s+(?P<text>https?://\S[^\]]*)\]?(?:\((?P<url>https?://\S+)\))?\s*$")
+_LINK_PARA_RE = re.compile(r"^\[(?P<text>[^\]]*)\]\((?P<url>https?://\S+)\)\s*$")
+
+
+def _rescue_leaked_footnotes(body: str, ids: set[int], marks: list[dict] | None) -> tuple[str, list[tuple[int, str]]]:
+    """본문 문단으로 새어 든 'N https://…' 각주 정의를 걷어 (본문, [(N, 내용)])로 돌려준다.
+
+    위첨자 증거가 있으면 그 번호의 마커가 실제로 본문에 있는 N만 걷는다(문단 첫머리의 숫자가 우연히
+    URL 앞에 온 경우와 구분). 이미 목록에 있는 번호는 건드리지 않는다.
+    """
+    paras = body.split("\n\n")
+    marked = {m["num"] for m in marks} if marks else None
+    found: list[tuple[int, str]] = []
+    out: list[str] = []
+    i = 0
+    while i < len(paras):
+        m = _LEAKED_FN_RE.match(paras[i].strip())
+        if m:
+            num = int(m.group("num"))
+            if num not in ids and (marked is None or num in marked):
+                url = m.group("url") or m.group("text").strip()
+                # 다음 문단이 같은 URL로 가는 링크(끊긴 나머지 줄)면 함께 걷는다
+                while i + 1 < len(paras):
+                    nm = _LINK_PARA_RE.match(paras[i + 1].strip())
+                    if nm and nm.group("url") == m.group("url"):
+                        i += 1
+                        continue
+                    break
+                found.append((num, url))
+                ids.add(num)
+                i += 1
+                continue
+        out.append(paras[i])
+        i += 1
+    return "\n\n".join(out), found
+
+
+def _apply_footnotes(md: str, footnotes: list[str],
+                     marks: list[dict] | None = None) -> tuple[str, dict[str, str]]:
     """본문 마커를 위첨자 링크로 치환 + 문서 끝에 각주 목록(앵커 포함) 추가.
 
+    `marks`: PDF에서 읽은 위첨자 마커 증거(pdfio.superscript_marks). 있으면 링크 자리는 그것만 따른다.
     반환: (갱신된 md, {번호: 내용} 툴팁용 맵). 번호 없는 각주는 링크 못 하지만 목록엔 남긴다.
     """
     items = _parse_footnotes(footnotes)
     ids = {i for i, _ in items if i is not None}
     before, after = _split_at_references(md)
-    before = _linkify_footnote_markers(before, ids)
+    before, leaked = _rescue_leaked_footnotes(before, ids, marks)
+    if leaked:
+        items = sorted(items + leaked, key=lambda t: (t[0] is None, t[0] or 0))
+    before = _linkify_footnote_markers(before, ids, marks)
     md = before + ("\n" + after if after else "")
     # 각주 목록 — 각 항목에 #fn-N 앵커(클릭 점프 대비). 툴팁이 주 UX지만 목록도 남긴다.
     lines: list[str] = []
@@ -1024,7 +1116,13 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         if footnotes:
             import json as _json
 
-            md, fn_tips = _apply_footnotes(md, footnotes)
+            from md4paper import pdfio
+
+            try:  # 위첨자 증거 — 텍스트 추측 대신 원본의 글자 크기·기준선으로 마커 자리를 잡는다
+                fn_marks = pdfio.superscript_marks(source)
+            except Exception:  # noqa: BLE001 — 증거를 못 읽으면 텍스트 휴리스틱으로
+                fn_marks = []
+            md, fn_tips = _apply_footnotes(md, footnotes, fn_marks)
             if fn_tips:
                 wd.footnotes_json.write_text(
                     _json.dumps(fn_tips, ensure_ascii=False, indent=2), encoding="utf-8")

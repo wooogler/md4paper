@@ -736,3 +736,75 @@ def test_apply_footnotes_skips_section_numbers_and_labels():
 
     assert "## 3 Introduction" in out and "(Finding 3)" in out
     assert 'it. <sup class="md-fn"><a href="#fn-3">3</a></sup>' in out
+
+
+def test_apply_footnotes_follows_superscript_evidence_not_text_guessing():
+    """PDF 위첨자 증거가 있으면 그 자리에만 링크한다.
+
+    실제 사례(ASE '26 논문): 텍스트만 보던 매처는 "comprising 7 main categories"의 7과
+    "(1.43; 25.01%; 13 turns)"의 13을 각주로 잡아, 진짜 자리인 "Search API 7"과 "GitHub 13"은
+    영영 링크되지 않았다. 증거 기반이면 앞 단어를 열쇠로 그 자리를 찍는다.
+    """
+    from md4paper.extract.docling_backend import _apply_footnotes
+
+    md = (
+        "We built a taxonomy comprising 7 main categories. We queried the GitHub Code Search API 7 "
+        "over histories.\n\n"
+        "Log Paste (1.43; 25.01%; 13 turns) was common. Code is available on GitHub 13 and archived.\n\n"
+        "Tools such as GitHub Spec Kit 10 and Amazon Kiro 11 treat specs as artifacts. "
+        "We never cite footnote 12 in the body.\n"
+    )
+    marks = [
+        {"num": 7, "before": ", we queried the  GitHub Code Search API", "page": 3},
+        {"num": 13, "before": "ll analysis code, is available on GitHub", "page": 11},
+        {"num": 10, "before": "elopment:  tools such as GitHub Spec Kit", "page": 10},
+        {"num": 11, "before": "uch as GitHub Spec Kit10 and Amazon Kiro", "page": 10},  # 앞 마커가 단어에 붙은 꼴
+    ]
+    notes = ["7 https://docs.github.com/search", "13 https://github.com/x/y",
+             "10 https://spec-kit", "11 https://kiro", "12 https://cursorbench"]
+    out, tips = _apply_footnotes(md, notes, marks)
+
+    assert "comprising 7 main categories" in out
+    assert "25.01%; 13 turns" in out
+    assert 'Search API <sup class="md-fn"><a href="#fn-7">7</a></sup> over' in out
+    assert 'on GitHub <sup class="md-fn"><a href="#fn-13">13</a></sup> and' in out
+    assert 'Spec Kit <sup class="md-fn"><a href="#fn-10">10</a></sup> and Amazon Kiro ' \
+           '<sup class="md-fn"><a href="#fn-11">11</a></sup> treat' in out
+    assert "footnote 12 in the body" in out  # 증거 없는 번호는 추측하지 않는다
+    assert tips["12"] == "https://cursorbench"  # 목록에는 남는다
+
+
+def test_apply_footnotes_without_evidence_falls_back_to_text_heuristic():
+    from md4paper.extract.docling_backend import _apply_footnotes
+
+    out, _ = _apply_footnotes("See Cursor 2 today.\n", ["2 https://cursor.com/"], marks=[])
+    assert 'Cursor <sup class="md-fn"><a href="#fn-2">2</a></sup>' in out
+
+
+def test_apply_footnotes_rescues_definition_leaked_into_body():
+    """Docling이 URL 각주를 본문 하이퍼링크 문단으로 내보낸 경우 — 목록으로 되돌리고 온전한 URL을 쓴다.
+
+    링크 텍스트는 줄 끝에서 끊긴 URL 조각 두 문단이고 링크 대상만 온전하다. 위첨자 증거가 그 번호를
+    가리킬 때만 걷는다(문단 첫머리 숫자의 우연한 일치와 구분).
+    """
+    from md4paper.extract.docling_backend import _apply_footnotes
+
+    full = "https://techcrunch.com/2025/03/06/a-quarter-of-startups-have-ai-codebases/"
+    md = (
+        "Some codebases are now 95% AI-generated 3 . This shift matters.\n\n"
+        f"[3 https://techcrunch.com/2025/03/06/a-quarter-of- startups-]({full})\n\n"
+        f"[have- ai-codebases/]({full})\n\n"
+        "Next paragraph of the body.\n"
+    )
+    marks = [{"num": 3, "before": " some codebases are now 95% AI-generated", "page": 1}]
+    out, tips = _apply_footnotes(md, ["1 https://github.com/features/copilot"], marks)
+
+    assert tips["3"] == full
+    assert 'AI-generated <sup class="md-fn"><a href="#fn-3">3</a></sup> .' in out
+    body = out.split("## Footnotes")[0]
+    assert "techcrunch" not in body and "[have-" not in body
+    assert "Next paragraph of the body." in body
+    assert '<a id="fn-3"></a>**3.** ' + full in out
+    # 증거가 다른 번호면 걷지 않는다 (우연한 숫자+URL 문단)
+    out2, tips2 = _apply_footnotes(md, ["1 https://x"], [{"num": 1, "before": "foo", "page": 1}])
+    assert "3" not in tips2 and "techcrunch" in out2.split("## Footnotes")[0]
