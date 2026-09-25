@@ -14,8 +14,8 @@ class Out(BaseModel):
 
 def test_cost_usd():
     u = Usage(input_tokens=1_000_000, output_tokens=1_000_000)
-    # gpt-5.6-luna = $0.2/$1.2
-    assert cost_usd("gpt-5.6-luna", u) == pytest.approx(1.4)
+    # gpt-6-luna = $0.1/$0.5
+    assert cost_usd("gpt-6-luna", u) == pytest.approx(0.6)
     # 미등록 모델은 0
     assert cost_usd("unknown-model", u) == 0.0
 
@@ -23,7 +23,7 @@ def test_cost_usd():
 def test_get_provider_dispatch():
     # 실제 네트워크 호출 없이 인스턴스 생성만 확인 (더미 키)
     for name, model in [
-        ("openai", "gpt-5.6-luna"),
+        ("openai", "gpt-6-luna"),
         ("anthropic", "claude-sonnet-5"),
         ("gemini", "gemini-3.1-pro-preview"),
     ]:

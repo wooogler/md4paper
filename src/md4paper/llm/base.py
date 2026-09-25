@@ -14,14 +14,18 @@ from pydantic import BaseModel
 
 T = TypeVar("T", bound=BaseModel)
 
-# $/1M 토큰 (input, output) — 2026-08 기준. 인트로 가격/변동 있으니 재검증 대상.
+# $/1M 토큰 (input, output) — 2026-08 기준(GPT-6은 2026-09). 인트로 가격/변동 있으니 재검증 대상.
+# GPT-6은 표준 티어·272K 이하 프롬프트 기준(그보다 긴 프롬프트는 단가가 다름).
 # 2026-07-30 OpenAI 인하: luna $1/$6 → $0.2/$1.2, terra $2.5/$15 → $2/$12 (sol은 그대로).
-# 캐시된 입력(luna $0.02, terra $0.2)은 모델링하지 않으므로 캐시 히트 시 실제보다 과대 추정된다.
+# 캐시된 입력(gpt-6-luna $0.01, gpt-6-sol $0.2)은 모델링하지 않으므로 캐시 히트 시 실제보다 과대 추정된다.
 # gemini-3.1-flash-lite는 gemini-2.5-flash-lite 가격($0.1/$0.4)을 잘못 적어둔 것을 바로잡음.
 # gemini는 표준 티어·텍스트 입력 기준(오디오 입력, 200k 초과 프롬프트는 단가가 다름).
 # claude-sonnet-5는 표준가 기준 — 2026-08-31까지는 인트로 $2/$10이라 그동안은 과대 추정된다.
 # MODEL_TIERS에서 빠진 모델도 남겨둔다: --model로 직접 고를 수 있고, 미등록이면 비용이 0으로 나온다.
 PRICING: dict[str, tuple[float, float]] = {
+    "gpt-6-luna": (0.1, 0.5),
+    "gpt-6-sol": (2.0, 10.0),
+    "gpt-6-astra": (10.0, 50.0),
     "gpt-5.6-luna": (0.2, 1.2),
     "gpt-5.6-terra": (2.0, 12.0),
     "gpt-5.6-sol": (5.0, 30.0),

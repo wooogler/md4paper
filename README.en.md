@@ -734,7 +734,7 @@ Or environment variables — recommended on a shared computer:
 
 | Provider | Environment variable | Default model |
 |---|---|---|
-| OpenAI | `OPENAI_API_KEY` | `gpt-5.6-luna` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-6-luna` |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-haiku-4-5` |
 | Google Gemini | `GEMINI_API_KEY` | `gemini-3.5-flash-lite` |
 
@@ -751,16 +751,20 @@ Papers with equations add formula reading, at roughly $0.0005 per formula — a 
 
 **Measured**: *Attention Is All You Need* (15 pages, 49k characters of body text), the paper used
 for this README's screenshots, with **automatic glossary generation + full translation** on the
-default model `gpt-5.6-luna`, cost — as reported by the tool itself — **$0.031** (15 chunks). Cost
+then-default model `gpt-5.6-luna`, cost — as reported by the tool itself — **$0.031** (15 chunks). Cost
 is close to linear in body length, so:
 
-| Paper | Default `gpt-5.6-luna` |
+| Paper | `gpt-5.6-luna` (then default) |
 |---|---|
 | Short paper (~50k chars of body) — **measured** | **$0.031** |
 | Typical conference paper (~70k chars) | ~$0.04 |
 | Long paper with appendices (~240k chars) | ~$0.14 |
 
 Add reference parsing (citation links) on top and it's another $0.01–0.02 per paper.
+
+The current default, `gpt-6-luna`, is $0.1/$0.5 per 1M tokens — half the input price and about 42%
+of the output price of `gpt-5.6-luna` — so the same paper should come to **roughly half** the
+figures above (short paper ~$0.013–0.016). This hasn't been re-measured on `gpt-6-luna` yet.
 
 **The viewer chatbot** sends eight retrieved paragraphs and a few recent turns per question, not the
 whole paper, so it is far smaller than a translation — the exact figure is printed with each answer,

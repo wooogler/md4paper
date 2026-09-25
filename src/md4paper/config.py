@@ -19,14 +19,15 @@ CONFIG_PATH = CONFIG_DIR / "config.toml"
 PROVIDERS = ("openai", "anthropic", "gemini")
 
 # 제공사별 모델 — 토큰당 가격 오름차순(저렴 → 비쌈). 기본값은 가장 저렴한 tier(GPT luna 급).
+# openai는 GPT-6 세대(luna < sol < astra). 5.6 세대도 --model로는 계속 고를 수 있다.
 # 각 사의 최신 세대만 싣는다. gemini 최저가 티어는 3.1-flash-lite($0.25/$1.5)가 더 싸지만
 # 최신인 3.5-flash-lite를 쓴다 — 구형도 --model로는 계속 고를 수 있다(PRICING에 단가 유지).
 MODEL_TIERS = {
-    "openai": ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"),
+    "openai": ("gpt-6-luna", "gpt-6-sol", "gpt-6-astra"),
     "anthropic": ("claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"),
     "gemini": ("gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-pro-preview"),
 }
-# 내장 기본값 (사용자 선호: openai / gpt-5.6-luna). 각 제공사의 가장 저렴한 tier를 기본으로.
+# 내장 기본값 (사용자 선호: openai / gpt-6-luna). 각 제공사의 가장 저렴한 tier를 기본으로.
 DEFAULT_PROVIDER = "openai"
 DEFAULT_MODELS = {p: tiers[0] for p, tiers in MODEL_TIERS.items()}
 ENV_VARS = {

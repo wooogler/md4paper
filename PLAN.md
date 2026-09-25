@@ -153,7 +153,7 @@ md4paper library [--en|--ko|--pdf DIR] [--off en|ko|pdf|all] [--export]  # 결�
 md4paper naming [TEMPLATE] [--apply] [--reset]   # 파일 이름 규칙({year}_{title}_{author}) 조회/설정/일괄 정리 (§11)
 ```
 
-프로바이더/모델 해석 순서: CLI 플래그(`--provider`/`--model`) → `config.toml`의 기본값 → **내장 기본(openai / `gpt-5.6-luna`)**. 키 조회 순서: env 변수(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `config.toml`. Gemini는 `GOOGLE_API_KEY` 우선순위 함정을 피하려 키를 클라이언트에 **명시적으로** 전달.
+프로바이더/모델 해석 순서: CLI 플래그(`--provider`/`--model`) → `config.toml`의 기본값 → **내장 기본(openai / `gpt-6-luna`)**. 키 조회 순서: env 변수(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `config.toml`. Gemini는 `GOOGLE_API_KEY` 우선순위 함정을 피하려 키를 클라이언트에 **명시적으로** 전달.
 
 ## 4. 기술 스택 (선정 이유 포함)
 
@@ -166,7 +166,7 @@ md4paper naming [TEMPLATE] [--apply] [--reset]   # 파일 이름 규칙({year}_{
 | pydantic v2 | manifest 검증 + 모든 JSON 아티팩트 스키마 + 3사 공통 structured-output 스키마 삼역 |
 | markdown-it-py | 파서 기반 청킹·구조 diff 검증 (정규식 청킹은 펜스 블록을 깨뜨린 전례 다수) |
 | **LLM: 손수 만든 ~150줄 어댑터** over `anthropic` + `openai`(v2, Responses API) + `google-genai`(통합 SDK) | 프로바이더 3개 × 연산 2개(`complete`/`parse`)뿐이라 얇은 Protocol이 정답. 세 SDK 모두 pydantic 모델을 직접 받아 파싱 인스턴스 반환(`messages.parse` / `responses.parse` / `response_schema`), 프로바이더별 노브(캐시·thinking)도 그대로 노출. **LiteLLM 제외**(무거운 의존성 + 2026-03 PyPI 공급망 사고), pydantic-ai는 폴백 후보 |
-| 기본 모델 (사용자 선택) | **기본 openai `gpt-5.6-luna`($0.2/$1.2, 2026-07-30 인하 전 $1/$6 — 최저가 티어, 사용자 선호)**; 대안 openai `gpt-5.6-terra`($2/$12, 인하 전 $2.5/$15) · anthropic `claude-haiku-4-5`($1/$5)·`claude-sonnet-5`($3/$15, 2026-08-31까지 인트로 $2/$10)·`claude-opus-5`(고품질, $5/$25) · gemini `gemini-3.5-flash-lite`($0.3/$2.5)·`gemini-3.6-flash`($1.5/$7.5)·`gemini-3.1-pro-preview`($2/$12). EN→KO는 2026 벤치에서 우열이 뚜렷치 않아 사용자 선택으로 둠 |
+| 기본 모델 (사용자 선택) | **기본 openai `gpt-6-luna`($0.1/$0.5, 2026-09 GPT-6 세대로 교체 — 최저가 티어, 사용자 선호)**; 대안 openai `gpt-6-sol`($2/$10)·`gpt-6-astra`($10/$50) · anthropic `claude-haiku-4-5`($1/$5)·`claude-sonnet-5`($3/$15, 2026-08-31까지 인트로 $2/$10)·`claude-opus-5`(고품질, $5/$25) · gemini `gemini-3.5-flash-lite`($0.3/$2.5)·`gemini-3.6-flash`($1.5/$7.5)·`gemini-3.1-pro-preview`($2/$12). EN→KO는 2026 벤치에서 우열이 뚜렷치 않아 사용자 선택으로 둠 |
 | 키 관리 | env 변수 우선(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `~/.config/md4paper/config.toml`(0600, `md4paper keys set`). simonw/llm·aider 관행을 따르고 OS keyring은 제외(의존성·헤드리스 마찰). Gemini는 키를 클라이언트에 명시 전달(`GOOGLE_API_KEY` 우선순위 함정 회피) |
 | **NiceGUI ≥3.14 (MIT)** | 로컬 웹 UI. FastAPI+Vue/Quasar가 wheel에 번들 → **Node·빌드 스텝 0**, `uv add nicegui`가 패키징 전부. 마크다운+KaTeX 내장, 웹소켓으로 `watchfiles` 파일 감시 간단, FastAPI라서 향후 JSON 엔드포인트 확장 자유. 필요 시 FastAPI+SPA로 탈출로 존재(밑이 FastAPI라 백엔드 코드 보존) |
 | pymupdf | 웹 UI의 PDF 페이지→PNG 렌더(원본 대조), extract 단계의 born-digital 스니핑 겸용 |
@@ -232,7 +232,7 @@ md4paper/
 
 | 질문 | 현재 기본값 |
 |---|---|
-| 기본 LLM 프로바이더/모델 | **결정됨: openai / `gpt-5.6-luna`**(사용자 선호, 최저가). anthropic·gemini 어댑터도 만들어 `--provider`·config·웹 UI로 전환 가능 |
+| 기본 LLM 프로바이더/모델 | **결정됨: openai / `gpt-6-luna`**(사용자 선호, 최저가; 2026-09에 5.6-luna에서 교체). anthropic·gemini 어댑터도 만들어 `--provider`·config·웹 UI로 전환 가능 |
 | citation 기본 스타일 | `keep`([n] + 앵커 링크). 선택지 `authoryear`([저자 연도])·`short`([단축명]). manifest·config·CLI로 변경 |
 | 참고문헌 링크 | 기본 on — 제목을 DOI/arXiv URL로 하이퍼링크(바로 논문 접근) + 단축명 병기. `--no-links`/`reference_links:false`로 끔 |
 | 한국어 문체 | **선택 가능**(`korean_style`): 해라체(기본, ~한다) / 합니다체(~합니다) / 해요체(~해요) / custom 프롬프트. config.toml 기본값 → sections.yaml 논문별 오버라이드 → **웹 UI 주요 설정**으로 실시간 변경(변경 시 재번역). 프롬프트 조각으로 구현되어 시스템 프롬프트에 갈아끼움 |
