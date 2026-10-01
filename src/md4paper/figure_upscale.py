@@ -25,6 +25,11 @@ _MIN_SCORE = 0.9  # 이보다 낮은 매칭은 버린다 (실측 최저 정답 0
 # 차이가 사실상 0인 건 예외: 같은 그림이 두 쪽에 그대로 실린 것이라 어느 쪽을 그려도 같다.
 _MIN_MARGIN = 0.01
 _SAME_EPS = 1e-4
+# 점수가 _MIN_SCORE에 못 미쳐도 다른 후보가 멀찍이 뒤처지면 받는다 — docling 렌더러가 글꼴을
+# 뭉개거나 테두리를 몇 pt 더 물고 잘라 점수만 낮은 경우다. 작업 폴더 179편 실측: 0.77~0.90 그림 46개가
+# 모두 2등과 0.14 넘게 차이 났고, 가장 낮은 축부터 눈으로 본 표본 5개는 전부 제자리였다.
+_LOW_SCORE = 0.75
+_LOW_MARGIN = 0.1
 _PEAKS = 3  # 쪽마다 정밀 맞춤할 1차 후보 수
 _COARSE_GATE = 0.4  # 1차(흑백 1/4) 점수가 이보다 낮은 쪽은 정밀 맞춤을 안 한다 (0.7 미만인 정답도 있었다)
 # 긴 변이 이보다 짧은 그림(48pt 미만) = 아이콘·배지 — 오매칭 구간이라 건너뛴다.
@@ -136,7 +141,8 @@ def upscale(wd: WorkDir, pdf: Path) -> dict:
         png = None
         if hit is not None:
             page, score, rect, margin = hit
-            if score >= _MIN_SCORE and not (_SAME_EPS <= margin < _MIN_MARGIN):
+            sure = score >= _MIN_SCORE and not (_SAME_EPS <= margin < _MIN_MARGIN)
+            if sure or (score >= _LOW_SCORE and margin >= _LOW_MARGIN):
                 png = pdfio.render_region_png(pdf, page, rect, zoom=FIG_ZOOM, mark_dpi=True)
         if png is None:
             stats["skipped"] += 1
