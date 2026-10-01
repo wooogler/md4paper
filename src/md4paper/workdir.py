@@ -328,6 +328,9 @@ def rename_workdir(wd: WorkDir, new_base: str, workspace: Path) -> WorkDir:
                 new_wd.meta_json.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         except (OSError, ValueError):
             pass
+    from md4paper.ui import tabstore  # 열어 둔 논문 탭이 옮겨진 폴더를 따라가게 (nicegui 불필요)
+
+    tabstore.rename_tab(old_md4, new_md4)
     return new_wd
 
 
@@ -425,34 +428,7 @@ def is_pinned(root: Path) -> bool:
         return False
 
 
-def pinned_workdirs(workspace: Path) -> list[dict]:
-    """고정한 논문만 고정한 순서로 — [{root, title, pinned_at}].
-
-    리뷰 화면 헤더의 탭이 페이지마다 쓰는 목록이라 `recent_workdirs`처럼 전체 서지를 읽지 않고
-    status.json(작다)을 먼저 보고 고정된 것만 제목을 읽는다.
-    """
-    if not Path(workspace).is_dir():
-        return []
-    out: list[dict] = []
-    for md4 in Path(workspace).rglob("*.md4"):
-        if not md4.is_dir() or not (md4 / "structure" / "sections.yaml").exists():
-            continue
-        try:
-            st = json.loads((md4 / "status.json").read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        try:
-            at = float(st.get("pinned_at") or 0.0)
-        except (TypeError, ValueError):  # 손으로 고친 status.json도 목록을 깨뜨리지 않게
-            continue
-        if not at or st.get("hidden"):  # 숨긴 논문은 탭·칩에 올리지 않는다 (목록에서 뺐다는 뜻이므로)
-            continue
-        out.append({"root": md4, "title": _title_of(md4), "pinned_at": at})
-    out.sort(key=lambda d: d["pinned_at"])
-    return out
-
-
-def _title_of(md4: Path) -> str:
+def paper_title(md4: Path) -> str:
     """논문 제목 — paper_meta.json(LLM 추출) > sections.yaml의 title > 폴더 이름."""
     import re
 
@@ -489,7 +465,7 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
     for md4 in workspace.rglob("*.md4"):
         if not md4.is_dir() or not (md4 / "structure" / "sections.yaml").exists():
             continue
-        title = _title_of(md4)
+        title = paper_title(md4)
         authors: list[str] = []
         year = None
         venue = ""

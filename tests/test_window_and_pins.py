@@ -16,12 +16,13 @@ from pathlib import Path
 import pytest
 
 from md4paper import pipeline
+from md4paper.ui import jobs, tabstore
 from md4paper.workdir import (
     WorkDir,
     is_pinned,
-    pinned_workdirs,
+    paper_title,
     recent_workdirs,
-    set_hidden,
+    rename_workdir,
     set_pinned,
 )
 
@@ -65,41 +66,99 @@ def test_pin_rejects_missing_workdir(tmp_path):
     assert is_pinned(tmp_path / "없는논문.md4") is False
 
 
-def test_pinned_workdirs_is_ordered_by_pin_time(tmp_path):
-    """탭 순서 = 고정한 순서 (제목·수정시각과 무관하게 안정적이어야 한다)."""
-    a, b, c = (_paper(tmp_path, n) for n in ("a", "b", "c"))
-    for wd, at in ((b, 300.0), (a, 100.0), (c, 200.0)):  # 고정 시각을 직접 박아 순서를 못 박는다
-        set_pinned(wd.root)
-        st = wd.load_status()
-        st["pinned_at"] = at
-        wd.save_status(st)
-
-    assert [p["root"].stem for p in pinned_workdirs(tmp_path)] == ["a", "c", "b"]
-    assert [p["title"] for p in pinned_workdirs(tmp_path)]  # 제목이 채워진다
-
-
-def test_pinned_workdirs_uses_paper_meta_title(tmp_path):
-    """제목은 recent_workdirs와 같은 규칙 — paper_meta.json이 있으면 그것."""
+def test_paper_title_uses_paper_meta_title(tmp_path):
+    """탭 제목은 recent_workdirs와 같은 규칙 — paper_meta.json이 있으면 그것."""
     wd = _paper(tmp_path, "p1")
-    set_pinned(wd.root)
     wd.paper_meta_json.write_text(json.dumps({"title": "정정된 제목"}), encoding="utf-8")
 
-    assert pinned_workdirs(tmp_path)[0]["title"] == "정정된 제목"
+    assert paper_title(wd.root) == "정정된 제목"
     assert recent_workdirs(tmp_path)[0]["title"] == "정정된 제목"
 
 
-def test_pinned_workdirs_skips_hidden_and_broken(tmp_path):
-    """숨긴 논문은 탭에 올리지 않고, 손상된 status.json이 목록을 깨뜨리지 않는다."""
-    keep, hide, broken = (_paper(tmp_path, n) for n in ("keep", "hide", "broken"))
-    for wd in (keep, hide, broken):
-        set_pinned(wd.root)
-    set_hidden(hide.root)
-    broken.status_json.write_text("{이건 JSON이 아니다", encoding="utf-8")
+# ===== 열린 탭 (§ui/tabstore.py) — 고정과 별개 =====
 
-    assert [p["root"].stem for p in pinned_workdirs(tmp_path)] == ["keep"]
+def test_tabs_open_in_order_and_ignore_reopen(tmp_path):
+    a, b, c = (_paper(tmp_path, n) for n in ("a", "b", "c"))
+    for wd in (a, b, c, a):  # 이미 열린 탭을 다시 열어도 자리는 그대로
+        tabstore.open_tab(wd.root)
+    assert [p.stem for p in tabstore.load()] == ["a", "b", "c"]
+    assert tabstore.is_open(b.root)
+    assert not is_pinned(a.root)  # 탭을 연다고 고정되지 않는다
 
-    broken.status_json.write_text(json.dumps({"pinned_at": "어제"}), encoding="utf-8")
-    assert [p["root"].stem for p in pinned_workdirs(tmp_path)] == ["keep"]  # 숫자가 아니면 건너뛴다
+
+def test_tabs_close_returns_neighbor(tmp_path):
+    a, b, c = (_paper(tmp_path, n) for n in ("a", "b", "c"))
+    for wd in (a, b, c):
+        tabstore.open_tab(wd.root)
+    assert tabstore.close_tab(b.root).stem == "c"   # 오른쪽 이웃
+    assert tabstore.close_tab(c.root).stem == "a"   # 맨 끝을 닫으면 왼쪽
+    assert tabstore.close_tab(a.root) is None       # 마지막 탭 → 홈으로
+    assert tabstore.close_tab(a.root) is None       # 없는 탭 닫기는 무해
+    assert tabstore.load() == []
+
+
+def test_tabs_drop_missing_papers_and_follow_renames(tmp_path):
+    a, b = (_paper(tmp_path, n) for n in ("a", "b"))
+    tabstore.open_tab(a.root)
+    tabstore.open_tab(b.root)
+    tabstore.open_tab(tmp_path / "없는논문.md4")
+    assert [p.stem for p in tabstore.load()] == ["a", "b"]  # 사라진 논문은 조용히 빠진다
+
+    new = rename_workdir(a, "renamed", tmp_path)
+    assert [p.stem for p in tabstore.load()] == ["renamed", "b"]  # 자리는 그대로, 경로만 따라간다
+    assert new.root.stem == "renamed"
+
+
+def test_tabs_survive_broken_file():
+    tabstore.TABS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tabstore.TABS_PATH.write_text("{이건 JSON이 아니다", encoding="utf-8")
+    assert tabstore.load() == []
+
+
+# ===== 백그라운드 작업 (§ui/jobs.py) — 페이지가 사라져도 끝까지 =====
+
+def test_job_runs_to_completion_without_a_page(tmp_path):
+    async def go():
+        def work(job):
+            for i in range(3):
+                job.progress(i + 1, 3)
+            job.message = "끝"
+            return {"ok": True}
+
+        job = jobs.start(tmp_path, "translate", "번역", work, title="논문")
+        assert job is not None and job.running
+        assert jobs.start(tmp_path, "translate", "번역", work) is None  # 같은 논문·종류는 하나만
+        assert [j.kind for j in jobs.running(tmp_path)] == ["translate"]
+        while job.running:
+            await asyncio.sleep(0.01)
+        return job
+
+    job = asyncio.run(go())
+    assert job.status == "done" and job.result == {"ok": True} and job.fraction == 1.0
+    assert jobs.unseen_finished(tmp_path) == [job]  # 자리를 비운 사이 끝난 작업 → 돌아오면 알린다
+    job.seen = True
+    assert jobs.unseen_finished(tmp_path) == []
+    assert jobs.running() == []
+
+
+def test_job_failure_is_recorded(tmp_path):
+    async def go():
+        def work(job):
+            raise RuntimeError("API 키 없음")
+
+        job = jobs.start(tmp_path, "layout", "레이아웃 수정", work)
+        while job.running:
+            await asyncio.sleep(0.01)
+        # 끝난 작업이 있어도 다시 시작할 수 있다
+        again = jobs.start(tmp_path, "layout", "레이아웃 수정", lambda j: None)
+        while again.running:
+            await asyncio.sleep(0.01)
+        return job, again
+
+    job, again = asyncio.run(go())
+    assert job.status == "failed" and "API 키 없음" in job.error
+    assert again.status == "done"
+    assert jobs.get(tmp_path, "layout") is again
 
 
 def test_recent_workdirs_reports_pin_and_keeps_it_past_the_limit(tmp_path):

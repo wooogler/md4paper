@@ -15,9 +15,9 @@ from pathlib import Path
 
 from md4paper import config, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
-from md4paper.ui import annotations, chat_panel, desktop, find_bar, mdrender, scroll_memory
+from md4paper.ui import annotations, chat_panel, desktop, find_bar, jobs, mdrender, scroll_memory, tabstore
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
-from md4paper.workdir import WorkDir, is_pinned, pinned_workdirs, set_pinned, set_project
+from md4paper.workdir import WorkDir, is_pinned, paper_title, set_pinned, set_project
 
 # 설명이 붙은 옵션 (값 → 사람이 이해하기 쉬운 라벨)
 _KSTYLE = {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)", "해요체": "해요체 (~해요 · 부드럽게)"}
@@ -1824,6 +1824,10 @@ _CHROME_CSS = """
 .md4-tab-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .md4-tab-ico { flex: 0 0 auto; opacity: .55; }
 .md4-tab.on .md4-tab-ico { opacity: .5; }
+.md4-tab-ico.md4-tab-busy { opacity: .9; animation: md4spin 1s linear infinite; }
+.md4-jobsbtn { margin-right: 2px; }
+.md4-spin { animation: md4spin 1s linear infinite; }
+@keyframes md4spin { to { transform: rotate(360deg); } }
 /* × 는 평소엔 자리만 비워 두고, 그 탭에 마우스가 올라올 때만 보인다 (Notion·브라우저 탭과 같게) */
 .md4-tab-x { flex: 0 0 14px; width: 14px; height: 14px; display: inline-flex; align-items: center;
   justify-content: center; border-radius: 4px; font-size: 9px; opacity: 0; transition: opacity .12s ease; }
@@ -1918,30 +1922,31 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     @ui.refreshable
     def paper_tabs() -> None:
-        """헤더의 논문 탭 — 고정한 논문들 + (고정 안 했으면) 지금 보고 있는 논문.
+        """헤더의 논문 탭 — 연 논문들(브라우저 탭처럼, ×를 누를 때까지 남는다).
 
         탭은 페이지 이동이다(한 창에 한 논문). 나란히 보려면 옆의 ⧉로 새 창을 띄운다.
+        고정(pin)과는 별개다 — 고정은 홈 목록에서 관심 논문을 맨 위에 모으는 표시일 뿐이다.
+        백그라운드 작업(번역 등)이 도는 논문은 탭 아이콘이 돌아간다.
         """
         here = str(ctrl.wd.root.resolve())
-        pins = pinned_workdirs(state["upload_dir"]) if state.get("upload_dir") else []
-        pinned_here = is_pinned(ctrl.wd.root)
-        # 작업 폴더 밖의 논문은 목록에 없어도 고정될 수 있다 → 탭 줄에 자기 자리를 만들어 준다.
-        if pinned_here and not any(str(pin["root"].resolve()) == here for pin in pins):
-            pins = [*pins, {"root": ctrl.wd.root, "title": _title, "pinned_at": 0.0}]
+        busy = {j.root for j in jobs.running()}
+        tabs = [str(p) for p in tabstore.load()]
+        if here not in tabs:  # 방금 닫은 탭을 다른 창이 보고 있는 등 — 지금 보는 논문은 늘 보인다
+            tabs.append(here)
         with ui.row().classes("items-end gap-0 no-wrap md4-tabstrip"):
-            if not pinned_here:  # 지금 보는 논문은 고정 전이라도 '현재 탭'으로 보인다
-                _tab_chip(_title, ctrl.wd.root, active=True)
-            for pin in pins:
-                _tab_chip(pin["title"], pin["root"],
-                          active=str(pin["root"].resolve()) == here, pinned=True)
+            for t in tabs:
+                _tab_chip(_title if t == here else paper_title(Path(t)), Path(t),
+                          active=t == here, busy=t in busy)
         with ui.row().classes("items-center gap-0 no-wrap md4-tabtools"):
-            # 고정 토글 — 눌러 두면 어느 논문을 보다가도 헤더 탭에서 한 번에 돌아온다
+            jobs_menu()
+            # 고정 토글 — 홈 목록 맨 위 '고정한 논문' 구역에 모아 둔다 (탭과는 무관)
+            pinned_here = is_pinned(ctrl.wd.root)
             ui.button(icon="push_pin", color=None, on_click=toggle_pin) \
                 .props(f"flat dense round size=sm text-color={'amber-4' if pinned_here else 'white'}") \
-                .tooltip("탭에서 고정 해제" if pinned_here else "이 논문을 탭에 고정")
+                .tooltip("목록 고정 해제" if pinned_here else "홈 목록 맨 위에 고정")
             new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
 
-    def _tab_chip(title: str, root: Path, active: bool = False, pinned: bool = False) -> None:
+    def _tab_chip(title: str, root: Path, active: bool = False, busy: bool = False) -> None:
         """논문 탭 하나 — 요소를 직접 짓는다.
 
         Quasar chip으로 그리면 알약 모양·배지 느낌이 나서 '탭'으로 읽히지 않는다. 위쪽만 둥근
@@ -1949,17 +1954,75 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """
         tab = ui.element("div").classes("md4-tab" + (" on" if active else ""))
         with tab:
-            ui.icon("description", size="14px").classes("md4-tab-ico")
+            if busy:
+                ui.icon("autorenew", size="14px").classes("md4-tab-ico md4-tab-busy")
+            else:
+                ui.icon("description", size="14px").classes("md4-tab-ico")
             ui.label(title).classes("md4-tab-t")
-            if pinned:  # 고정한 논문만 닫을 수 있다 (× = 고정 해제, 논문은 그대로)
-                x = ui.element("span").classes("md4-tab-x")
-                with x:
-                    ui.html("&#10005;")
-                x.on("click.stop", lambda _, r=root: unpin(r))
-                x.tooltip("탭에서 내리기 (고정 해제)")
-        tab.tooltip(title if active else f"{title}\n클릭하면 이 논문으로 이동")
+            x = ui.element("span").classes("md4-tab-x")
+            with x:
+                ui.html("&#10005;")
+            x.on("click.stop", lambda _, r=root, a=active: close_tab(r, a))
+            x.tooltip("탭 닫기" + (" — 도는 작업은 계속됩니다" if busy else ""))
+        tip = title if active else f"{title}\n클릭하면 이 논문으로 이동"
+        if busy:
+            tip += "\n백그라운드 작업 진행 중"
+        tab.tooltip(tip)
         if not active:
             tab.on("click", lambda _, r=root: ui.navigate.to(_review_url(r)))
+
+    def close_tab(root: Path, active: bool) -> None:
+        nxt = tabstore.close_tab(root)
+        if not active:
+            paper_tabs.refresh()
+            return
+        # 보고 있던 탭을 닫으면 이웃 탭으로, 남은 탭이 없으면 홈으로 (작업은 서버에서 계속 돈다)
+        ui.navigate.to(_review_url(nxt) if nxt is not None else "/home")
+
+    @ui.refreshable
+    def jobs_menu() -> None:
+        """도는 백그라운드 작업 — 어느 논문을 보고 있든 진행을 한눈에, 눌러서 그 논문으로."""
+        active = jobs.running()
+        conv = [q for q in state.get("queue", []) if q.get("status") in _QUEUE_ACTIVE]
+        if not active and not conv:
+            return
+        btn = ui.button(color=None).props("flat dense no-caps text-color=white size=sm") \
+            .classes("md4-jobsbtn").tooltip("백그라운드 작업 진행 중 — 눌러서 보기")
+        with btn:
+            ui.icon("autorenew", size="16px").classes("md4-spin")
+            ui.label(f"{len(active) + len(conv)}").classes("q-ml-xs")
+            with ui.menu().props("anchor='bottom right' self='top right'"):
+                for j in active:
+                    pct = f" {int(j.fraction * 100)}%" if j.total else ""
+                    ui.menu_item(f"{j.label}{pct} · {j.title or Path(j.root).stem}",
+                                 on_click=lambda _, r=j.root: ui.navigate.to(_review_url(Path(r))))
+                for q in conv:
+                    ui.menu_item(f"변환 · {q['name']}", on_click=lambda: ui.navigate.to("/home"))
+
+    # 탭 아이콘·작업 목록은 다른 논문의 작업 상태도 비추므로, 무엇이 도는지 바뀔 때만 다시 그린다
+    _jobs_sig: dict = {"v": None, "watch": []}
+
+    def _poll_jobs() -> None:
+        here = str(ctrl.wd.root.resolve())
+        # 다른 논문의 작업이 끝나면 여기서 알린다 (이 논문 것은 각 화면이 붙어서 알린다)
+        for j in _jobs_sig["watch"]:
+            if not j.running and not j.seen and j.root != here:
+                j.seen = True
+                name = j.title or Path(j.root).stem
+                if j.status == "done":
+                    ui.notify(f"‘{name}’ {j.label} 완료 — {j.message}", type="positive")
+                else:
+                    ui.notify(f"‘{name}’ {j.label} 실패: {j.error}", type="negative")
+        _jobs_sig["watch"] = jobs.running()
+        sig = (tuple(sorted((j.root, j.kind) for j in _jobs_sig["watch"])),
+               sum(1 for q in state.get("queue", []) if q.get("status") in _QUEUE_ACTIVE))
+        if sig != _jobs_sig["v"]:
+            first = _jobs_sig["v"] is None
+            _jobs_sig["v"] = sig
+            if not first:
+                paper_tabs.refresh()
+
+    ui.timer(1.0, _poll_jobs)
 
     def toggle_pin() -> None:
         now_pinned = is_pinned(ctrl.wd.root)
@@ -1967,12 +2030,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ui.notify("고정 처리 실패 (경로 확인).", type="negative")
             return
         paper_tabs.refresh()
-        ui.notify("탭 고정을 해제했습니다." if now_pinned else "헤더 탭에 고정했습니다.",
+        ui.notify("목록 고정을 해제했습니다." if now_pinned else "홈 목록 맨 위에 고정했습니다.",
                   type="positive", timeout=1400)
-
-    def unpin(root: Path) -> None:
-        set_pinned(root, False)
-        paper_tabs.refresh()
 
     # 헤더는 한 줄이다 — 논문 탭은 아래 끝에 물려(활성 탭이 본문 흰 바닥과 맞닿아 '탭'으로 읽힌다),
     # 단계(변환/번역/뷰어)는 오른쪽의 작은 세그먼트 컨트롤로. 단계는 '한 논문 안의 화면 전환'이라
@@ -2885,10 +2944,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         gloss_entries.append({"term": "", "korean": "", "policy": "translate"})
         gloss_rows.refresh()
 
-    async def add_terms_from_selected() -> None:
+    def add_terms_from_selected() -> None:
         """번역할 섹션에서 새 용어를 뽑아 용어집에 추가 (변환에 쓰던 기본 프로바이더 사용)."""
-        from nicegui import run
-
         n_sec = len(ctrl.ticked_ids())
         if n_sec == 0:
             ui.notify("먼저 번역할 섹션을 선택하세요.", type="warning")
@@ -2899,90 +2956,141 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ui.notify(str(e), type="negative")
             return
 
-        async def run_extract() -> None:
-            ui.notify("선택 섹션에서 용어 추출 중… (AI)")
-            try:
-                have = [d["term"] for d in gloss_entries if d["term"].strip()]
-                new = await run.io_bound(ctrl.new_terms_from_selected, prov, have)
-                for e in new:
-                    gloss_entries.append({"term": e.term, "korean": e.korean, "policy": e.policy})
-                gloss_rows.refresh()
-                gloss_autosave()
-                ui.notify(f"새 용어 {len(new)}개 추가됨 (자동 저장)." if new
-                          else "추가할 새 용어가 없습니다.", type="positive" if new else "info")
-            except Exception as ex:  # noqa: BLE001
-                ui.notify(str(ex), type="negative")
+        def run_extract() -> None:
+            gloss_autosave()  # 지금 편집본을 파일에 — 작업은 파일 위에서 합친다
+            have = [d["term"] for d in gloss_entries if d["term"].strip()]
+
+            # 결과를 화면의 편집 사본이 아니라 glossary.yaml에 바로 합친다 — 탭을 옮겨 이 페이지가
+            # 사라져도 뽑은 용어가 남도록. 돌아온 화면은 파일에서 다시 읽는다.
+            def work(job: jobs.Job) -> int:
+                new = ctrl.new_terms_from_selected(prov, have)
+                cur = ctrl.glossary_entries()
+                seen = {e.term.strip().lower() for e in cur}
+                added = [e for e in new if e.term.strip() and e.term.strip().lower() not in seen]
+                if added:
+                    ctrl.save_glossary([*cur, *added])
+                job.message = (f"새 용어 {len(added)}개 추가됨 (자동 저장)." if added
+                               else "추가할 새 용어가 없습니다.")
+                return len(added)
+
+            job = jobs.start(ctrl.wd.root, "terms", "용어 추출", work, title=_title)
+            if job is None:
+                ui.notify("이미 용어를 추출하는 중입니다.", type="info")
+                return
+            ui.notify("선택 섹션에서 용어 추출 중… (AI) — 다른 탭으로 옮겨도 계속됩니다")
+            attach_terms(job)
+            paper_tabs.refresh()
 
         if n_sec > 12 or len(ctrl.selected_sections_text()) > 30000:  # 많으면 시간·비용 경고
             with ui.dialog() as dlg, ui.card().classes("gap-2"):
                 ui.label(f"{n_sec}개 섹션에서 용어를 추출합니다. 섹션이 많아 시간·비용이 더 들 수 있어요. 계속할까요?")
 
-                async def _yes() -> None:
+                def _yes() -> None:
                     dlg.close()
-                    await run_extract()
+                    run_extract()
                 with ui.row().classes("justify-end w-full gap-2"):
                     ui.button("취소", on_click=dlg.close).props("flat")
                     ui.button("계속", on_click=_yes).props("color=primary")
             dlg.open()
         else:
-            await run_extract()
+            run_extract()
+
+    def attach_terms(job: jobs.Job) -> None:
+        """용어 추출이 끝나면 파일에서 용어집을 다시 읽어 표에 반영한다."""
+        def tick() -> None:
+            if job.running:
+                return
+            timer.deactivate()
+            fresh = not job.seen
+            job.seen = True
+            if job.status == "done":
+                if job.result:
+                    gloss_entries[:] = [{"term": e.term, "korean": e.korean, "policy": e.policy}
+                                        for e in ctrl.glossary_entries()]
+                    gloss_rows.refresh()
+                if fresh:
+                    ui.notify(job.message, type="positive" if job.result else "info")
+            elif fresh:
+                ui.notify(job.error, type="negative")
+
+        timer = ui.timer(0.5, tick)
 
     def glossary_tab() -> None:
-        from nicegui import run
-
-        async def do_translate() -> None:
+        def do_translate() -> None:
             gloss_autosave()
             try:
                 prov = config.build_provider()  # 변환에 쓰던 기본 프로바이더
             except RuntimeError as e:
                 ui.notify(str(e), type="negative")
                 return
-            translate_btn.disable()
-            translate_state.update(status={}, done=0, total=0, active=True, failures={})
-            update_tree_status()
-            failure_panel.refresh()
-            bar.visible = True
-            bar.value = 0
+            style = ctrl.manifest.korean_style
 
-            def tick() -> None:
-                t = translate_state["total"] or 0
-                bar.value = (translate_state["done"] / t) if t else 0
-                pct = int(bar.value * 100)
-                prog_lbl.text = (
-                    f"번역 중… {translate_state['done']}/{t} 섹션 ({pct}%) · 병렬 처리"
-                    if t else "번역 준비 중…"
-                )
-                update_tree_status()  # 섹션 트리 아이템에 진행중/완료 아이콘 반영
+            # 워커 스레드에서 화면 없이 완결된다 — 탭을 옮겨 이 페이지가 사라져도 번역·저장은 끝까지 간다.
+            def work(job: jobs.Job) -> dict:
+                def on_progress(d: int, t: int, status: dict) -> None:
+                    job.progress(d, t)
+                    job.detail["status"] = status
 
-            timer = ui.timer(0.3, tick)
-            try:
-                # 워커 스레드가 콜백으로 translate_state를 갱신 → 타이머가 폴링 (NiceGUI 스레드 안전)
-                summary = await run.io_bound(
-                    ctrl.translate, prov, ctrl.manifest.korean_style,
-                    lambda d, t, s: translate_state.update(done=d, total=t, status=s),
-                )
-                ko_preview.refresh()
-                trans_result.refresh()  # 번역 탭 결과(원문·번역 나란히) 갱신
-                side_by_side.refresh()
-                translate_state["failures"] = summary.get("failures", {})
-                bar.value = 1
-                saved = await run.io_bound(library.auto_export, ctrl.wd)  # 저장 위치로 자동 저장
+                summary = ctrl.translate(prov, style, on_progress)
+                saved = library.auto_export(ctrl.wd)  # 저장 위치로 자동 저장
                 msg = f"번역 완료 (≈${summary['cost_usd']:.4f})"
                 if saved:
                     msg += f" · 저장 위치에 {len(saved)}개 파일 저장"
                 if summary.get("passthrough"):
                     msg += f" · {summary['passthrough']}개 섹션은 아래 표시(구조 검증 실패)"
-                ui.notify(msg, type="positive")
-                prog_lbl.text = "✓ " + msg
-            except Exception as ex:  # noqa: BLE001
-                ui.notify(str(ex), type="negative")
-                prog_lbl.text = f"실패: {ex}"
-            finally:
+                job.message = msg
+                return summary
+
+            job = jobs.start(ctrl.wd.root, "translate", "번역", work, title=_title)
+            if job is None:
+                ui.notify("이 논문은 이미 번역 중입니다.", type="info")
+                return
+            translate_state.update(status={}, done=0, total=0, failures={})
+            failure_panel.refresh()
+            attach_translate(job)
+            paper_tabs.refresh()  # 탭 아이콘이 '작업 중'으로 돈다
+
+        def attach_translate(job: jobs.Job) -> None:
+            """번역 작업을 이 화면에 붙인다 — 여기서 시작했든, 다른 탭에 갔다 돌아왔든."""
+            translate_btn.disable()
+            translate_state["active"] = True
+            bar.visible = True
+
+            def tick() -> None:
+                t = job.total
+                translate_state.update(done=job.done, total=t, status=job.detail.get("status") or {})
+                if job.running:
+                    bar.value = job.fraction
+                    prog_lbl.text = (f"번역 중… {job.done}/{t} 섹션 ({int(job.fraction * 100)}%) · 병렬 처리 "
+                                     "· 다른 탭으로 옮겨도 계속됩니다" if t else "번역 준비 중…")
+                    update_tree_status()  # 섹션 트리 아이템에 진행중/완료 아이콘 반영
+                    return
                 timer.deactivate()
-                translate_state["active"] = False
-                update_tree_status()
-                failure_panel.refresh()
-                translate_btn.enable()
+                finish_translate(job)
+
+            timer = ui.timer(0.3, tick)
+            tick()
+
+        def finish_translate(job: jobs.Job) -> None:
+            fresh = not job.seen  # 두 창이 같이 지켜봤으면 알림은 한 번만
+            job.seen = True
+            translate_state["active"] = False
+            if job.status == "done":
+                ko_preview.refresh()
+                trans_result.refresh()  # 번역 탭 결과(원문·번역 나란히) 갱신
+                side_by_side.refresh()
+                translate_state["failures"] = (job.result or {}).get("failures", {})
+                bar.value = 1
+                prog_lbl.text = "✓ " + job.message
+                if fresh:
+                    ui.notify(job.message, type="positive")
+            else:
+                prog_lbl.text = f"실패: {job.error}"
+                if fresh:
+                    ui.notify(job.error, type="negative")
+            update_tree_status()
+            failure_panel.refresh()
+            translate_btn.enable()
 
         @ui.refreshable
         def failure_panel() -> None:
@@ -3026,6 +3134,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             prog_lbl = ui.label("").classes("text-sm text-gray-500")
             failure_panel()  # 번역 실패 섹션 이유 + 재번역 버튼 (실패 없으면 안 보임)
         gloss_rows()
+        running = jobs.get(ctrl.wd.root, "translate")
+        if running is not None and running.running:  # 번역 중에 떠났다 돌아왔다 → 진행 바를 다시 붙인다
+            attach_translate(running)
+        if jobs.is_running(ctrl.wd.root, "terms"):
+            attach_terms(jobs.get(ctrl.wd.root, "terms"))
 
     def _sec_page0(sid: str) -> int | None:
         # 섹션 자체 페이지가 없으면(run-in 헤더 등은 headings.json에 없어 page가 비어 있음)
@@ -3227,7 +3340,6 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     def convert_settings() -> None:
         """변환(원어 마크다운) 관련 설정만."""
-        from nicegui import run
 
         ui.label("인용 · 참고문헌").classes("font-semibold text-sm text-primary")
 
@@ -3242,32 +3354,50 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         # 참고문헌은 변환 시 API 키가 있으면 자동 파싱된다. 이 버튼은 (1) 키가 없어 자동
         # 파싱이 건너뛰어졌을 때의 수동 실행, (2) 표기·프롬프트를 바꾼 뒤 다시 뽑기용 폴백이다.
-        parse_busy = {"on": False}
-
-        async def do_parse() -> None:
+        def do_parse() -> None:
             try:
                 prov = config.build_provider()
             except RuntimeError as e:
                 ui.notify(str(e), type="negative")
                 return
-            parse_busy["on"] = True
+
+            def work(job: jobs.Job) -> dict:  # 화면 없이 완결 — 탭을 옮겨도 파싱·링크 적용은 끝까지
+                summary = ctrl.parse_references(prov)
+                job.message = (f"참고문헌 {summary.get('parsed', 0)}개 파싱 · 본문 인용 {summary.get('linked', 0)}곳 "
+                               f"링크 (≈${summary.get('cost_usd', 0):.4f})")
+                return summary
+
+            job = jobs.start(ctrl.wd.root, "cite", "참고문헌 파싱", work, title=_title)
+            if job is None:
+                ui.notify("이미 참고문헌을 파싱하는 중입니다.", type="info")
+                return
+            ui.notify("참고문헌 파싱 중… (LLM) — 다른 탭으로 옮겨도 계속됩니다")
+            attach_parse(job)
+            paper_tabs.refresh()
+
+        def attach_parse(job: jobs.Job) -> None:
             parse_control.refresh()
-            ui.notify("참고문헌 파싱 중… (LLM)")
-            try:
-                summary = await run.io_bound(ctrl.parse_references, prov)
-                refresh_preview()
-                push_cite_tips()  # 새로 파싱한 서지정보를 호버 툴팁 맵에 반영
-                ui.notify(f"참고문헌 {summary.get('parsed', 0)}개 파싱 · 본문 인용 {summary.get('linked', 0)}곳 링크 "
-                          f"(≈${summary.get('cost_usd', 0):.4f})", type="positive")
-            except Exception as ex:  # noqa: BLE001
-                ui.notify(str(ex), type="negative")
-            finally:
-                parse_busy["on"] = False
+
+            def tick() -> None:
+                if job.running:
+                    return
+                timer.deactivate()
+                fresh = not job.seen
+                job.seen = True
+                if job.status == "done":
+                    refresh_preview()
+                    push_cite_tips()  # 새로 파싱한 서지정보를 호버 툴팁 맵에 반영
+                    if fresh:
+                        ui.notify(job.message, type="positive")
+                elif fresh:
+                    ui.notify(job.error, type="negative")
                 parse_control.refresh()
+
+            timer = ui.timer(0.5, tick)
 
         @ui.refreshable
         def parse_control() -> None:
-            if parse_busy["on"]:
+            if jobs.is_running(ctrl.wd.root, "cite"):
                 with ui.row().classes("items-center gap-2"):
                     ui.spinner(size="sm")
                     ui.label("참고문헌 파싱 중…").classes("text-xs text-gray-500")
@@ -3286,6 +3416,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.button("참고문헌 파싱 (LLM)", icon="link", on_click=do_parse).props("dense outline")
 
         parse_control()
+        if jobs.is_running(ctrl.wd.root, "cite"):  # 파싱 중에 떠났다 돌아왔다 → 끝나면 이 화면에 반영
+            attach_parse(jobs.get(ctrl.wd.root, "cite"))
 
         ui.label("본문 인용 표기 (조합 가능)").classes("text-sm")
         parts_state = {p: (p in m.citation_parts) for p in ("number", "authoryear", "short")}
@@ -3503,7 +3635,6 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         _refresh_translate_tree()
         edit_toggle.refresh()
         push_cite_tips()  # 재조립하며 인용 링크가 다시 붙었다 → 호버 툴팁 맵 갱신
-        library.auto_export(ctrl.wd)
 
     with ui.dialog() as fix_dialog, ui.card().classes("gap-3").style("width:560px;max-width:92vw"):
         ui.label("레이아웃 자동 수정").classes("text-lg font-bold")
@@ -3525,54 +3656,84 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         fix_bar.visible = False
         fix_status = ui.label("").classes("text-sm text-gray-600")
 
-        async def run_layout_fix() -> None:
-            from nicegui import run
-
+        def run_layout_fix() -> None:
             try:
                 prov = config.build_provider()  # 변환에 쓰던 기본 프로바이더
             except RuntimeError as e:
                 ui.notify(str(e), type="negative")
                 return
+            instructions = fix_prompt.value or ""
+
+            # 화면 없이 완결 — 탭을 옮겨도 수정·재조립·자동 저장은 끝까지 간다.
+            def work(job: jobs.Job) -> dict:
+                summary = ctrl.fix_layout(prov, instructions, job.progress)
+                if not summary.get("changed"):
+                    job.message = "고칠 레이아웃을 찾지 못했습니다 — 문서는 그대로입니다."
+                    return summary
+                library.auto_export(ctrl.wd)
+                msg = (f"레이아웃 수정 완료 · {summary['chunks']}구간 중 {summary['fixed']}개 수정 "
+                       f"(≈${summary['cost_usd']:.4f})")
+                if summary["kept"]:
+                    msg += f" · {summary['kept']}개 구간은 내용 보존 검증에 걸려 원문 유지"
+                job.message = msg
+                return summary
+
+            job = jobs.start(ctrl.wd.root, "layout", "레이아웃 수정", work, title=_title)
+            if job is None:
+                ui.notify("이미 레이아웃을 수정하는 중입니다.", type="info")
+                return
+            attach_layout_fix(job, own=True)
+            paper_tabs.refresh()
+
+        def attach_layout_fix(job: jobs.Job, own: bool) -> None:
+            """레이아웃 수정 진행을 이 화면에 붙인다.
+
+            own=False(돌아와서 다시 붙은 화면)면 이 화면의 섹션 트리는 수정 전 문서로 지어진 것이라,
+            끝나면 페이지를 새로 읽어 고친 문서로 다시 짓는다 — 낡은 매니페스트로 저장하면 수정이 덮인다.
+            """
             for w in (fix_apply, fix_cancel, fix_undo, fix_prompt):
                 w.disable()
             fix_dialog.props(add="persistent")  # 도는 동안 바깥 클릭·ESC로 닫히지 않게
             fix_bar.visible = True
-            fix_bar.value = 0
-            prog = {"done": 0, "total": 0}
+            fix_hide.set_visibility(True)
 
-            def tick() -> None:  # 워커 스레드가 prog를 갱신 → 타이머가 폴링 (NiceGUI 스레드 안전)
-                t = prog["total"]
-                fix_bar.value = (prog["done"] / t) if t else 0
-                fix_status.text = (f"수정 중… {prog['done']}/{t} 구간 ({int(fix_bar.value * 100)}%)"
-                                   if t else "구간을 나누는 중…")
-
-            timer = ui.timer(0.3, tick)
-            try:
-                summary = await run.io_bound(
-                    ctrl.fix_layout, prov, fix_prompt.value or "",
-                    lambda d, t: prog.update(done=d, total=t),
-                )
-                if not summary.get("changed"):
-                    ui.notify("고칠 레이아웃을 찾지 못했습니다 — 문서는 그대로입니다.", type="info")
-                else:
-                    _after_relayout()
-                    msg = (f"레이아웃 수정 완료 · {summary['chunks']}구간 중 {summary['fixed']}개 수정 "
-                           f"(≈${summary['cost_usd']:.4f})")
-                    if summary["kept"]:
-                        msg += f" · {summary['kept']}개 구간은 내용 보존 검증에 걸려 원문 유지"
-                    ui.notify(msg, type="positive")
-                fix_dialog.close()
-            except Exception as ex:  # noqa: BLE001 — API 오류 등을 그대로 보여준다
-                ui.notify(str(ex), type="negative")
-                fix_status.text = f"실패: {ex}"
-            finally:
+            def tick() -> None:  # 워커 스레드가 job을 갱신 → 타이머가 폴링 (NiceGUI 스레드 안전)
+                if job.running:
+                    t = job.total
+                    fix_bar.value = job.fraction
+                    fix_status.text = (f"수정 중… {job.done}/{t} 구간 ({int(job.fraction * 100)}%)"
+                                       if t else "구간을 나누는 중…")
+                    fix_banner.text = f"레이아웃 자동 수정 중… {fix_status.text.removeprefix('수정 중… ')}"
+                    fix_banner.set_visibility(True)
+                    return
                 timer.deactivate()
+                fresh = not job.seen
+                job.seen = True
                 fix_dialog.props(remove="persistent")
                 fix_bar.visible = False
+                fix_hide.set_visibility(False)
+                fix_banner.set_visibility(False)
                 for w in (fix_apply, fix_cancel, fix_prompt):
                     w.enable()
-                fix_undo.set_visibility(ctrl.can_undo_layout_fix())
                 fix_undo.enable()
+                if job.status == "done":
+                    changed = (job.result or {}).get("changed")
+                    if fresh:
+                        ui.notify(job.message, type="positive" if changed else "info")
+                    if changed and not own:
+                        ui.navigate.reload()
+                        return
+                    if changed:
+                        _after_relayout()
+                    fix_dialog.close()
+                else:
+                    if fresh:
+                        ui.notify(job.error, type="negative")
+                    fix_status.text = f"실패: {job.error}"
+                fix_undo.set_visibility(ctrl.can_undo_layout_fix())
+
+            timer = ui.timer(0.3, tick)
+            tick()
 
         async def undo_layout_fix() -> None:
             from nicegui import run
@@ -3581,6 +3742,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.notify("되돌릴 이전 상태가 없습니다.", type="warning")
                 return
             _after_relayout()
+            await run.io_bound(library.auto_export, ctrl.wd)  # 저장 위치의 사본도 되돌린 문서로
             ui.notify("레이아웃 수정 전으로 되돌렸습니다.", type="positive")
             fix_dialog.close()
 
@@ -3589,6 +3751,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 .props("flat dense no-caps color=grey-8").tooltip("마지막 수정 직전의 마크다운·구조로 복구")
             ui.space()
             fix_cancel = ui.button("취소", on_click=fix_dialog.close).props("flat no-caps")
+            # 도는 동안엔 대화상자를 닫을 수 없다(persistent) → 숨기기만 — 작업은 서버에서 계속된다
+            fix_hide = ui.button("숨기기", on_click=fix_dialog.close).props("flat no-caps") \
+                .tooltip("작업은 계속됩니다 — 다른 탭으로 옮겨도 됩니다")
+            fix_hide.set_visibility(False)
             fix_apply = ui.button("적용", icon="auto_fix_high", on_click=run_layout_fix) \
                 .props("color=primary no-caps")
 
@@ -3622,6 +3788,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                             .props("outline no-caps color=primary").classes("w-full").tooltip(
                                 "쪼개진 헤더·깨진 수식·끊긴 문단을 AI가 문서 전체에서 찾아 고칩니다")
                         cap("PDF 추출이 어그러뜨린 부분을 AI가 훑어 고치고, 섹션 트리를 다시 만듭니다.")
+                        # 수정이 도는 동안 대화상자를 숨겼거나 다른 탭에서 돌아왔을 때 진행을 보여 준다
+                        fix_banner = ui.label("").classes("text-xs text-primary cursor-pointer")
+                        fix_banner.on("click", open_fix_dialog)
+                        fix_banner.set_visibility(False)
+                        if jobs.is_running(ctrl.wd.root, "layout"):
+                            attach_layout_fix(jobs.get(ctrl.wd.root, "layout"), own=False)
 
                         with ui.expansion("변환 설정", icon="settings").classes("w-full"):
                             convert_settings()
@@ -3671,6 +3843,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             with ui.column().classes("p-3 w-full gap-2").style("height: calc(100vh - 108px)"):
                 viewer_toolbar()
                 side_by_side()
+
+    # 자리를 비운 사이 끝난 작업 — 이 화면은 이미 결과 파일로 지어졌으니 알림만 한 번
+    for job in jobs.unseen_finished(ctrl.wd.root):
+        job.seen = True
+        if job.status == "done":
+            ui.notify(f"{job.label} — {job.message}", type="positive")
+        else:
+            ui.notify(f"{job.label} 실패: {job.error}", type="negative")
 
 
 # 홈 드롭존 — 실제 q-uploader를 투명하게 위에 겹쳐(드롭·클릭 캐치) 아래 dashed 힌트를 보여준다.
@@ -4359,7 +4539,7 @@ def build_home(state: dict) -> None:
         await desktop.deliver(name, data)
 
     def toggle_pin(item: dict) -> None:
-        """목록 맨 위로 올리기/내리기 + 리뷰 헤더 탭에 올리기/내리기 (status.json에만 표시)."""
+        """목록 맨 위 '고정한 논문' 구역으로 올리기/내리기 (status.json에만 표시 — 탭과는 무관)."""
         if not set_pinned(item["root"], not item["pinned"]):
             ui.notify("고정 처리 실패 (경로 확인).", type="negative")
             return
@@ -4371,7 +4551,7 @@ def build_home(state: dict) -> None:
             ui.notify("처리 실패 (경로 확인).", type="negative")
             return
         if hidden:
-            set_pinned(item["root"], False)  # 숨긴 논문이 고정 구역·헤더 탭에 남아 있으면 앞뒤가 안 맞는다
+            set_pinned(item["root"], False)  # 숨긴 논문이 고정 구역에 남아 있으면 앞뒤가 안 맞는다
         selected.discard(str(item["root"]))  # 숨기면 일괄 다운로드 선택에서도 빠진다
         sel_bar.refresh()
         recent_list.refresh()
@@ -4773,10 +4953,10 @@ def build_home(state: dict) -> None:
                     chip.tooltip("프로젝트 옮기기 — 저장 위치의 사본도 함께 옮깁니다")
                     with chip:
                         project_menu(r["root"], pid)
-                    # 고정 = 목록 맨 위 칩 + 리뷰 헤더 탭. 자주 오가는 논문을 매번 찾지 않도록.
+                    # 고정 = 목록 맨 위 '고정한 논문' 구역. 관심 논문을 모아 두고 매번 찾지 않도록.
                     ui.button(icon="push_pin", on_click=lambda _, item=r: toggle_pin(item)) \
                         .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-5")) \
-                        .classes("shrink-0").tooltip("고정 해제" if r["pinned"] else "위에 고정 (헤더 탭에도)")
+                        .classes("shrink-0").tooltip("고정 해제" if r["pinned"] else "목록 맨 위에 고정")
                     new_window_button(r["root"], state, r["title"], small=True)
                     # 번역된 문서는 원문(EN)·번역(KO)을 각각 버튼으로. 미번역은 영어 하나만.
                     ui.button("EN", icon="download", on_click=lambda _, root=r["root"]: download_zip(root, "en")) \
@@ -4847,6 +5027,18 @@ def build_home(state: dict) -> None:
     @ui.refreshable
     def queue_panel() -> None:
         q = state["queue"]
+        running_jobs = jobs.running()
+        if running_jobs:  # 리뷰 화면에서 띄운 번역 등 — 화면을 떠나도 서버에서 계속 돈다
+            ui.label("백그라운드 작업").classes("text-xs text-gray-500 self-start")
+            for j in running_jobs:
+                pct = f" {int(j.fraction * 100)}%" if j.total else ""
+                with ui.card().classes("w-full q-pa-sm cursor-pointer").on(
+                        "click", lambda _, r=j.root: ui.navigate.to(_review_url(Path(r)))):
+                    with ui.row().classes("items-center w-full no-wrap gap-2"):
+                        ui.icon("autorenew", size="20px").classes("text-primary md4-spin")
+                        with ui.column().classes("gap-0 flex-grow min-w-0"):
+                            ui.label(j.title or Path(j.root).stem).classes("text-sm truncate w-full")
+                            ui.label(f"{j.label} 중…{pct} · 눌러서 열기").classes("text-xs text-gray-400")
         if not q:
             return
         ui.label("변환 중").classes("text-xs text-gray-500 self-start")
@@ -5291,6 +5483,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         state["current_wd"] = wdir  # 이미지 서빙이 이 워크디렉토리를 가리키도록
         _register_wd(wdir)  # 토큰 등록 (이 논문 자산 URL 해석용)
         _mark_opened(wdir)  # 미열람 표시 해제 (한 번이라도 열면 '새 항목' 아님)
+        tabstore.open_tab(wdir.root)  # 연 논문은 ×를 누를 때까지 헤더 탭에 남는다
         build(UIController(wdir), state)
 
     port = pick_port(port)

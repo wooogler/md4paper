@@ -78,3 +78,17 @@ def _reset_bibsource_cooldown():
     bibsource.reset_sources()
     yield
     bibsource.reset_sources()
+
+
+@pytest.fixture(autouse=True)
+def _clean_tabs_and_jobs():
+    """열린 탭(open_tabs.json)·백그라운드 작업 레지스트리는 전역이라 테스트마다 비운다."""
+    from md4paper.ui import jobs, tabstore
+
+    if tabstore.TABS_PATH.exists():
+        tabstore.TABS_PATH.unlink()
+    jobs.reset()
+    yield
+    if tabstore.TABS_PATH.exists():
+        tabstore.TABS_PATH.unlink()
+    jobs.reset()

@@ -238,9 +238,10 @@ cleanup).
   the copies in your library folders (Markdown, images, PDF, bib entry) follow it.
 - Hit **📌 pin** on a card and that paper moves up into a **Pinned** group at the top of the list
   (marked with a blue edge). Switching the sort to most-recent or by-title doesn't move a pinned
-  paper, and it **stays in the list even when it falls outside the 20 most recent**. The same paper
-  also shows up as a **paper tab** in the review header (see
-  [Several papers at once](#several-papers-at-once--header-tabs-and-new-windows)). Press 📌 again to unpin.
+  paper, and it **stays in the list even when it falls outside the 20 most recent**. Pinning only
+  gathers papers you care about in the list — it has nothing to do with the header tabs (a tab appears
+  when you open a paper; see [Several papers at once](#several-papers-at-once--header-tabs-and-new-windows)).
+  Press 📌 again to unpin.
 - **⧉** on a card opens that paper in a **new window** — for reading two papers side by side.
 - Paste your API key into **AI settings** on the left and hit "test connection" to verify it right
   away (only needed for translation and citations).
@@ -263,11 +264,18 @@ cleanup).
 
 You rarely read one paper at a time. There are two ways to move between them.
 
-- **Header tabs** — across the top of the review screen, your **pinned papers sit as tabs**. The
-  paper you are looking at is the white tab (it meets the page below it); clicking another tab jumps
-  straight there without going back home. The × that appears when you hover a tab **unpins** it (the
-  paper and its files are untouched), and the **📌** at the end of the tab row pins or unpins the
-  current paper on the spot. With many pins the tab row scrolls sideways.
+- **Header tabs** — like browser tabs, **opening a paper adds a tab that stays until you press ×**
+  (it survives an app restart too). The paper you are looking at is the white tab (it meets the page
+  below it); clicking another tab jumps straight there without going back home. Hover a tab for its ×
+  to close it (the paper and its files are untouched); closing the tab you are on moves to its
+  neighbour, or home if it was the last one. With many tabs the row scrolls sideways. The **📌** at
+  the end of the tab row pins the current paper to the top of the home list — separate from tabs.
+- **Background jobs** — translation, layout auto-fix, reference parsing and adding glossary terms run
+  on the server. Switch to another tab or go home mid-run and the job **is not cancelled; it runs to
+  the end** (including saving and auto-export). That paper's tab icon spins and a **↻ count** button
+  in the header lists what is running (click to jump to that paper); home shows them under
+  "백그라운드 작업" as well. Come back and the progress bar reattaches; if it finished while you were
+  away you get a one-time completion notice. Only one job of each kind runs per paper at a time.
 - The header is **a single 44px row**. The steps (1 · convert / 2 · translate / 3 · viewer) are tabs
   meeting the page the same way at the right end, but one size smaller (26px) with a blue active
   label — so the layers stay legible: **left tabs = which paper, right tabs = which view of it**.
