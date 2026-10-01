@@ -15,9 +15,9 @@ from pathlib import Path
 
 from md4paper import config, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
-from md4paper.ui import annotations, chat_panel, desktop, find_bar, jobs, mdrender, scroll_memory, tabstore
+from md4paper.ui import annotations, chat_panel, desktop, find_bar, jobs, mdrender, scroll_memory, spa, tabstore
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
-from md4paper.workdir import WorkDir, is_pinned, paper_title, set_pinned, set_project
+from md4paper.workdir import WorkDir, paper_title, set_pinned, set_project
 
 # 설명이 붙은 옵션 (값 → 사람이 이해하기 쉬운 라벨)
 _KSTYLE = {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)", "해요체": "해요체 (~해요 · 부드럽게)"}
@@ -609,6 +609,15 @@ _ANNO_HTML = """
     renderPanel();
     if (repaired) save();
   }
+  // 다른 논문으로 탭을 옮기면(본문만 갈아 끼움, §ui/spa.py) 그 논문의 하이라이트로 바꾼다.
+  // 미뤄 둔 저장은 **옛 논문 토큰으로** 먼저 내보낸다 — 순서가 바뀌면 메모가 엉뚱한 논문에 쓰인다.
+  window.__mdAnnoSwitch = function(tok, list){
+    flush();
+    window.__mdAnnoTok = tok; window.__mdAnno = list;
+    items = Array.isArray(list) ? list : []; lost = {};
+    closePop(); clearSel();
+    window.__mdAnnoApply();
+  };
   window.__mdAnnoApply = function(){
     // 탭 패널이 keep-alive라, 뷰어 탭이 활성화되기 전에는 .anno-scope가 DOM에 아예 없다.
     // 한 번만 시도하면 탭을 열었을 때 하이라이트가 안 그려진 채로 남는다 → 잠깐 더 두드린다.
@@ -1523,7 +1532,10 @@ def fn_tips_js(tips: dict[str, str]) -> str:
 def anno_items_js(items: list[dict], token: str) -> str:
     """저장된 하이라이트·메모와 논문 토큰을 클라이언트에 실어줄 JS (되저장 주소로도 쓰인다)."""
     payload = json.dumps(items, ensure_ascii=False).replace("<", "\\u003c")
-    return f"window.__mdAnnoTok = {json.dumps(token)}; window.__mdAnno = {payload};"
+    tok = json.dumps(token)
+    # 이미 떠 있는 하이라이트 스크립트가 있으면(탭 전환) 그 논문으로 바꿔 끼우게 한다
+    return (f"if (window.__mdAnnoSwitch) window.__mdAnnoSwitch({tok}, {payload});"
+            f" else {{ window.__mdAnnoTok = {tok}; window.__mdAnno = {payload}; }}")
 
 
 _HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
@@ -2059,7 +2071,7 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
                 j.seen = True
                 name = j.title or Path(j.root).stem
                 if j.status == "done":
-                    ui.notify(f"‘{name}’ {j.label} 완료 — {j.message}", type="positive")
+                    ui.notify(f"‘{name}’ — {j.message or j.label + ' 완료'}", type="positive")
                 else:
                     ui.notify(f"‘{name}’ {j.label} 실패: {j.error}", type="negative")
         sig_state["watch"] = jobs.running()
@@ -2121,32 +2133,32 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     tok = wd_token(ctrl.wd.root)  # 이미지·PDF URL에 넣는 논문별 토큰 (캐시 충돌 방지)
     _title = m.title or ctrl.wd.root.name
 
-    ui.add_css(_CHROME_CSS)
-    ui.add_head_html(_PREPAINT_HTML)  # 탭으로 넘어올 때 흰 화면이 반짝하지 않게 (헤더 자리 미리 칠하기)
+    spa.add_css(_CHROME_CSS)
     find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 — 앱 창에는 브라우저 찾기 바가 없다
     scroll_memory.install(tok)  # 읽던 자리(단계별 스크롤) 기억 — 탭으로 오가도 그 자리로
 
-    def review_tools() -> None:
-        # 고정 토글 — 홈 목록 맨 위 '고정한 논문' 구역에 모아 둔다 (탭과는 무관)
-        pinned_here = is_pinned(ctrl.wd.root)
-        ui.button(icon="push_pin", color=None, on_click=toggle_pin) \
-            .props(f"flat dense round size=sm text-color={'amber-4' if pinned_here else 'white'}") \
-            .tooltip("목록 고정 해제" if pinned_here else "홈 목록 맨 위에 고정")
-        new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
+    async def open_pdf_app() -> None:
+        """원본 PDF를 운영체제 PDF 뷰어(미리보기 등)로 따로 연다."""
+        from nicegui import run
 
-    def toggle_pin() -> None:
-        now_pinned = is_pinned(ctrl.wd.root)
-        if not set_pinned(ctrl.wd.root, not now_pinned):
-            ui.notify("고정 처리 실패 (경로 확인).", type="negative")
+        pdf = ctrl.source_pdf()
+        if not pdf or not Path(pdf).is_file():
+            ui.notify("원본 PDF를 찾지 못했습니다 (마크다운에서 변환한 논문일 수 있어요).", type="warning")
             return
-        paper_tabs.refresh()
-        ui.notify("목록 고정을 해제했습니다." if now_pinned else "홈 목록 맨 위에 고정했습니다.",
-                  type="positive", timeout=1400)
+        if not await run.io_bound(desktop.open_file, Path(pdf)):
+            ui.notify("PDF 뷰어를 열지 못했습니다.", type="negative")
+
+    def review_tools() -> None:
+        if ctrl.source_pdf():
+            ui.button(icon="picture_as_pdf", color=None, on_click=open_pdf_app) \
+                .props("flat dense round size=sm text-color=white") \
+                .tooltip("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서")
+        new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
 
     # 헤더는 한 줄이다 — 논문 탭은 아래 끝에 물려(활성 탭이 본문 흰 바닥과 맞닿아 '탭'으로 읽힌다),
     # 단계(변환/번역/뷰어)는 오른쪽의 작은 세그먼트 컨트롤로. 단계는 '한 논문 안의 화면 전환'이라
     # 논문 탭과 같은 모양이면 안 되고, 아이콘·2단 라벨로 헤더 높이를 먹지 않아야 한다.
-    with ui.header().classes("md4-header items-end no-wrap"):
+    with spa.header():
         paper_tabs = tab_bar(state, ctrl.wd.root, _title, tools=review_tools)
         ui.space()
         with ui.tabs().props("dense no-caps indicator-color=transparent").classes("md4-steptabs") as steps:
@@ -2337,13 +2349,13 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                 lbl.classes("cursor-pointer").on("click", lambda _, sid=s.id: goto_md(sid)) \
                                     .tooltip("클릭하면 마크다운의 이 섹션으로 이동")
 
-    ui.add_css(_PREVIEW_CSS)
+    spa.add_css(_PREVIEW_CSS)
     # 인용·각주 호버 툴팁: 맵 주입 → 툴팁 요소/스크립트 (같은 툴팁 UI를 #ref-·#fn- 둘 다 씀)
-    ui.add_body_html(f"<script>{cite_tips_js(ctrl.citation_tooltips())}</script>")
-    ui.add_body_html(f"<script>{fn_tips_js(ctrl.footnote_tooltips())}</script>")
-    ui.add_body_html(_CITE_TIP_HTML)
-    ui.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
-    ui.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
+    spa.add_body_html(f"<script>{cite_tips_js(ctrl.citation_tooltips())}</script>")
+    spa.add_body_html(f"<script>{fn_tips_js(ctrl.footnote_tooltips())}</script>")
+    spa.add_body_html(_CITE_TIP_HTML)
+    spa.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
+    spa.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
 
     def zoomed_file(e) -> Path | None:  # noqa: ANN001 — GenericEventArguments
         """확대 뷰어가 넘긴 `/wdimages/<토큰>/<파일>` → 이 논문의 out/images 안 실제 파일."""
@@ -2377,12 +2389,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     ui.on("md4-img-save", save_zoomed)
     ui.on("md4-img-copy", copy_zoomed)
-    ui.add_css(_ANNO_CSS)
-    ui.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
-    ui.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
-    ui.add_css(chat_panel.CSS)  # 뷰어 챗봇 서랍 — 질문 → 정렬 문단 근거 답변
-    ui.add_body_html(f"<script>{chat_panel.init_js(tok, *chat_panel.readiness())}</script>")
-    ui.add_body_html(chat_panel.HTML)
+    spa.add_css(_ANNO_CSS)
+    spa.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
+    spa.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
+    spa.add_css(chat_panel.CSS)  # 뷰어 챗봇 서랍 — 질문 → 정렬 문단 근거 답변
+    spa.add_body_html(f"<script>{chat_panel.init_js(tok, *chat_panel.readiness())}</script>")
+    spa.add_body_html(chat_panel.HTML)
 
     def push_cite_tips() -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""
@@ -3954,7 +3966,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     for job in jobs.unseen_finished(ctrl.wd.root):
         job.seen = True
         if job.status == "done":
-            ui.notify(f"{job.label} — {job.message}", type="positive")
+            ui.notify(job.message or f"{job.label} 완료", type="positive")
         else:
             ui.notify(f"{job.label} 실패: {job.error}", type="negative")
 
@@ -4609,11 +4621,14 @@ def build_home(state: dict) -> None:
         """작업 폴더 — '저장 위치'에서 바꿀 수 있으므로 항상 state에서 읽는다."""
         return state["upload_dir"]
 
-    ui.add_css(_HOME_CSS)
-    ui.add_css(_CHROME_CSS)  # 헤더 탭 줄 + 카드의 '새 창으로' 링크
-    ui.add_head_html(_PREPAINT_HTML)  # 탭으로 오갈 때 헤더 자리가 흰 화면으로 반짝하지 않게
+    spa.add_css(_HOME_CSS)
+    spa.add_css(_CHROME_CSS)  # 헤더 탭 줄 + 카드의 '새 창으로' 링크
+    # 논문 화면에서 열어 둔 서랍·툴팁(본문 밖 오버레이라 화면을 갈아 끼워도 남는다)은 홈에서 닫는다
+    ui.run_javascript("document.querySelectorAll('#md-anno-panel.open, #md-chat-panel.open')"
+                      ".forEach(function(e){ e.classList.remove('open'); });"
+                      "var t = document.getElementById('md-cite-tip'); if (t) t.style.opacity = '0';")
     # 홈도 탭 하나다 (아래 2단 높이는 이 헤더 44px까지 뺀 값) — 맨 앞 '홈' 탭이 활성, 연 논문 탭들과 '+'(논문 골라 열기)가 그대로 보인다
-    with ui.header().classes("md4-header items-end no-wrap"):
+    with spa.header():
         tab_bar(state, None)
     scroll_memory.install("home")  # 논문을 열었다 돌아와도 목록의 그 자리
     find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 (앱 창에는 브라우저 찾기 바가 없다)
@@ -5571,20 +5586,17 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
 
     chat_panel.register_routes(fastapi_app, _wd_for)  # 뷰어 챗봇 — /chat/{token}
 
-    @ui.page("/")
-    def index() -> None:
+    def index_view() -> None:
         # CLI로 워크디렉토리를 지정해 띄웠으면 그 리뷰로, 아니면 업로드 홈
         if state["launch_wd"] is not None:
             ui.navigate.to(_review_url(state["launch_wd"].root))
             return
         build_home(state)
 
-    @ui.page("/home")
-    def home() -> None:
+    def home_view() -> None:
         build_home(state)
 
-    @ui.page("/review")
-    def review_page(wd: str = "") -> None:  # noqa: ANN001 — 쿼리 파라미터
+    def review_view(wd: str = "") -> None:  # noqa: ANN001 — 쿼리 파라미터
         root = Path(wd) if wd else None
         if root is None or not WorkDir(root).sections_yaml.exists():
             ui.navigate.to("/home")
@@ -5595,6 +5607,16 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         _mark_opened(wdir)  # 미열람 표시 해제 (한 번이라도 열면 '새 항목' 아님)
         tabstore.open_tab(wdir.root)  # 연 논문은 ×를 누를 때까지 헤더 탭에 남는다
         build(UIController(wdir), state)
+
+    # 셸 — 문서는 하나만 띄우고 헤더는 그대로 둔 채 본문만 갈아 끼운다(탭 전환 깜빡임 제거, §ui/spa.py).
+    # 세 경로가 **같은 함수**여야 한다: 라우터는 다른 페이지 함수가 그 주소를 맡고 있으면 문서를 새로 연다.
+    @ui.page("/")
+    @ui.page("/home")
+    @ui.page("/review")
+    def shell() -> None:
+        ui.add_head_html(spa.HEAD_HTML + _PREPAINT_HTML)
+        spa.make_header()
+        ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view})
 
     port = pick_port(port)
     state["port"] = port  # 새 창(형제 웹뷰 프로세스)이 가리킬 주소를 만들 때 쓴다

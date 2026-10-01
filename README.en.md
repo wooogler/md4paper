@@ -268,8 +268,11 @@ You rarely read one paper at a time. There are two ways to move between them.
   (it survives an app restart too). The paper you are looking at is the white tab (it meets the page
   below it); clicking another tab jumps straight there without going back home. Hover a tab for its ×
   to close it (the paper and its files are untouched); closing the tab you are on moves to its
-  neighbour, or home if it was the last one. With many tabs the row scrolls sideways. The **📌** at
-  the end of the tab row pins the current paper to the top of the home list — separate from tabs.
+  neighbour, or home if it was the last one. With many tabs the row scrolls sideways. Pinning (📌)
+  lives only on the home list cards, separate from tabs. The **PDF icon** at the end of the tab row opens the original PDF in your system's PDF
+  viewer (Preview etc.).
+- Switching tabs **no longer flickers** — the window keeps its document and header and only the body is
+  swapped in. Scroll position, highlights and the chat follow each paper; browser back/forward work the same way.
 - **Home tab and +** — the first tab is a **Home** tab that never closes (upload and paper list). Home
   shows the same tab row, so you can jump straight back to an open paper. The **+** next to the tabs
   lists your converted papers — search by title, author or year and click (Enter opens the first

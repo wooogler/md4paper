@@ -808,6 +808,11 @@ HTML = """
   });
 
   function annoPanel(){ return document.getElementById('md-anno-panel'); }
+  // 다른 논문으로 탭을 옮기면(본문만 갈아 끼움, §ui/spa.py) 대화도 그 논문 것으로 — 열려 있으면 다시 읽는다
+  window.__mdChatSwitch = function(){
+    turns = []; loaded = false; busy = false; pending = null; errMsg = null; picked = '';
+    if (panel.classList.contains('open')) loadHistory();
+  };
   window.__mdChatTogglePanel = function(){
     var opening = !panel.classList.contains('open');
     panel.classList.toggle('open', opening);
@@ -891,7 +896,8 @@ def init_js(token: str, ready: bool = False, reason: str = "") -> str:
                          ensure_ascii=False).replace("<", "\\u003c")
     return (f"(function(){{var s = {payload};"
             "window.__mdChatTok = s.tok; window.__mdChatReady = s.ready;"
-            "window.__mdChatReason = s.reason; window.__mdChatModel = s.model;})();")
+            "window.__mdChatReason = s.reason; window.__mdChatModel = s.model;"
+            "if (window.__mdChatSwitch) window.__mdChatSwitch();})();")
 
 
 def register_routes(fastapi_app, wd_for: Callable[[str], object],  # noqa: ANN001

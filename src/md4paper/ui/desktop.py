@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -91,6 +92,21 @@ def reveal(path: Path) -> None:
             subprocess.run(["xdg-open", str(path.parent)], check=False, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         pass
+
+
+def open_file(path: Path) -> bool:
+    """파일을 운영체제 기본 앱으로 연다 (PDF → 미리보기·Acrobat 등). 반환: 띄우기 성공 여부."""
+    try:
+        if sys.platform == "darwin":
+            return subprocess.run(["open", str(path)], check=False, timeout=10).returncode == 0
+        if sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]  # noqa: S606 — Windows 전용
+            return True
+        if shutil.which("xdg-open"):
+            return subprocess.run(["xdg-open", str(path)], check=False, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return False
 
 
 async def deliver(name: str, data: bytes, media_type: str = "application/zip") -> None:

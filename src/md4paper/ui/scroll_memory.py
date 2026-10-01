@@ -30,7 +30,8 @@ SELECTORS = (
 
 _JS = """
 (function(){
-  if (window.__mdScrollMem) return; window.__mdScrollMem = true;
+  // 탭 전환은 문서를 버리지 않고 본문만 갈아 끼운다(§ui/spa.py) → 이미 떠 있으면 화면 키만 바꾼다
+  if (window.__mdScrollMem) { window.__mdScrollMem.setPaper(%s); return; }
   var PAPER = %s, SELS = %s;
   var PREFIX = 'md4:pos:' + PAPER + ':';
   var quiet = 0, timer = null, moved = false;
@@ -111,8 +112,15 @@ _JS = """
   document.addEventListener('visibilitychange', function(){ if (document.hidden) save(); });
   // 단계 탭을 누르면 패널이 갈아 끼워진다 → 누르기 전 자리 저장, 새 패널이 붙은 뒤 그 단계 자리 복원
   document.addEventListener('click', function(ev){
-    if (ev.target.closest && ev.target.closest('.q-tab')) { save(); setTimeout(restoreSoon, 60); }
+    if (!ev.target.closest) return;
+    if (ev.target.closest('.q-tab')) { save(); setTimeout(restoreSoon, 60); }
+    else if (ev.target.closest('.md4-tab, .md4-pick')) save();   // 다른 화면으로 — 떠나기 전 자리 저장
   }, true);
+  window.__mdScrollMem = {setPaper: function(key){
+    if (key === PAPER) return;
+    PAPER = key; PREFIX = 'md4:pos:' + PAPER + ':';
+    restoreSoon();                           // 새 화면이 붙는 대로 그 화면의 자리로
+  }};
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', restoreSoon);
   else restoreSoon();
 })();
@@ -121,11 +129,11 @@ _JS = """
 
 def init_js(paper_key: str) -> str:
     """이 논문(또는 화면)의 스크롤 기억 스크립트."""
-    return _JS % (json.dumps(paper_key), json.dumps(list(SELECTORS)))
+    return _JS % (json.dumps(paper_key), json.dumps(paper_key), json.dumps(list(SELECTORS)))
 
 
 def install(paper_key: str) -> None:
     """현재 페이지에 스크롤 기억을 얹는다."""
-    from nicegui import ui
+    from md4paper.ui import spa
 
-    ui.add_body_html(f"<script>{init_js(paper_key)}</script>")
+    spa.add_body_html(f"<script>{init_js(paper_key)}</script>")

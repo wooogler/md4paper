@@ -249,7 +249,7 @@ HTML = """
 
 def install() -> None:
     """현재 페이지에 찾기 바를 얹는다 (CSS + 바 + 키 바인딩)."""
-    from nicegui import ui
+    from md4paper.ui import spa
 
-    ui.add_css(CSS)
-    ui.add_body_html(HTML)
+    spa.add_css(CSS)
+    spa.add_body_html(HTML)  # 이미 얹혀 있으면(탭을 옮겨 본문만 바뀐 경우) 그대로 쓴다

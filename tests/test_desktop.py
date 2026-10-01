@@ -154,3 +154,20 @@ def test_configure_sets_window_icon_and_downloads():
     finally:
         for cfg in (app.native.window_args, app.native.settings, app.native.start_args):
             cfg.clear()
+
+
+def test_open_file_uses_system_opener(monkeypatch, tmp_path):
+    """'PDF 뷰어로 열기' — 운영체제 기본 앱으로 넘긴다 (macOS는 open, 실제 창은 띄우지 않는다)."""
+    import subprocess
+    import sys
+
+    from md4paper.ui import desktop
+
+    calls = []
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(subprocess, "run",
+                        lambda cmd, **kw: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0))
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    assert desktop.open_file(pdf) is True
+    assert calls == [["open", str(pdf)]]
