@@ -261,6 +261,20 @@ def test_served_markdown_rewrites_all_images():
     assert "https://x.com/remote.png" in out  # 원격 URL은 그대로
 
 
+
+def test_served_markdown_hints_hidpi_width(tmp_path):
+    """dpi가 적힌 고해상도 그림만 예전 표시 폭(144dpi 기준) 힌트를 받는다."""
+    from PIL import Image
+
+    from md4paper.ui.app import served_markdown
+
+    Image.new("RGB", (800, 400), "white").save(tmp_path / "hi.png", dpi=(288, 288))
+    Image.new("RGB", (400, 200), "white").save(tmp_path / "old.png")  # 예전 그림 — dpi 없음
+    out = served_markdown("![a](images/hi.png)\n![b](images/old.png)\n", "t", tmp_path)
+    assert "](/wdimages/t/hi.png#mdw=400)" in out  # 픽셀은 2배, 보이는 크기는 그대로
+    assert "](/wdimages/t/old.png)" in out
+    assert "](/wdimages/t/missing.png)" in served_markdown("![c](missing.png)", "t", tmp_path)
+
 def test_format_reference_one_line():
     from md4paper.ir import RefEntry
     from md4paper.ui.controller import _format_reference

@@ -78,13 +78,14 @@ def metadata(src) -> dict:  # noqa: ANN001
 
 
 def render_region_png(  # noqa: ANN001
-    src, page: int, rect: tuple[float, float, float, float], zoom: float = 3.0,
+    src, page: int, rect: tuple[float, float, float, float], zoom: float = 3.0, mark_dpi: bool = False,
 ) -> bytes | None:
     """페이지의 한 영역만 PNG로 잘라낸다 (좌상단 원점 pt). 범위 밖이면 None.
 
     pdfium의 `crop`은 좌표가 아니라 **각 변에서 잘라낼 여백**(left, bottom, right, top)이다.
     수식은 원문에서도 작아서 zoom을 페이지 렌더(1.5)보다 높게 잡는다 — 첨자·위첨자가
     LLM 입력에서 뭉개지면 그게 곧 오독이 된다.
+    `mark_dpi`면 PNG에 렌더 배율(72×zoom dpi)을 적는다 — 뷰어가 이걸 보고 표시 크기를 되돌린다.
     """
     import io
 
@@ -98,7 +99,8 @@ def render_region_png(  # noqa: ANN001
         if width - crop[0] - crop[2] <= 1 or height - crop[1] - crop[3] <= 1:
             return None  # 빈 영역 — pdfium이 여기서 에러를 낸다
         buf = io.BytesIO()
-        pg.render(scale=zoom, crop=crop).to_pil().save(buf, format="PNG")
+        extra = {"dpi": (72 * zoom, 72 * zoom)} if mark_dpi else {}
+        pg.render(scale=zoom, crop=crop).to_pil().save(buf, format="PNG", **extra)
         return buf.getvalue()
 
 

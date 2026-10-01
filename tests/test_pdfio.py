@@ -29,6 +29,19 @@ def test_page_count_and_render(sample_pdf):
     assert pdfio.render_page_png(sample_pdf, 99) is None  # 범위 밖
 
 
+
+def test_render_region_marks_dpi(sample_pdf):
+    """mark_dpi면 렌더 배율이 PNG dpi로 남는다 (뷰어가 표시 크기를 되돌리는 근거)."""
+    import io
+
+    from PIL import Image
+
+    hi = Image.open(io.BytesIO(pdfio.render_region_png(sample_pdf, 0, (10, 10, 60, 40), zoom=4.0,
+                                                      mark_dpi=True)))
+    assert hi.size == (200, 120) and round(hi.info["dpi"][0]) == 288
+    plain = Image.open(io.BytesIO(pdfio.render_region_png(sample_pdf, 0, (10, 10, 60, 40))))
+    assert "dpi" not in plain.info
+
 def test_page_count_on_broken_pdf(tmp_path):
     broken = tmp_path / "broken.pdf"
     broken.write_bytes(b"not a pdf at all")

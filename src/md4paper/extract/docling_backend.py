@@ -13,7 +13,7 @@ from pathlib import Path
 
 from md4paper.extract import formulas as formula_regions
 from md4paper.extract import spacing
-from md4paper.extract.reading_order import export_geometry, repair_reading_order
+from md4paper.extract.reading_order import _top_left, export_geometry, repair_reading_order
 from md4paper.extract.text_clean import ExtractError, rewrite_image_refs
 from md4paper.workdir import WorkDir
 
@@ -937,8 +937,17 @@ def _relocate_footer_blocks(document) -> tuple[list[str], list[str], list[str]]:
     return footnotes, boilerplate, author_notes
 
 
-# Docling export 아티팩트 파일명: image_000002_<hash>.png → 픽처 인덱스 2 (document.pictures[2])
+# Docling export 아티팩트 파일명: image_000002_<hash>.png → 픽처 인덱스 2.
+# 번호는 document.pictures 순서가 아니라 **본문 순회(iterate_items) 순서**로 매겨진다 —
+# 읽기 순서를 되돌린 뒤엔 둘이 다르다. 그래서 _export_pictures로 같은 순서를 다시 만든다.
 _ARTIFACT_IDX_RE = re.compile(r"image_0*(\d+)_")
+
+
+def _export_pictures(document) -> list:  # noqa: ANN001 — DoclingDocument
+    """마크다운 export가 아티팩트 번호를 매기는 순서 그대로의 PictureItem 목록."""
+    from docling_core.types.doc import PictureItem
+
+    return [it for it, _ in document.iterate_items() if isinstance(it, PictureItem)]
 
 
 def _artifact_pic(pictures: list, fname: str):  # noqa: ANN001,ANN201 — DoclingDocument PictureItem
@@ -949,6 +958,50 @@ def _artifact_pic(pictures: list, fname: str):  # noqa: ANN001,ANN201 — Doclin
     k = int(m.group(1))
     return pictures[k] if 0 <= k < len(pictures) else None
 
+
+
+# 그림 해상도: docling은 images_scale(2.0 = 144dpi) 페이지 래스터에서 그림을 잘라 낸다 — 벡터 그림도
+# 그 해상도로 굳어서, 같은 해상도라도 화면에 크게 펼쳐 보이는 뷰어에선 PDF보다 확연히 흐리다.
+# 같은 bbox를 원본 PDF에서 이 배율(288dpi)로 다시 그린다. PNG에 dpi를 적어 두면 뷰어가
+# 예전 표시 크기(1pt = 2px)를 지킨다 — 크기는 그대로, 픽셀만 촘촘해진다.
+FIG_ZOOM = 4.0
+_IMAGES_SCALE = 2.0  # docling 페이지 래스터 배율 — 아티팩트 크기 대조의 기준
+
+
+def _picture_png(source: Path, pic, document, artifact: Path) -> bytes | None:  # noqa: ANN001
+    """픽처의 bbox를 원본 PDF에서 FIG_ZOOM 배율로 다시 렌더한 PNG. 좌표가 없거나 실패하면 None.
+
+    docling이 잘라 낸 래스터(`artifact`)와 크기가 맞을 때만 쓴다 — 짝이 어긋난 픽처면
+    엉뚱한 그림으로 바꿔치기하느니 흐린 원래 그림이 낫다.
+    """
+    from md4paper import pdfio
+
+    prov = getattr(pic, "prov", None)
+    if not prov:
+        return None
+    page_no = int(prov[0].page_no)
+    size = getattr(getattr(document, "pages", {}).get(page_no, None), "size", None)
+    height = float(getattr(size, "height", 0) or 0)
+    if not height:
+        return None
+    box = prov[0].bbox
+    top, bottom = _top_left(box, height)
+    rect = (min(box.l, box.r), top, max(box.l, box.r), bottom)
+    try:
+        from PIL import Image
+
+        with Image.open(artifact) as im:
+            aw, ah = im.size
+    except Exception:  # noqa: BLE001
+        return None
+    for got, pt in ((aw, rect[2] - rect[0]), (ah, rect[3] - rect[1])):
+        want = pt * _IMAGES_SCALE
+        if abs(got - want) > 0.05 * want + 3:
+            return None
+    try:
+        return pdfio.render_region_png(source, page_no - 1, rect, zoom=FIG_ZOOM, mark_dpi=True)
+    except Exception:  # noqa: BLE001 — 다시 그리기 실패면 docling 래스터를 그대로 쓴다
+        return None
 
 
 def _artifact_page(pictures: list, fname: str) -> int | None:
@@ -1082,7 +1135,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
 
     opts = PdfPipelineOptions()
     opts.generate_picture_images = True
-    opts.images_scale = 2.0
+    opts.images_scale = _IMAGES_SCALE
     opts.do_ocr = ocr  # born-digital 논문은 OCR 불필요 (기본 off)
 
     converter = DocumentConverter(
@@ -1112,7 +1165,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         formula_recs = []
     wd.extract.mkdir(parents=True, exist_ok=True)
     wd.frontmatter_txt.write_text("\n".join(boilerplate), encoding="utf-8")  # 서지(venue/연도) 추출용
-    pictures = list(getattr(result.document, "pictures", []))  # 아티팩트 파일명 인덱스와 매핑
+    pictures = _export_pictures(result.document)  # 아티팩트 파일명 인덱스와 매핑
 
     with tempfile.TemporaryDirectory(prefix="md4paper-docling-") as tmp:
         md_path = Path(tmp) / "out.md"
@@ -1153,7 +1206,12 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         if artifacts.is_dir():
             for i, img in enumerate(sorted(p for p in artifacts.iterdir() if p.is_file()), start=1):
                 new_name = _short_name(img, i)
-                shutil.copy2(img, wd.extract_images / new_name)
+                pic = _artifact_pic(pictures, img.name)
+                png = _picture_png(source, pic, result.document, img) if pic is not None else None
+                if png is not None and img.suffix.lower() == ".png":
+                    (wd.extract_images / new_name).write_bytes(png)
+                else:
+                    shutil.copy2(img, wd.extract_images / new_name)
                 mapping[str(img)] = new_name
                 mapping[img.name] = new_name
                 pg = _artifact_page(pictures, img.name)

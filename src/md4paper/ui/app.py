@@ -7,6 +7,7 @@ CLI와 같은 아티팩트(sections.yaml 등)를 읽고 쓴다. 항상 떠 있�
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import re
 import time
@@ -1257,6 +1258,23 @@ _IMG_ZOOM_HTML = """
 <script>
 (function(){
   if (window.__mdImgZoom) return; window.__mdImgZoom = true;
+  // 고해상도 그림(#mdw= 힌트)은 예전 크기로 — 픽셀만 촘촘해지고 본문 레이아웃은 그대로.
+  // 확대 뷰어의 그림엔 적용하지 않는다(거기선 원본 픽셀을 다 써야 한다).
+  function hidpi(root){
+    var imgs = root.querySelectorAll ? root.querySelectorAll('.md-preview img[src*="#mdw="]') : [];
+    for (var i = 0; i < imgs.length; i++){
+      var m = /#mdw=(\d+)/.exec(imgs[i].getAttribute('src') || '');
+      if (m && !imgs[i].style.width) imgs[i].style.width = m[1] + 'px';
+    }
+  }
+  hidpi(document);
+  new MutationObserver(function(muts){
+    for (var i = 0; i < muts.length; i++)
+      for (var j = 0; j < muts[i].addedNodes.length; j++){
+        var n = muts[i].addedNodes[j];
+        if (n.nodeType === 1) hidpi(n.parentNode || n);
+      }
+  }).observe(document.body, {childList: true, subtree: true});
   var box = document.getElementById('md-img-zoom');
   if (!box) return;
   var img = box.querySelector('img'), pct = box.querySelector('.mdz-pct'), cap = box.querySelector('.mdz-cap');
@@ -1384,17 +1402,53 @@ def wd_token(root: Path) -> str:
     return hashlib.sha1(str(Path(root).resolve()).encode("utf-8")).hexdigest()[:12]
 
 
-def _to_served(path: str, token: str) -> str:
+# 그림 표시 크기의 기준 — 예전 그림 래스터(144dpi)는 1pt = 2px로 그대로 보였다.
+# 고해상도로 다시 그린 그림(PNG에 dpi가 적힘)도 이 크기로 보여야 본문 레이아웃이 안 바뀐다.
+_BASE_DPI = 144.0
+
+
+@functools.lru_cache(maxsize=512)
+def _hidpi_width(path: str, mtime_ns: int) -> int | None:  # noqa: ARG001 — mtime은 캐시 무효화 키
+    """고해상도 그림이면 예전 크기로 보일 CSS 폭(px), 아니면 None (헤더만 읽는다)."""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            dpi = (im.info.get("dpi") or (0, 0))[0]
+            width = im.size[0]
+    except Exception:  # noqa: BLE001
+        return None
+    if not dpi or dpi <= _BASE_DPI * 1.05:
+        return None
+    return max(1, round(width * _BASE_DPI / float(dpi)))
+
+
+def _to_served(path: str, token: str, images_dir: Path | None = None) -> str:
     if path.startswith(("http://", "https://", "data:", "/wdimages/")):
         return path
     name = path.rstrip("/").split("/")[-1]  # 파일명만 서버 라우트로
-    return f"/wdimages/{token}/{name}"
+    url = f"/wdimages/{token}/{name}"
+    if images_dir is not None:
+        f = images_dir / name
+        try:
+            w = _hidpi_width(str(f), f.stat().st_mtime_ns)
+        except OSError:
+            w = None
+        if w:
+            url += f"#mdw={w}"  # 표시 폭 힌트 — 프래그먼트라 요청·캐시엔 영향 없다 (_HIDPI_JS가 읽는다)
+    return url
 
 
-def served_markdown(md: str, token: str) -> str:
-    """프리뷰용 — 모든 이미지 참조(md·HTML)를 out/images 서버 라우트로 치환 (논문별 토큰 포함)."""
-    md = _MD_IMG_RE.sub(lambda m: m.group(1) + _to_served(m.group(2), token) + m.group(3), md)
-    md = _HTML_IMG_RE.sub(lambda m: m.group(1) + _to_served(m.group(2), token) + m.group(3), md)
+def served_markdown(md: str, token: str, images_dir: Path | None = None) -> str:
+    """프리뷰용 — 모든 이미지 참조(md·HTML)를 out/images 서버 라우트로 치환 (논문별 토큰 포함).
+
+    `images_dir`를 주면 고해상도 그림에 표시 폭 힌트(#mdw=)를 붙인다.
+    """
+    def sub(m: re.Match) -> str:
+        return m.group(1) + _to_served(m.group(2), token, images_dir) + m.group(3)
+
+    md = _MD_IMG_RE.sub(sub, md)
+    md = _HTML_IMG_RE.sub(sub, md)
     return md
 
 
@@ -2097,7 +2151,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if not md:
             return ""
         page_by_id = {s.id: s.page for s in ctrl.manifest.sections}
-        return anchored_markdown(served_markdown(md, tok), ctrl.section_map(), page_by_id, jump=True)
+        return anchored_markdown(served_markdown(md, tok, ctrl.wd.out_images), ctrl.section_map(), page_by_id, jump=True)
 
     def toggle_edit(on: bool) -> None:
         """직접 편집 토글. 분할 뷰라 프리뷰가 계속 보이므로 스크롤 위치를 인수인계할 필요가 없다."""
@@ -2211,7 +2265,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     @ui.refreshable
     def ko_preview() -> None:
-        ui.markdown(served_markdown(ctrl.ko_markdown(), tok) or "_아직 번역 안 됨 — 용어집 탭에서 번역을 실행하세요._",
+        ui.markdown(served_markdown(ctrl.ko_markdown(), tok, ctrl.wd.out_images) or "_아직 번역 안 됨 — 용어집 탭에서 번역을 실행하세요._",
                     extras=["fenced-code-blocks", "tables", "latex"]).classes("md-preview")
 
     # --- 번역 탭 결과: 원문/번역 토글 + 섹션·문단 정렬 나란히 (뷰어와 동일 정렬) ---
@@ -2248,8 +2302,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             chip("원문", "en")
             chip("번역", "ko", has_ko)
 
-        en = served_markdown(en_raw, tok) if en_raw else ""
-        rows = align_rows(en, served_markdown(ko_raw, tok)) if has_ko else None
+        en = served_markdown(en_raw, tok, ctrl.wd.out_images) if en_raw else ""
+        rows = align_rows(en, served_markdown(ko_raw, tok, ctrl.wd.out_images)) if has_ko else None
         two = show_en and show_ko and rows is not None
         # 탭(스크롤 컬럼) 안이라 그리드가 높이를 갖도록 고정 높이 컨테이너로 감싼다
         with ui.element("div").style("height: calc(100vh - 210px); min-height: 0"):
@@ -2266,7 +2320,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                             with ui.element("div").classes(f"sbs-cell{sep}"):
                                 ui.markdown(kob or "", extras=_md).classes("md-preview sbs-md")
             else:  # 번역 전(ko 없음) 또는 정렬 실패 → 단일 패널
-                single = served_markdown(ko_raw, tok) if show_ko else en
+                single = served_markdown(ko_raw, tok, ctrl.wd.out_images) if show_ko else en
                 with ui.element("div").classes("vpane md-preview").style("padding:0 12px"):
                     ui.markdown(single or "_아직 번역 안 됨 — 용어집 탭에서 번역을 실행하세요._", extras=_md)
 
@@ -2488,7 +2542,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ui.label("영어 마크다운이 없습니다 — 먼저 변환하세요.").classes("text-sm text-gray-500")
             return
         _md = ["fenced-code-blocks", "tables", "latex"]
-        en = served_markdown(en_raw, tok)
+        en = served_markdown(en_raw, tok, ctrl.wd.out_images)
         ko_raw = ctrl.ko_markdown()
         has_ko = bool(ko_raw)
         has_pdf = ctrl.pdf_page_count() > 0
@@ -2499,7 +2553,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if not (show_en or show_ko or show_pdf):
             show_en = True  # 최소 하나는 보이도록
 
-        rows = align_rows(en, served_markdown(ko_raw, tok)) if has_ko else None
+        rows = align_rows(en, served_markdown(ko_raw, tok, ctrl.wd.out_images)) if has_ko else None
         aligned = rows is not None
         if not aligned:
             rows = [(s, None, _heading_of(s)) for s in _split_sections(en)]  # EN 전용 유사 행
@@ -2564,7 +2618,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 # 정렬 실패 + 번역만 → 단일 패널 (여기서도 하이라이트·메모는 그대로 된다)
                 with ui.element("div").classes("vpane md-preview anno-scope").style(
                         "padding:1px 22px 8px").props("data-row=0 data-side=ko"):
-                    ui.markdown(served_markdown(ko_raw, tok), extras=_md)
+                    ui.markdown(served_markdown(ko_raw, tok, ctrl.wd.out_images), extras=_md)
 
         with ui.element("div").classes("vshell"):
             if viewer_state["toc"]:
