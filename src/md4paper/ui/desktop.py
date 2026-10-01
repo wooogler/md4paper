@@ -135,6 +135,52 @@ async def deliver(name: str, data: bytes, media_type: str = "application/zip") -
     ui.notify(f"저장됨: {target}", type="positive")
 
 
+def copy_image(path: Path) -> bool:
+    """그림 파일을 OS 클립보드에 이미지로 넣는다. 성공하면 True.
+
+    브라우저의 `navigator.clipboard.write`가 안 되는 곳(일부 웹뷰·권한 거부)의 대체 경로다 —
+    로컬 앱이라 서버 프로세스의 클립보드가 곧 사용자의 클립보드다. PNG가 아니면 PNG로 바꿔 넣는다
+    (붙여넣는 앱들이 가장 널리 받는 형식).
+    """
+    import os
+    import tempfile
+
+    src, tmp = Path(path), None
+    try:
+        if src.suffix.lower() != ".png":
+            from PIL import Image
+
+            fd, name = tempfile.mkstemp(suffix=".png")
+            os.close(fd)
+            tmp = Path(name)
+            with Image.open(src) as im:
+                im.save(tmp, format="PNG")
+            src = tmp
+        if sys.platform == "darwin":
+            # 경로는 argv로 넘긴다 — 스크립트 문자열에 끼워 넣으면 따옴표 든 경로가 깨진다
+            cmd = ["osascript", "-e", "on run argv",
+                   "-e", "set the clipboard to (read (POSIX file (item 1 of argv)) as «class PNGf»)",
+                   "-e", "end run", str(src)]
+            return subprocess.run(cmd, check=False, timeout=15).returncode == 0
+        if sys.platform.startswith("win"):
+            ps = ("Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
+                  "$i=[System.Drawing.Image]::FromFile($env:MD4_IMG); "
+                  "[System.Windows.Forms.Clipboard]::SetImage($i); $i.Dispose()")
+            env = {**os.environ, "MD4_IMG": str(src)}
+            cmd = ["powershell", "-NoProfile", "-STA", "-Command", ps]
+            return subprocess.run(cmd, check=False, timeout=15, env=env).returncode == 0
+        for tool in (["wl-copy", "--type", "image/png"], ["xclip", "-selection", "clipboard", "-t", "image/png"]):
+            if shutil.which(tool[0]):
+                with src.open("rb") as fh:
+                    return subprocess.run(tool, stdin=fh, check=False, timeout=15).returncode == 0
+        return False
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
 async def choose_folder(title: str, initial: str | None = None) -> str | None:
     """폴더 선택 — 네이티브 창이면 앱 자신의 대화상자로, 아니면 OS 대화상자(osascript 등)로.
 

@@ -260,6 +260,7 @@ sup.md-fn a:hover { text-decoration: underline; }
   width: 28px; height: 26px; border: none; background: none; color: #e8e8e8;
   font-size: 15px; line-height: 1; border-radius: 7px; cursor: pointer; }
 #md-img-zoom .mdz-bar button:hover { background: rgba(255,255,255,.16); }
+#md-img-zoom .mdz-sep { width: 1px; height: 16px; margin: 0 4px; background: rgba(255,255,255,.22); }
 #md-img-zoom .mdz-pct { min-width: 48px; text-align: center; color: #cfcfcf; font-size: 12px;
   font-variant-numeric: tabular-nums; }
 /* 캡션(alt) + 조작 힌트 — 그림 아래 가운데 */
@@ -1250,10 +1251,20 @@ _IMG_ZOOM_HTML = """
       <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
         <path d="M4 9V4h5v2H6v3H4zm11-5h5v5h-2V6h-3V4zM4 15h2v3h3v2H4v-5zm14 3v-3h2v5h-5v-2h3z"/>
       </svg></button>
+    <span class="mdz-sep"></span>
+    <button data-act="copy" title="그림 복사 (⌘/Ctrl+C)">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+      </svg></button>
+    <button data-act="save" title="그림 저장 (⌘/Ctrl+S)">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+        <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/>
+      </svg></button>
+    <span class="mdz-sep"></span>
     <button data-act="close" title="닫기 (Esc)">&#10005;</button>
   </div>
   <div class="mdz-foot"><div class="mdz-cap"></div>
-    <div class="mdz-hint">휠·더블클릭으로 확대 · 드래그로 이동 · Esc로 닫기</div></div>
+    <div class="mdz-hint">휠·더블클릭으로 확대 · 드래그로 이동 · ⌘/Ctrl+C 복사 · Esc로 닫기</div></div>
 </div>
 <script>
 (function(){
@@ -1315,6 +1326,40 @@ _IMG_ZOOM_HTML = """
   }
   function fit(){ base = fitScale(); s = base; tx = 0; ty = 0; apply(); }
   function close(){ box.classList.remove('open'); }
+  // 복사·저장 — 서버 쪽 경로(/wdimages/<토큰>/<파일>)만 넘긴다. #mdw= 같은 꼬리는 뗀다.
+  function imgPath(){ try { return new URL(img.src).pathname; } catch (e) { return ''; } }
+  var CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">'
+    + '<path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>';
+  function flash(act){                 // 눌린 버튼을 잠깐 체크로 — 복사는 눈에 보이는 결과가 없어서
+    var b = box.querySelector('.mdz-bar button[data-act="' + act + '"]');
+    if (!b || b.__orig) return;
+    b.__orig = b.innerHTML; b.innerHTML = CHECK;
+    setTimeout(function(){ b.innerHTML = b.__orig; b.__orig = null; }, 1200);
+  }
+  function asPng(blob){                // 클립보드는 PNG만 확실히 받는다 — 다른 형식은 캔버스로 바꾼다
+    if (blob.type === 'image/png') return Promise.resolve(blob);
+    return createImageBitmap(blob).then(function(bm){
+      var c = document.createElement('canvas'); c.width = bm.width; c.height = bm.height;
+      c.getContext('2d').drawImage(bm, 0, 0);
+      return new Promise(function(res){ c.toBlob(res, 'image/png'); });
+    });
+  }
+  function copyImg(){
+    var path = imgPath(); if (!path) return;
+    // 서버가 OS 클립보드에 넣는다 — 웹뷰(앱 창)엔 이미지 클립보드 API가 없거나 막혀 있다
+    function viaServer(){ if (typeof emitEvent === 'function') emitEvent('md4-img-copy', {path: path}); }
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.write || !window.ClipboardItem) throw 0;
+      // Safari는 사용자 동작 안에서 write를 불러야 해서, blob은 Promise째로 건넨다
+      var item = new ClipboardItem({'image/png': fetch(path).then(function(r){ return r.blob(); }).then(asPng)});
+      navigator.clipboard.write([item]).then(function(){ flash('copy'); }, viaServer);
+    } catch (e) { viaServer(); }
+  }
+  function saveImg(){
+    var path = imgPath();
+    if (path && typeof emitEvent === 'function') emitEvent('md4-img-save', {path: path});
+  }
+  window.__mdImgCopied = function(){ flash('copy'); };
 
   document.addEventListener('click', function(ev){
     var t = ev.target;
@@ -1335,7 +1380,8 @@ _IMG_ZOOM_HTML = """
     b.addEventListener('click', function(){
       var a = b.getAttribute('data-act');
       if (a === 'in') zoomBy(1.25); else if (a === 'out') zoomBy(0.8);
-      else if (a === 'fit') fit(); else close();
+      else if (a === 'fit') fit(); else if (a === 'copy') copyImg(); else if (a === 'save') saveImg();
+      else close();
     });
   });
   box.addEventListener('wheel', function(ev){
@@ -1377,6 +1423,12 @@ _IMG_ZOOM_HTML = """
     if (ev.key === 'Escape') close();
     else if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA'
                            || ev.target.isContentEditable)) return;   // 입력 중인 글자는 뺏지 않는다
+    else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 'c' || ev.key === 'C')) {
+      if (String(window.getSelection() || '')) return;   // 캡션 글자를 골라 둔 복사는 그대로
+      copyImg();
+    }
+    else if ((ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S')) saveImg();
+    else if (ev.metaKey || ev.ctrlKey) return;            // 다른 조합키(⌘+= 브라우저 확대 등)는 뺏지 않는다
     else if (ev.key === '+' || ev.key === '=') zoomBy(1.25);
     else if (ev.key === '-' || ev.key === '_') zoomBy(0.8);
     else if (ev.key === '0') fit();
@@ -2127,6 +2179,39 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     ui.add_body_html(_CITE_TIP_HTML)
     ui.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
     ui.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
+
+    def zoomed_file(e) -> Path | None:  # noqa: ANN001 — GenericEventArguments
+        """확대 뷰어가 넘긴 `/wdimages/<토큰>/<파일>` → 이 논문의 out/images 안 실제 파일."""
+        from urllib.parse import unquote
+
+        parts = str((e.args or {}).get("path", "")).split("/")
+        if len(parts) != 4 or parts[1] != "wdimages" or parts[2] != tok:
+            return None
+        base = ctrl.wd.out_images.resolve()
+        target = (base / unquote(parts[3])).resolve()
+        return target if target.is_relative_to(base) and target.is_file() else None
+
+    async def save_zoomed(e) -> None:  # noqa: ANN001
+        f = zoomed_file(e)
+        if f is None:
+            ui.notify("그림 파일을 찾지 못했습니다.", type="warning")
+            return
+        media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(
+            f.suffix.lower(), "application/octet-stream")
+        # 논문 이름을 앞에 — 다운로드 폴더에서 figure-1.png가 여러 논문 것으로 섞이지 않게
+        await desktop.deliver(f"{ctrl.wd.root.stem}_{f.name}", f.read_bytes(), media)
+
+    async def copy_zoomed(e) -> None:  # noqa: ANN001
+        from nicegui import run
+
+        f = zoomed_file(e)
+        if f is not None and await run.io_bound(desktop.copy_image, f):
+            await ui.run_javascript("window.__mdImgCopied && window.__mdImgCopied()")
+        else:
+            ui.notify("그림을 클립보드에 넣지 못했습니다 — 저장 버튼으로 받아 주세요.", type="warning")
+
+    ui.on("md4-img-save", save_zoomed)
+    ui.on("md4-img-copy", copy_zoomed)
     ui.add_css(_ANNO_CSS)
     ui.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
     ui.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
