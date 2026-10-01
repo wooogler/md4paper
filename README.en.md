@@ -270,6 +270,10 @@ You rarely read one paper at a time. There are two ways to move between them.
   to close it (the paper and its files are untouched); closing the tab you are on moves to its
   neighbour, or home if it was the last one. With many tabs the row scrolls sideways. The **📌** at
   the end of the tab row pins the current paper to the top of the home list — separate from tabs.
+- **Home tab and +** — the first tab is a **Home** tab that never closes (upload and paper list). Home
+  shows the same tab row, so you can jump straight back to an open paper. The **+** next to the tabs
+  lists your converted papers — search by title, author or year and click (Enter opens the first
+  match) to open it in a new tab without going through home. Papers already open are marked.
 - **Background jobs** — translation, layout auto-fix, reference parsing and adding glossary terms run
   on the server. Switch to another tab or go home mid-run and the job **is not cancelled; it runs to
   the end** (including saving and auto-export). That paper's tab icon spins and a **↻ count** button

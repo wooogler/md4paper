@@ -1796,8 +1796,7 @@ _PREPAINT_HTML = """
 
 _CHROME_CSS = """
 /* 헤더 한 줄 — 논문 탭은 아래 끝에 물리고, 그림자를 없애야 활성 탭이 본문으로 이어져 보인다. */
-.md4-header { min-height: 44px; padding: 0 8px 0 2px !important; box-shadow: none !important; gap: 4px; }
-.md4-hdr-back { margin-bottom: 6px; }
+.md4-header { min-height: 44px; padding: 0 8px !important; box-shadow: none !important; gap: 4px; }
 .md4-tabstrip { max-width: 52vw; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .md4-tabstrip::-webkit-scrollbar { height: 0; }
 .md4-tabtools { padding-bottom: 5px; opacity: .9; }
@@ -1826,6 +1825,14 @@ _CHROME_CSS = """
 .md4-tab.on .md4-tab-ico { opacity: .5; }
 .md4-tab-ico.md4-tab-busy { opacity: .9; animation: md4spin 1s linear infinite; }
 .md4-jobsbtn { margin-right: 2px; }
+.md4-tab-home { flex: 0 0 auto; }
+.md4-tab-home .md4-tab-t { overflow: visible; }
+.md4-tabadd { margin: 0 2px 5px; flex: 0 0 auto; }
+/* '+' 논문 고르기 목록 — 한 줄 = 한 논문, 호버로 고를 자리를 보여 준다 */
+.md4-pick { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+  cursor: pointer; }
+.md4-pick:hover { background: rgba(35,131,226,.08); }
+.md4-pick.here { opacity: .6; cursor: default; }
 .md4-spin { animation: md4spin 1s linear infinite; }
 @keyframes md4spin { to { transform: rotate(360deg); } }
 /* × 는 평소엔 자리만 비워 두고, 그 탭에 마우스가 올라올 때만 보인다 (Notion·브라우저 탭과 같게) */
@@ -1868,6 +1875,205 @@ async def _spawn_window(root: Path, state: dict, title: str) -> None:
     else:
         ui.notify(f"새 창이 바로 닫혔습니다 (종료 코드 {code}) — 앱 창 의존성(pywebview)을 확인하세요.",
                   type="negative", timeout=6000)
+
+
+def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  # noqa: ANN001, ANN201
+    """헤더의 탭 줄 — 맨 앞 '홈' 탭 + 연 논문 탭들(×까지 유지) + '+'(변환된 논문 골라 열기).
+
+    홈·리뷰 두 화면이 같은 탭 줄을 쓴다. here=None이면 홈 탭이 활성이다. 탭은 페이지 이동이고
+    (한 창에 한 화면), 나란히 보려면 리뷰 화면의 ⧉로 새 창을 띄운다. 고정(pin)과는 별개다.
+    백그라운드 작업(번역 등)이 도는 논문은 탭 아이콘이 돈다. tools()는 탭 줄 끝 단추(고정·새 창)를
+    그린다. 반환값은 refreshable — .refresh()로 다시 그린다.
+    """
+    from nicegui import ui
+
+    here_key = str(Path(here).resolve()) if here is not None else None
+
+    @ui.refreshable
+    def bar() -> None:
+        busy = {j.root for j in jobs.running()}
+        tabs = [str(p) for p in tabstore.load()]
+        if here_key is not None and here_key not in tabs:  # 다른 창이 막 닫은 탭 등 — 보는 논문은 늘 보인다
+            tabs.append(here_key)
+        with ui.row().classes("items-end gap-0 no-wrap md4-tabstrip"):
+            _home_chip(active=here_key is None)
+            for t in tabs:
+                _chip(here_title if t == here_key else paper_title(Path(t)), Path(t),
+                      active=t == here_key, busy=t in busy)
+        ui.button(icon="add", color=None, on_click=open_picker) \
+            .props("flat dense round size=sm text-color=white").classes("md4-tabadd") \
+            .tooltip("논문 열기 — 변환된 논문을 골라 새 탭으로")
+        with ui.row().classes("items-center gap-0 no-wrap md4-tabtools"):
+            jobs_menu()
+            if tools is not None:
+                tools()
+
+    def _home_chip(active: bool) -> None:
+        tab = ui.element("div").classes("md4-tab md4-tab-home" + (" on" if active else ""))
+        with tab:
+            ui.icon("home", size="16px").classes("md4-tab-ico")
+            ui.label("홈").classes("md4-tab-t")
+        tab.tooltip("홈 — 업로드 · 논문 목록")
+        if not active:
+            tab.on("click", lambda: ui.navigate.to("/home"))
+
+    def _chip(title: str, root: Path, active: bool = False, busy: bool = False) -> None:
+        """논문 탭 하나 — 요소를 직접 짓는다.
+
+        Quasar chip으로 그리면 알약 모양·배지 느낌이 나서 '탭'으로 읽히지 않는다. 위쪽만 둥근
+        사각형 + 활성 탭은 본문과 같은 흰 바닥이라야 헤더에 물려 있는 탭처럼 보인다.
+        """
+        tab = ui.element("div").classes("md4-tab" + (" on" if active else ""))
+        with tab:
+            if busy:
+                ui.icon("autorenew", size="14px").classes("md4-tab-ico md4-tab-busy")
+            else:
+                ui.icon("description", size="14px").classes("md4-tab-ico")
+            ui.label(title).classes("md4-tab-t")
+            x = ui.element("span").classes("md4-tab-x")
+            with x:
+                ui.html("&#10005;")
+            x.on("click.stop", lambda _, r=root, a=active: close_tab(r, a))
+            x.tooltip("탭 닫기" + (" — 도는 작업은 계속됩니다" if busy else ""))
+        tip = title if active else f"{title}\n클릭하면 이 논문으로 이동"
+        if busy:
+            tip += "\n백그라운드 작업 진행 중"
+        tab.tooltip(tip)
+        if not active:
+            tab.on("click", lambda _, r=root: ui.navigate.to(_review_url(r)))
+
+    def close_tab(root: Path, active: bool) -> None:
+        nxt = tabstore.close_tab(root)
+        if not active:
+            bar.refresh()
+            return
+        # 보고 있던 탭을 닫으면 이웃 탭으로, 남은 탭이 없으면 홈으로 (작업은 서버에서 계속 돈다)
+        ui.navigate.to(_review_url(nxt) if nxt is not None else "/home")
+
+    def open_picker() -> None:
+        """'+' — 변환된 논문 목록에서 골라 바로 연다 (홈을 거치지 않고 새 탭으로)."""
+        from md4paper.workdir import recent_workdirs
+
+        ws = state.get("upload_dir")
+        rows = recent_workdirs(Path(ws), limit=1000) if ws else []
+        open_keys = {str(p) for p in tabstore.load()}
+        q = {"text": ""}
+
+        def matches() -> list[dict]:
+            words = q["text"].lower().split()
+            out = []
+            for r in rows:
+                hay = " ".join(str(r.get(k) or "") for k in ("title", "authors", "year", "venue", "name")).lower()
+                if all(w in hay for w in words):
+                    out.append(r)
+            return out
+
+        def pick(root: Path) -> None:
+            dlg.close()
+            tabstore.open_tab(root)
+            ui.navigate.to(_review_url(root))
+
+        with ui.dialog() as dlg, ui.card().classes("gap-2 q-pa-md").style("width:620px;max-width:94vw"):
+            with ui.row().classes("items-center w-full no-wrap"):
+                ui.label("논문 열기").classes("text-base font-bold")
+                ui.space()
+                ui.button("새 PDF 올리기", icon="upload_file", on_click=lambda: ui.navigate.to("/home")) \
+                    .props("flat dense no-caps size=sm color=primary").tooltip("홈에서 PDF를 올려 변환합니다")
+            search = ui.input(placeholder="제목 · 저자 · 연도로 찾기 (Enter = 첫 번째 열기)") \
+                .props("dense outlined autofocus clearable").classes("w-full")
+
+            @ui.refreshable
+            def listing() -> None:
+                found = matches()
+                if not rows:
+                    ui.label("아직 변환된 논문이 없습니다 — 홈에서 PDF를 올리세요.").classes("text-sm text-gray-500")
+                    return
+                if not found:
+                    ui.label("찾는 논문이 없습니다.").classes("text-sm text-gray-500")
+                    return
+                for r in found:
+                    key = str(Path(r["root"]).resolve())
+                    is_here = key == here_key
+                    item = ui.element("div").classes("md4-pick" + (" here" if is_here else ""))
+                    with item:
+                        ui.icon("push_pin" if r.get("pinned") else "description", size="16px") \
+                            .classes("text-primary" if r.get("pinned") else "text-gray-400")
+                        with ui.column().classes("gap-0 min-w-0 flex-grow"):
+                            ui.label(r["title"]).classes("text-sm truncate w-full")
+                            sub = " · ".join(str(x) for x in (r.get("authors"), r.get("year")) if x)
+                            if sub:
+                                ui.label(sub).classes("text-xs text-gray-500 truncate w-full")
+                        if is_here:
+                            ui.badge("보는 중", color="grey").props("outline")
+                        elif key in open_keys:
+                            ui.badge("열린 탭", color="primary").props("outline")
+                        if r.get("has_ko"):
+                            ui.badge("번역", color="green").props("outline")
+                    if is_here:
+                        item.on("click", dlg.close)
+                    else:
+                        item.on("click", lambda _, root=r["root"]: pick(Path(root)))
+
+            def on_search(e) -> None:  # noqa: ANN001
+                q["text"] = e.value or ""
+                listing.refresh()
+
+            def on_enter() -> None:
+                found = [r for r in matches() if str(Path(r["root"]).resolve()) != here_key]
+                if found:
+                    pick(Path(found[0]["root"]))
+
+            search.on_value_change(on_search)
+            search.on("keydown.enter", on_enter)
+            with ui.column().classes("w-full gap-0").style("max-height:60vh; overflow-y:auto"):
+                listing()
+        dlg.open()
+
+    @ui.refreshable
+    def jobs_menu() -> None:
+        """도는 백그라운드 작업 — 어느 화면에 있든 진행을 한눈에, 눌러서 그 논문으로."""
+        active = jobs.running()
+        conv = [q for q in state.get("queue", []) if q.get("status") in _QUEUE_ACTIVE]
+        if not active and not conv:
+            return
+        btn = ui.button(color=None).props("flat dense no-caps text-color=white size=sm") \
+            .classes("md4-jobsbtn").tooltip("백그라운드 작업 진행 중 — 눌러서 보기")
+        with btn:
+            ui.icon("autorenew", size="16px").classes("md4-spin")
+            ui.label(f"{len(active) + len(conv)}").classes("q-ml-xs")
+            with ui.menu().props("anchor='bottom right' self='top right'"):
+                for j in active:
+                    pct = f" {int(j.fraction * 100)}%" if j.total else ""
+                    ui.menu_item(f"{j.label}{pct} · {j.title or Path(j.root).stem}",
+                                 on_click=lambda _, r=j.root: ui.navigate.to(_review_url(Path(r))))
+                for q in conv:
+                    ui.menu_item(f"변환 · {q['name']}", on_click=lambda: ui.navigate.to("/home"))
+
+    # 탭 아이콘·작업 목록은 다른 논문의 작업 상태도 비추므로, 무엇이 도는지 바뀔 때만 다시 그린다
+    sig_state: dict = {"v": None, "watch": []}
+
+    def poll() -> None:
+        # 다른 논문의 작업이 끝나면 여기서 알린다 (지금 보는 논문 것은 각 화면이 붙어서 알린다)
+        for j in sig_state["watch"]:
+            if not j.running and not j.seen and j.root != here_key:
+                j.seen = True
+                name = j.title or Path(j.root).stem
+                if j.status == "done":
+                    ui.notify(f"‘{name}’ {j.label} 완료 — {j.message}", type="positive")
+                else:
+                    ui.notify(f"‘{name}’ {j.label} 실패: {j.error}", type="negative")
+        sig_state["watch"] = jobs.running()
+        sig = (tuple(sorted((j.root, j.kind) for j in sig_state["watch"])),
+               sum(1 for q in state.get("queue", []) if q.get("status") in _QUEUE_ACTIVE))
+        if sig != sig_state["v"]:
+            first = sig_state["v"] is None
+            sig_state["v"] = sig
+            if not first:
+                bar.refresh()
+
+    ui.timer(1.0, poll)
+    bar()
+    return bar
 
 
 def new_window_button(root: Path, state: dict, title: str = "", *,
@@ -1920,109 +2126,13 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 — 앱 창에는 브라우저 찾기 바가 없다
     scroll_memory.install(tok)  # 읽던 자리(단계별 스크롤) 기억 — 탭으로 오가도 그 자리로
 
-    @ui.refreshable
-    def paper_tabs() -> None:
-        """헤더의 논문 탭 — 연 논문들(브라우저 탭처럼, ×를 누를 때까지 남는다).
-
-        탭은 페이지 이동이다(한 창에 한 논문). 나란히 보려면 옆의 ⧉로 새 창을 띄운다.
-        고정(pin)과는 별개다 — 고정은 홈 목록에서 관심 논문을 맨 위에 모으는 표시일 뿐이다.
-        백그라운드 작업(번역 등)이 도는 논문은 탭 아이콘이 돌아간다.
-        """
-        here = str(ctrl.wd.root.resolve())
-        busy = {j.root for j in jobs.running()}
-        tabs = [str(p) for p in tabstore.load()]
-        if here not in tabs:  # 방금 닫은 탭을 다른 창이 보고 있는 등 — 지금 보는 논문은 늘 보인다
-            tabs.append(here)
-        with ui.row().classes("items-end gap-0 no-wrap md4-tabstrip"):
-            for t in tabs:
-                _tab_chip(_title if t == here else paper_title(Path(t)), Path(t),
-                          active=t == here, busy=t in busy)
-        with ui.row().classes("items-center gap-0 no-wrap md4-tabtools"):
-            jobs_menu()
-            # 고정 토글 — 홈 목록 맨 위 '고정한 논문' 구역에 모아 둔다 (탭과는 무관)
-            pinned_here = is_pinned(ctrl.wd.root)
-            ui.button(icon="push_pin", color=None, on_click=toggle_pin) \
-                .props(f"flat dense round size=sm text-color={'amber-4' if pinned_here else 'white'}") \
-                .tooltip("목록 고정 해제" if pinned_here else "홈 목록 맨 위에 고정")
-            new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
-
-    def _tab_chip(title: str, root: Path, active: bool = False, busy: bool = False) -> None:
-        """논문 탭 하나 — 요소를 직접 짓는다.
-
-        Quasar chip으로 그리면 알약 모양·배지 느낌이 나서 '탭'으로 읽히지 않는다. 위쪽만 둥근
-        사각형 + 활성 탭은 본문과 같은 흰 바닥이라야 헤더에 물려 있는 탭처럼 보인다.
-        """
-        tab = ui.element("div").classes("md4-tab" + (" on" if active else ""))
-        with tab:
-            if busy:
-                ui.icon("autorenew", size="14px").classes("md4-tab-ico md4-tab-busy")
-            else:
-                ui.icon("description", size="14px").classes("md4-tab-ico")
-            ui.label(title).classes("md4-tab-t")
-            x = ui.element("span").classes("md4-tab-x")
-            with x:
-                ui.html("&#10005;")
-            x.on("click.stop", lambda _, r=root, a=active: close_tab(r, a))
-            x.tooltip("탭 닫기" + (" — 도는 작업은 계속됩니다" if busy else ""))
-        tip = title if active else f"{title}\n클릭하면 이 논문으로 이동"
-        if busy:
-            tip += "\n백그라운드 작업 진행 중"
-        tab.tooltip(tip)
-        if not active:
-            tab.on("click", lambda _, r=root: ui.navigate.to(_review_url(r)))
-
-    def close_tab(root: Path, active: bool) -> None:
-        nxt = tabstore.close_tab(root)
-        if not active:
-            paper_tabs.refresh()
-            return
-        # 보고 있던 탭을 닫으면 이웃 탭으로, 남은 탭이 없으면 홈으로 (작업은 서버에서 계속 돈다)
-        ui.navigate.to(_review_url(nxt) if nxt is not None else "/home")
-
-    @ui.refreshable
-    def jobs_menu() -> None:
-        """도는 백그라운드 작업 — 어느 논문을 보고 있든 진행을 한눈에, 눌러서 그 논문으로."""
-        active = jobs.running()
-        conv = [q for q in state.get("queue", []) if q.get("status") in _QUEUE_ACTIVE]
-        if not active and not conv:
-            return
-        btn = ui.button(color=None).props("flat dense no-caps text-color=white size=sm") \
-            .classes("md4-jobsbtn").tooltip("백그라운드 작업 진행 중 — 눌러서 보기")
-        with btn:
-            ui.icon("autorenew", size="16px").classes("md4-spin")
-            ui.label(f"{len(active) + len(conv)}").classes("q-ml-xs")
-            with ui.menu().props("anchor='bottom right' self='top right'"):
-                for j in active:
-                    pct = f" {int(j.fraction * 100)}%" if j.total else ""
-                    ui.menu_item(f"{j.label}{pct} · {j.title or Path(j.root).stem}",
-                                 on_click=lambda _, r=j.root: ui.navigate.to(_review_url(Path(r))))
-                for q in conv:
-                    ui.menu_item(f"변환 · {q['name']}", on_click=lambda: ui.navigate.to("/home"))
-
-    # 탭 아이콘·작업 목록은 다른 논문의 작업 상태도 비추므로, 무엇이 도는지 바뀔 때만 다시 그린다
-    _jobs_sig: dict = {"v": None, "watch": []}
-
-    def _poll_jobs() -> None:
-        here = str(ctrl.wd.root.resolve())
-        # 다른 논문의 작업이 끝나면 여기서 알린다 (이 논문 것은 각 화면이 붙어서 알린다)
-        for j in _jobs_sig["watch"]:
-            if not j.running and not j.seen and j.root != here:
-                j.seen = True
-                name = j.title or Path(j.root).stem
-                if j.status == "done":
-                    ui.notify(f"‘{name}’ {j.label} 완료 — {j.message}", type="positive")
-                else:
-                    ui.notify(f"‘{name}’ {j.label} 실패: {j.error}", type="negative")
-        _jobs_sig["watch"] = jobs.running()
-        sig = (tuple(sorted((j.root, j.kind) for j in _jobs_sig["watch"])),
-               sum(1 for q in state.get("queue", []) if q.get("status") in _QUEUE_ACTIVE))
-        if sig != _jobs_sig["v"]:
-            first = _jobs_sig["v"] is None
-            _jobs_sig["v"] = sig
-            if not first:
-                paper_tabs.refresh()
-
-    ui.timer(1.0, _poll_jobs)
+    def review_tools() -> None:
+        # 고정 토글 — 홈 목록 맨 위 '고정한 논문' 구역에 모아 둔다 (탭과는 무관)
+        pinned_here = is_pinned(ctrl.wd.root)
+        ui.button(icon="push_pin", color=None, on_click=toggle_pin) \
+            .props(f"flat dense round size=sm text-color={'amber-4' if pinned_here else 'white'}") \
+            .tooltip("목록 고정 해제" if pinned_here else "홈 목록 맨 위에 고정")
+        new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
 
     def toggle_pin() -> None:
         now_pinned = is_pinned(ctrl.wd.root)
@@ -2037,11 +2147,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 단계(변환/번역/뷰어)는 오른쪽의 작은 세그먼트 컨트롤로. 단계는 '한 논문 안의 화면 전환'이라
     # 논문 탭과 같은 모양이면 안 되고, 아이콘·2단 라벨로 헤더 높이를 먹지 않아야 한다.
     with ui.header().classes("md4-header items-end no-wrap"):
-        # color(kwarg)는 '배경색'이라 흰 상자가 된다 → 배경은 flat(투명), 글자는 text-color=white
-        ui.button(icon="arrow_back", color=None, on_click=lambda: ui.navigate.to("/home")) \
-            .props("flat dense round text-color=white").classes("md4-hdr-back") \
-            .tooltip("다른 논문 — 업로드 / 최근 작업으로")
-        paper_tabs()
+        paper_tabs = tab_bar(state, ctrl.wd.root, _title, tools=review_tools)
         ui.space()
         with ui.tabs().props("dense no-caps indicator-color=transparent").classes("md4-steptabs") as steps:
             step_convert = ui.tab(_STEP_NAMES[0])
@@ -4504,7 +4610,11 @@ def build_home(state: dict) -> None:
         return state["upload_dir"]
 
     ui.add_css(_HOME_CSS)
-    ui.add_css(_CHROME_CSS)  # 카드의 '새 창으로' 링크
+    ui.add_css(_CHROME_CSS)  # 헤더 탭 줄 + 카드의 '새 창으로' 링크
+    ui.add_head_html(_PREPAINT_HTML)  # 탭으로 오갈 때 헤더 자리가 흰 화면으로 반짝하지 않게
+    # 홈도 탭 하나다 (아래 2단 높이는 이 헤더 44px까지 뺀 값) — 맨 앞 '홈' 탭이 활성, 연 논문 탭들과 '+'(논문 골라 열기)가 그대로 보인다
+    with ui.header().classes("md4-header items-end no-wrap"):
+        tab_bar(state, None)
     scroll_memory.install("home")  # 논문을 열었다 돌아와도 목록의 그 자리
     find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 (앱 창에는 브라우저 찾기 바가 없다)
     state.setdefault("queue", [])
@@ -5140,7 +5250,7 @@ def build_home(state: dict) -> None:
         # 프로젝트 전환 줄 — 왼쪽(올리기)과 오른쪽(목록) 둘 다에 걸리는 선택이라 양쪽 위에 둔다.
         project_bar()
 
-    with ui.splitter(value=42).classes("w-full").style("height: calc(100vh - 132px)") as sp:
+    with ui.splitter(value=42).classes("w-full").style("height: calc(100vh - 202px)") as sp:
         # ---- 왼쪽: 업로드 · 설정 · 진행상황 ----
         with sp.before, ui.column().classes("p-4 gap-3 w-full md4-scroll").style("height:100%; overflow-y:auto"):
             _kstat = config.key_status()
