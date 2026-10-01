@@ -610,6 +610,54 @@ def enrich_cmd(workdir: Path | None, project_ref: str | None, do_all: bool, mail
         click.echo(f"저장 위치 반영: {ok}편" + (f" · 실패 {failed}편" if failed else ""))
 
 
+@cli.command("figures")
+@click.argument("workdir", required=False, type=click.Path(exists=True, file_okay=False, path_type=Path))
+@click.option("--project", "project_ref", default=None, help="이 프로젝트의 논문만 (이름이나 id)")
+@click.option("--all", "do_all", is_flag=True, help="프로젝트 상관없이 작업 폴더 전체")
+def figures_cmd(workdir: Path | None, project_ref: str | None, do_all: bool) -> None:
+    """예전에 변환한 논문의 그림을 고해상도(288dpi)로 바꾼다 — 재변환 없이 그림 파일만.
+
+    옛 그림(144dpi)이 원본 PDF의 어디였는지 찾아 그 자리를 다시 그린다. 마크다운·번역·메모는
+    그대로이고, 뷰어에서 보이는 크기도 같다. 자리를 확신할 수 없는 그림(아이콘처럼 작은 것 등)은
+    건너뛴다. 이미 바뀐 그림은 다시 손대지 않으니 여러 번 돌려도 된다. 네트워크·LLM을 쓰지 않는다.
+    """
+    from md4paper import enrich, figure_upscale, library
+
+    if sum(bool(x) for x in (workdir, project_ref, do_all)) > 1:
+        raise click.UsageError("WORKDIR · --project · --all 중 하나만 쓰세요.")
+    ws = config.resolve_workspace()
+    if workdir:
+        roots, label = [workdir], Path(workdir).stem
+    elif do_all:
+        roots, label = enrich.project_roots(enrich.ALL, ws), "전체"
+    else:
+        pid = ("" if _is_none_ref(project_ref) else _find_project(project_ref)["id"]) \
+            if project_ref else projects.assign_target()
+        roots, label = enrich.project_roots(pid, ws), projects.name_of(pid)
+    if not roots:
+        click.echo(f"{label}에 속한 논문이 없습니다.")
+        return
+    click.echo(f"대상: {label} · {len(roots)}편")
+    total = {"done": 0, "skipped": 0, "already": 0}
+    for root in roots:
+        wd = WorkDir(Path(root))
+        pdf = library._source_pdf(wd)
+        if pdf is None:
+            continue
+        try:
+            got = figure_upscale.upscale(wd, pdf)
+        except Exception as e:  # noqa: BLE001 — 한 편이 실패해도 나머지는 계속
+            click.secho(f"  {wd.root.stem}: 실패 — {e}", fg="yellow")
+            continue
+        for k in total:
+            total[k] += got[k]
+        if got["done"] or got["skipped"]:
+            skip = f" · {got['skipped']}개 건너뜀" if got["skipped"] else ""
+            click.echo(f"  {wd.root.stem}: {got['done']}개 고해상도{skip}")
+    click.echo(f"그림 {total['done']}개 바꿈 · {total['skipped']}개 건너뜀 · "
+               f"{total['already']}개는 이미 고해상도")
+
+
 @cli.command("naming")
 @click.argument("template", required=False)
 @click.option("--apply", "apply_now", is_flag=True,
