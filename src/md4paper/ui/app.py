@@ -1809,9 +1809,11 @@ _PREPAINT_HTML = """
 _CHROME_CSS = """
 /* 헤더 한 줄 — 논문 탭은 아래 끝에 물리고, 그림자를 없애야 활성 탭이 본문으로 이어져 보인다. */
 .md4-header { min-height: 44px; padding: 0 8px !important; box-shadow: none !important; gap: 4px; }
-.md4-tabstrip { max-width: 52vw; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+/* 탭 줄은 헤더 남는 폭을 다 쓴다 — 탭은 240px까지 넓게, 모자라면 다 같이 줄고(크롬처럼), 64px 밑으로는
+   줄지 않고 가로 스크롤. '+'가 마지막 탭 바로 뒤에 붙도록 줄 자체는 늘리지 않는다(0 1 auto). */
+.md4-tabstrip { flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .md4-tabstrip::-webkit-scrollbar { height: 0; }
-.md4-tabtools { padding-bottom: 5px; opacity: .9; }
+.md4-tabtools { padding-bottom: 5px; opacity: .9; flex: 0 0 auto; }
 /* 단계 전환도 아래 물린 탭 — 다만 논문 탭보다 한 급 작고(26px), 활성 글자는 파랑이다.
    "왼쪽 탭 = 어느 논문, 오른쪽 탭 = 그 논문의 어느 화면"으로 층이 갈리게. */
 .md4-steptabs { min-height: 0; flex: 0 0 auto; align-self: flex-end; }
@@ -1825,7 +1827,7 @@ _CHROME_CSS = """
 .md4-steptabs .q-tab__indicator, .md4-steptabs .q-tabs__arrow { display: none; }
 /* 탭 하나 — 위만 둥근 사각형. 비활성은 헤더에 잠긴 색, 활성은 본문과 같은 흰 바닥. */
 .md4-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
-  max-width: 250px; min-width: 0; border-radius: 8px 8px 0 0; cursor: pointer;
+  flex: 0 1 240px; max-width: 240px; min-width: 64px; border-radius: 8px 8px 0 0; cursor: pointer;
   font-size: 12.5px; line-height: 1; color: rgba(255,255,255,.86);
   background: rgba(255,255,255,.13); transition: background .12s ease, color .12s ease; }
 .md4-tab + .md4-tab { margin-left: 2px; }
@@ -1837,7 +1839,7 @@ _CHROME_CSS = """
 .md4-tab.on .md4-tab-ico { opacity: .5; }
 .md4-tab-ico.md4-tab-busy { opacity: .9; animation: md4spin 1s linear infinite; }
 .md4-jobsbtn { margin-right: 2px; }
-.md4-tab-home { flex: 0 0 auto; }
+.md4-tab-home { flex: 0 0 auto; min-width: 0; }
 .md4-tab-home .md4-tab-t { overflow: visible; }
 .md4-tabadd { margin: 0 2px 5px; flex: 0 0 auto; }
 /* '+' 논문 고르기 목록 — 한 줄 = 한 논문, 호버로 고를 자리를 보여 준다 */
