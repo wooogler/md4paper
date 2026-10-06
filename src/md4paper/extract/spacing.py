@@ -43,23 +43,38 @@ def _norm_char(ch: str) -> str:
 class Reference:
     norm: str  # 공백을 뺀 정규화 텍스트
     gap: list[int]  # gap[k]: norm[k] 앞(원본)이 NO_GAP / SPACE / NEWLINE
+    font: list[str] | None = None  # font[k]: norm[k]의 글꼴 이름(서브셋 접두 뺀 것, 모르면 "")
+    face: list[int] | None = None  # face[k]: norm[k]의 글꼴 객체 식별자 (같은 이름의 다른 서브셋 구분)
+    size: list[float] | None = None  # size[k]: norm[k]의 글자 크기 (아래첨자 구분)
 
     @classmethod
-    def from_texts(cls, texts: list[str]) -> Reference:
+    def from_texts(cls, texts: list[str], fonts: list[list[str]] | None = None,
+                   faces: list[list[int]] | None = None,
+                   sizes: list[list[float]] | None = None) -> Reference:
         chars: list[str] = []
         gap: list[int] = []
+        font: list[str] = []
+        face: list[int] = []
+        size: list[float] = []
         pending = NO_GAP
-        for t in texts:
+        for pi, t in enumerate(texts):
             pending = NEWLINE  # 페이지 경계
-            for ch in t:
+            page_fonts = fonts[pi] if fonts and len(fonts[pi]) == len(t) else None
+            page_faces = faces[pi] if faces and len(faces[pi]) == len(t) else None
+            page_sizes = sizes[pi] if sizes and len(sizes[pi]) == len(t) else None
+            for ci, ch in enumerate(t):
                 if ch.isspace():
                     pending = max(pending, NEWLINE if ch in "\r\n" else SPACE)
                     continue
                 for c in _norm_char(ch):
                     chars.append(c)
                     gap.append(pending)
+                    font.append(page_fonts[ci] if page_fonts else "")
+                    face.append(page_faces[ci] if page_faces else 0)
+                    size.append(page_sizes[ci] if page_sizes else 0.0)
                     pending = NO_GAP
-        return cls("".join(chars), gap)
+        return cls("".join(chars), gap, font if fonts else None, face if faces else None,
+                   size if sizes else None)
 
     @classmethod
     def from_pdf(cls, src) -> Reference | None:  # noqa: ANN001 — 경로 | bytes
@@ -67,11 +82,61 @@ class Reference:
 
         try:
             with pdfio.open_document(src) as doc:
-                texts = [doc[p].get_textpage().get_text_range() for p in range(len(doc))]
+                pages = [_char_fonts(doc[p].get_textpage()) for p in range(len(doc))]
         except Exception:  # noqa: BLE001 — 텍스트 레이어를 못 읽으면 복원을 안 할 뿐
             return None
-        ref = cls.from_texts(texts)
+        texts, fonts, faces, sizes = (list(x) for x in zip(*pages)) if pages else ([], [], [], [])
+        ref = cls.from_texts(texts, fonts, faces, sizes)
         return ref if len(ref.norm) >= 200 else None
+
+
+def _char_fonts(textpage) -> tuple[str, list[str], list[int], list[float]]:  # noqa: ANN001
+    """페이지 텍스트와 글자마다 (글꼴 이름, 글꼴 객체 식별자, 크기). pdfium이 만든 공백·줄바꿈은 ("", 0, 0).
+
+    텍스트도 글자 단위로 만든다 — get_text_range는 서로게이트 쌍(수식 이탤릭 𝑥)을 한 글자로 합쳐
+    글자 인덱스와 어긋난다.
+
+    같은 이름이라도 서브셋이 다르면 객체가 다르다 — 스몰캡 글리프만 따로 든 서브셋 등.
+    """
+    import ctypes
+
+    import pypdfium2.raw as C
+
+    names: dict[int, str] = {}
+    chars: list[str] = []
+    out: list[str] = []
+    faces: list[int] = []
+    sizes: list[float] = []
+    n_chars = textpage.count_chars()
+    merged = False
+    for i in range(n_chars):
+        if merged:  # 서로게이트 쌍의 뒷조각 — 앞 글자에 합쳤다
+            merged = False
+            continue
+        u = C.FPDFText_GetUnicode(textpage, i)
+        if 0xD800 <= u <= 0xDBFF and i + 1 < n_chars:
+            lo = C.FPDFText_GetUnicode(textpage, i + 1)
+            if 0xDC00 <= lo <= 0xDFFF:
+                u = 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00)
+                merged = True
+        chars.append(chr(u) if u else " ")
+        obj = C.FPDFText_GetTextObject(textpage, i)
+        font = C.FPDFTextObj_GetFont(obj) if obj else None
+        key = ctypes.cast(font, ctypes.c_void_p).value if font else None
+        if key is None:
+            out.append("")
+            faces.append(0)
+            sizes.append(0.0)
+            continue
+        if key not in names:
+            n = C.FPDFFont_GetBaseFontName(font, None, 0)
+            buf = ctypes.create_string_buffer(n)
+            C.FPDFFont_GetBaseFontName(font, buf, n)
+            names[key] = re.sub(r"^[A-Z]{6}\+", "", buf.value.decode("latin-1"))  # 서브셋 접두
+        out.append(names[key])
+        faces.append(key)
+        sizes.append(float(C.FPDFText_GetFontSize(textpage, i)))
+    return "".join(chars), out, faces, sizes
 
 
 def _normalize_token(tok: str) -> str:
@@ -172,12 +237,92 @@ def _apply_to_original(tok: str, key: str, spaced: str) -> str:
     return "".join(out)
 
 
+# 글꼴이 바뀌는 자리에서 쪼개진 단어 — 스몰캡은 첫 대문자만 보통 글리프라 Docling이 그 경계에 공백을
+# 넣는다("C onversational", "P ref A ct"). 그 사이 하이픈을 잃기도 한다("M agenticUI" ← Magentic-UI).
+# 이번엔 반대 방향: 원본에 없는 공백을 뺀다. 판단은 역시 원본 텍스트 레이어가 하고, 원본에서
+# **한 글꼴로 짠 한 단어**이고, Docling이 공백을 넣은 자리마다 **글꼴 객체가 바뀔 때만** 잇는다.
+# 수식 변수 + 본문 단어("C using")는 글꼴 이름이 달라, pdfium이 띄어쓰기를 놓친 평범한 자리
+# ("I started" → pdfium "Istarted")는 같은 글꼴 객체가 이어져, 아래첨자("D train")는 크기가 달라 걸러진다.
+_SPLIT_RE = re.compile(r"(?<![\w-])[A-Z](?: [A-Za-z]+){1,3}(?![\w-])")
+_JOIN_MIN_LEN = 4
+
+
+def _bounded(ref: Reference, start: int, end: int) -> bool:
+    """원본에서 [start, end)가 단어 하나로 떨어져 있나 (앞뒤가 다른 글자와 붙어 있지 않다)."""
+    before = start == 0 or ref.gap[start] != NO_GAP or not ref.norm[start - 1].isalnum()
+    after = end >= len(ref.norm) or ref.gap[end] != NO_GAP or not ref.norm[end].isalnum()
+    return before and after
+
+
+def _one_word(ref: Reference, start: int, end: int) -> bool:
+    """원본에서 [start, end)가 공백 없이, 한 글꼴로 짠 한 단어인가."""
+    fonts = set(ref.font[start:end]) if ref.font else {""}
+    return all(g == NO_GAP for g in ref.gap[start + 1:end]) and len(fonts) == 1 and "" not in fonts
+
+
+def _face_breaks(ref: Reference, start: int, key: str, cuts: list[int]) -> bool:
+    """Docling이 끊은 자리(cuts: key 인덱스)마다 원본에서 글꼴 객체가 바뀌나 (끊긴 까닭이 있나)."""
+    if not ref.face:
+        return False
+    pos: list[int] = []  # key 글자 → 원본 위치 (사이에 끼운 하이픈은 건너뛴다)
+    ri = start
+    for ch in key:
+        while ref.norm[ri] != ch:
+            ri += 1
+        pos.append(ri)
+        ri += 1
+    def same_size(a: int, b: int) -> bool:
+        if not ref.size:
+            return True
+        hi = max(ref.size[a], ref.size[b])
+        return hi > 0 and abs(ref.size[a] - ref.size[b]) <= 0.05 * hi
+
+    return all(ref.face[pos[c - 1]] != ref.face[pos[c]] and same_size(pos[c - 1], pos[c]) for c in cuts)
+
+
+def rejoin_words(tokens: list[str], ref: Reference) -> str | None:
+    """쪼개진 토큰들의 원본 표기(하이픈 포함). 원본에서 한 단어로 찾아지고 출현마다 같을 때만."""
+    parts = [_normalize_token(t) for t in tokens]
+    key = "".join(parts)
+    if len(key) < _JOIN_MIN_LEN:
+        return None
+    cuts = [sum(map(len, parts[:i])) for i in range(1, len(parts))]
+    found = {
+        m.group(0)
+        for m in re.finditer("-?".join(map(re.escape, key)), ref.norm)  # 잃어버린 하이픈 허용
+        if _bounded(ref, m.start(), m.end()) and _one_word(ref, m.start(), m.end())
+        and _face_breaks(ref, m.start(), key, cuts)
+    }
+    return found.pop() if len(found) == 1 else None
+
+
+def _rejoin_line(line: str, ref: Reference) -> tuple[str, int]:
+    out: list[str] = []
+    pos = fixed = 0
+    search = 0
+    while m := _SPLIT_RE.search(line, search):
+        # 다음 탐색은 첫 토큰 뒤에서 — "M anual and M agenticUI"에서 묶이지 않은 뒤쪽 M도 다시 본다
+        search = m.start() + 1
+        tokens = m.group(0).split(" ")
+        if not tokens[1][:1].islower():  # "C onversational"처럼 대문자 뒤가 소문자로 이어질 때만
+            continue
+        for n in range(len(tokens), 1, -1):  # 길게 묶이는 것부터 ("P ref A ct" → PrefAct)
+            joined = rejoin_words(tokens[:n], ref)
+            if joined is not None:
+                out.append(line[pos:m.start()] + joined)
+                pos = search = m.start() + len(" ".join(tokens[:n]))
+                fixed += 1
+                break
+    out.append(line[pos:])
+    return "".join(out), fixed
+
+
 _SKIP_LINE_RE = re.compile(r"^\s*(!\[|<|\$\$|```|\|?\s*:?-{3,})")  # 그림·HTML·수식 블록·코드·표 구분선
 _SKIP_TOKEN_RE = re.compile(r"://|\]\(|^\$|^<|^\[\^|^`")
 
 
 def restore_spaces(md: str, ref: Reference | None) -> tuple[str, int]:
-    """마크다운 본문의 붙은 토큰을 원본 띄어쓰기로 되살린다. 반환: (본문, 고친 토큰 수)."""
+    """마크다운 본문의 띄어쓰기를 원본대로 — 붙은 토큰은 떼고 쪼개진 단어는 잇는다. 반환: (본문, 고친 수)."""
     if ref is None:
         return md, 0
     fixed = 0
@@ -201,5 +346,7 @@ def restore_spaces(md: str, ref: Reference | None) -> tuple[str, int]:
             if core is not None:
                 parts[i] = m.group(1) + core + m.group(3)
                 fixed += 1
-        out_lines.append("".join(parts))
+        line, rejoined = _rejoin_line("".join(parts), ref)
+        fixed += rejoined
+        out_lines.append(line)
     return "\n".join(out_lines), fixed

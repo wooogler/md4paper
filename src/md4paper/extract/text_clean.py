@@ -43,9 +43,20 @@ def normalize_math_letters(text: str) -> str:
     )
 
 
+# YAML(그리고 대부분의 텍스트 도구)이 받지 않는 글자 — 제어 문자, 비문자 U+FFFE/U+FFFF, 외톨이
+# 서로게이트. 이런 글자가 sections.yaml 주석에 그대로 들어가면 다시 읽을 때 파서가 통째로 실패한다.
+_UNPRINTABLE_RE = re.compile(
+    "[^\t\n\r\x20-\x7e\x85\xa0-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
+
+def printable(text: str) -> str:
+    """출력할 수 없는 글자를 U+FFFD로 — 깨진 글자로 세어지고(⚠ 경고) YAML도 안전하다."""
+    return _UNPRINTABLE_RE.sub("\ufffd", text)
+
+
 def clean_extracted(text: str) -> str:
-    """추출 직후 공통 정리 — 수학용 유니코드 정규화 + 엔티티 복구."""
-    return repair_entities(normalize_math_letters(text))
+    """추출 직후 공통 정리 — 수학용 유니코드 정규화 + 엔티티 복구 + 출력 불가 글자 표식."""
+    return printable(repair_entities(normalize_math_letters(text)))
 
 
 _GARBLED_RE = re.compile("�+")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from md4paper.extract.text_clean import (
@@ -19,6 +20,7 @@ from md4paper.extract.text_clean import (
     repair_mojibake_from_pdf,
     sniff_text_coverage,
 )
+from md4paper.extract import tounicode
 from md4paper.workdir import WorkDir
 
 BACKENDS = ("docling",)
@@ -70,13 +72,19 @@ def extract(
     from md4paper.extract import docling_backend
 
     coverage = sniff_text_coverage(source)
-    part = docling_backend.extract_to(source, wd, ocr=ocr)
+    with tempfile.TemporaryDirectory() as tmp:
+        # 글리프 이름은 있는데 ToUnicode만 깨진 글꼴(macOS 미리보기로 다시 저장한 PDF의 합자 등)을
+        # 고친 사본으로 추출한다. 고칠 게 없으면 원본 그대로.
+        fixed_pdf = Path(tmp) / source.name
+        glyphs = tounicode.repair(source, fixed_pdf)
+        pdf = fixed_pdf if glyphs else source
+        part = docling_backend.extract_to(pdf, wd, ocr=ocr)
 
-    # 공통 후처리: 깨진 글자 복구(안전망) → 수학 유니코드 정규화 + 엔티티 복구
-    raw = wd.raw_md.read_text(encoding="utf-8")
-    raw, repaired = repair_garbled_from_pdf(raw, source)
-    # 2바이트 코드가 한자처럼 묶인 깨짐(구형 CID 폰트)도 PDF 텍스트 레이어로 되살린다
-    raw, moji_fixed, moji_left = repair_mojibake_from_pdf(raw, source)
+        # 공통 후처리: 깨진 글자 복구(안전망) → 수학 유니코드 정규화 + 엔티티 복구
+        raw = wd.raw_md.read_text(encoding="utf-8")
+        raw, repaired = repair_garbled_from_pdf(raw, pdf)
+        # 2바이트 코드가 한자처럼 묶인 깨짐(구형 CID 폰트)도 PDF 텍스트 레이어로 되살린다
+        raw, moji_fixed, moji_left = repair_mojibake_from_pdf(raw, pdf)
     wd.raw_md.write_text(clean_extracted(raw), encoding="utf-8")
 
     final = wd.raw_md.read_text(encoding="utf-8")
@@ -86,6 +94,7 @@ def extract(
         # 남은 깨짐: U+FFFD + 되살리지 못한 묶임 글자 (홈 목록·CLI가 ⚠로 경고)
         "garbled_chars": final.count("�") + moji_left,
         "garbled_repaired": repaired + moji_fixed,
+        "glyphs_restored": glyphs,  # ToUnicode를 글리프 이름으로 고친 코드 수
         "source": str(source.resolve()),
         "python": sys.version.split()[0],
         "ok": True,

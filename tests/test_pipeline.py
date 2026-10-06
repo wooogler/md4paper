@@ -752,3 +752,29 @@ def test_drop_running_heads_spares_repeated_section_headings():
     doc = _FakeDoc([*heads, *caps], n_pages=6)
     assert _drop_running_heads(doc) == 0
     assert len(doc.texts) == 5
+
+
+def test_manifest_survives_unprintable_snippet(wd):
+    """본문 스니펫 주석에 U+FFFF(깨진 합자)·줄바꿈이 섞여도 저장한 YAML을 다시 읽을 수 있다."""
+    from md4paper.ir import Manifest, ManifestSection
+
+    sec = ManifestSection(id="h_0000", text="1 Intro", line=0, level=1,
+                          context="PrefAct \uffffrst builds\nan explicit model")
+    manifest_io.save(Manifest(title="T", sections=[sec]), wd)
+    assert manifest_io.load(wd).sections[0].text == "1 Intro"
+    # 옛 버전이 주석에 그대로 써 둔 파일도 열린다
+    wd.sections_yaml.write_text(
+        "title: T\nsections:\n- id: h_0000\n  text: 1 Intro  # \u21b3 di\uffffferent\n  level: 1\n",
+        encoding="utf-8")
+    assert manifest_io.load(wd).sections[0].text == "1 Intro"
+
+
+def test_stale_extract_with_noncharacters_is_redone(wd, tmp_path):
+    """U+FFFF가 남은 raw.md는 복구 이전의 추출 결과 — 신선해도 다시 뽑는다."""
+    src = tmp_path / "paper.md"
+    src.write_text("# Title\n\nWe de\uffffne it.\n", encoding="utf-8")
+    pipeline.run_extract(src, wd)
+    assert "\uffff" not in wd.raw_md.read_text(encoding="utf-8")  # 추출 정리가 U+FFFD로 표시
+    assert pipeline.run_extract(src, wd) == {"skipped": True}
+    wd.raw_md.write_text("# Title\n\nWe de\uffffne it.\n", encoding="utf-8")  # 옛 추출 결과
+    assert pipeline.run_extract(src, wd) != {"skipped": True}

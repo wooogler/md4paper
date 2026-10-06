@@ -26,6 +26,7 @@ dependencies = [
     # BibTeX 생성·검증 — 저장 위치의 references.bib에 쌓는 항목을 직접 문자열로 짜지 않는다.
     # 이스케이프(&, %, _, 악센트)·직렬화·되읽기 검증을 이 라이브러리에 맡긴다 (순수 파이썬, MIT).
     "bibtexparser>=1.4",
+    "pypdf>=5",
 ]
 
 [project.optional-dependencies]

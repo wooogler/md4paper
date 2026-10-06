@@ -92,3 +92,58 @@ def test_reference_from_pdf_returns_none_without_text_layer(tmp_path):
     doc.save(str(path))
     doc.close()
     assert spacing.Reference.from_pdf(path) is None
+
+
+# 스몰캡(CHI '27 투고본): 첫 대문자만 보통 글리프라 Docling이 글꼴 경계에 공백을 넣고 하이픈을 잃는다
+SC_PAGE = "In the Conversational, Magentic-UI, and PrefAct conditions at round C using roots\r\n"
+SC_PAGE2 = "than in the Manual and Magentic-UI conditions\r\n"
+
+
+def _sc_fonts() -> list[list[str]]:
+    fonts = ["LinLibertineT"] * len(SC_PAGE)
+    fonts[SC_PAGE.index("C using")] = "LibertineMathMI"  # 수식 변수는 다른 글꼴
+    return [fonts]
+
+
+def _sc_faces() -> list[list[int]]:
+    """Quartz처럼 스몰캡 소문자만 다른 서브셋(객체 2), 나머지는 객체 1."""
+    faces = [1] * len(SC_PAGE)
+    for word, sc in (("Conversational", "onversational"), ("Magentic-UI", "agentic-"),
+                     ("PrefAct", "ref"), ("PrefAct", "ct")):
+        at = SC_PAGE.index(word) + word.index(sc)
+        faces[at:at + len(sc)] = [2] * len(sc)
+    faces[SC_PAGE.index("C using")] = 3
+    return [faces]
+
+
+def test_small_caps_split_words_are_rejoined_from_the_original():
+    ref = Reference.from_texts([SC_PAGE], _sc_fonts(), _sc_faces())
+    md = "In the C onversational , M agenticUI , and P ref A ct conditions at round C using roots\n"
+    out, n = restore_spaces(md, ref)
+    assert out == "In the Conversational , Magentic-UI , and PrefAct conditions at round C using roots\n"
+    assert n == 3  # 수식 변수 + 본문 단어("C using")는 원본에서 글꼴이 달라 잇지 않는다
+
+
+def test_rejoin_needs_font_evidence():
+    md = "In the C onversational condition\n"
+    assert restore_spaces(md, Reference.from_texts([SC_PAGE]))[0] == md  # 글꼴 정보 없으면 안 건드림
+
+
+def test_rejoin_never_drops_spaces_the_original_lacks_between_words():
+    # pdfium도 가끔 띄어쓰기를 놓친다("A webagent") — 한 단어로 짜인 게 아니면 잇지 않는다
+    page = "A webagent and I actuallywanted it. Istarted\r\n"
+    ref = Reference.from_texts([page], [["LinLibertineT"] * len(page)], [[1] * len(page)])
+    md = "A web agent and I actually wanted it. I started\n"
+    assert restore_spaces(md, ref) == (md, 0)
+
+
+def test_rejoin_retries_inside_a_longer_failed_span():
+    # "M anual and M agenticUI": 앞쪽 4토큰 묶음이 실패해 "Manual"만 이었을 때 뒤쪽 M도 다시 본다
+    page = SC_PAGE2
+    faces = [1] * len(page)
+    for word, sc in (("Manual", "anual"), ("Magentic-UI", "agentic-")):
+        at = page.index(word) + word.index(sc)
+        faces[at:at + len(sc)] = [2] * len(sc)
+    ref = Reference.from_texts([page], [["LinLibertineT"] * len(page)], [faces])
+    out, n = restore_spaces("than in the M anual and M agenticUI conditions\n", ref)
+    assert out == "than in the Manual and Magentic-UI conditions\n" and n == 2

@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import io
 import json
+import re
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
+from md4paper.extract.text_clean import printable
 from md4paper.ir import Detected, Flavor, Manifest, ManifestSection, Scheme
 from md4paper.workdir import WorkDir
 
@@ -33,6 +35,11 @@ def _yaml() -> YAML:
     y.preserve_quotes = True
     y.width = 4096  # 긴 줄 자동 줄바꿈 방지
     return y
+
+
+def _comment_text(text: str) -> str:
+    """주석은 이스케이프되지 않고 그대로 쓰인다 — 출력 불가 글자·줄바꿈이 섞이면 다시 읽을 때 깨진다."""
+    return re.sub(r"[\r\n\x85\u2028\u2029]+", " ", printable(text))
 
 
 def to_yaml(manifest: Manifest) -> str:
@@ -75,7 +82,7 @@ def to_yaml(manifest: Manifest) -> str:
         if s.needs_review:
             m["needs_review"] = True
         if s.context:
-            m.yaml_add_eol_comment(f"↳ {s.context}", "text")
+            m.yaml_add_eol_comment(f"↳ {_comment_text(s.context)}", "text")
         secs.append(m)
     root["sections"] = secs
 
@@ -99,7 +106,8 @@ def _line_map(wd: WorkDir) -> dict[str, int]:
 
 def load(wd: WorkDir) -> Manifest:
     """sections.yaml → Manifest. raw.md 라인 앵커는 blocks.json에서 id로 복원."""
-    data = _yaml().load(wd.sections_yaml.read_text(encoding="utf-8"))
+    # 옛 버전이 주석에 출력 불가 글자(U+FFFF 등)를 그대로 써 둔 파일도 열리도록
+    data = _yaml().load(printable(wd.sections_yaml.read_text(encoding="utf-8")))
     line_by_id = _line_map(wd)
 
     sections: list[ManifestSection] = []

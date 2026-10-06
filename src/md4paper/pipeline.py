@@ -21,11 +21,21 @@ def run_extract(
     force: bool = False,
 ) -> dict:
     src_hash = hash_text(f"{source}:{backend}:ocr={ocr}")
-    if not force and wd.is_fresh("extract", src_hash) and wd.raw_md.exists():
+    if not force and wd.is_fresh("extract", src_hash) and wd.raw_md.exists() and not _stale_raw(wd):
         return {"skipped": True}
     meta = extract_stage.extract(source, wd, backend=backend, ocr=ocr)
     wd.mark_done("extract", src_hash, backend=meta.get("backend"))
     return meta
+
+
+def _stale_raw(wd: WorkDir) -> bool:
+    """복구·정리가 들어가기 전에 뽑아 둔 raw.md인가 — 비문자(U+FFFE/U+FFFF)가 남아 있으면 그렇다.
+
+    지금의 추출은 이런 글자를 PDF 텍스트 레이어로 되살리거나 U+FFFD로 바꿔 두므로, 남아 있다는 것은
+    옛 추출 결과라는 뜻이다. 다시 뽑으면 합자(fi·ff·ft…)가 복구되고 YAML도 깨지지 않는다.
+    """
+    text = wd.raw_md.read_text(encoding="utf-8", errors="replace")
+    return "\ufffe" in text or "\uffff" in text
 
 
 def run_formulas(wd: WorkDir, provider=None, force: bool = False, on_progress=None) -> dict:
