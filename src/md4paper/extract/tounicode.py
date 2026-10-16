@@ -143,12 +143,18 @@ def fix_font(font) -> int:  # noqa: ANN001
     if parsed is None:
         return 0
     mapping, codespace, nbytes = parsed
+    named = {code: t for code, name in names.items() if (t := glyph_text(name))}
+    # 수식 글꼴은 깨진 표시(U+FFFF) 대신 엉뚱한 글자로 적히기도 한다: 𝑡→'C', ℓ→'✓', ∈→'2'.
+    # 이름이 풀리는 코드의 과반이 ToUnicode와 어긋나면 그 글꼴의 ToUnicode는 통째로 믿지 않는다.
+    wrong = sum(1 for code, t in named.items() if mapping.get(code) != t)
+    distrust = wrong * 2 > len(named)
     fixed = 0
-    for code, text in list(mapping.items()):
-        if text and not any(c in text for c in _BROKEN):
+    for code, good in named.items():
+        text = mapping.get(code)
+        if text == good:
             continue
-        good = glyph_text(names[code]) if code in names else None
-        if good:
+        broken = not text or text == "\x00" or any(c in text for c in _BROKEN)
+        if broken or distrust:
             mapping[code] = good
             fixed += 1
     if fixed:

@@ -20,7 +20,7 @@ from md4paper.extract.text_clean import (
     repair_mojibake_from_pdf,
     sniff_text_coverage,
 )
-from md4paper.extract import tounicode
+from md4paper.extract import inline_math, tounicode
 from md4paper.workdir import WorkDir
 
 BACKENDS = ("docling",)
@@ -85,6 +85,9 @@ def extract(
         raw, repaired = repair_garbled_from_pdf(raw, pdf)
         # 2바이트 코드가 한자처럼 묶인 깨짐(구형 CID 폰트)도 PDF 텍스트 레이어로 되살린다
         raw, moji_fixed, moji_left = repair_mojibake_from_pdf(raw, pdf)
+        # 납작해진 인라인 수식("x ( k ) i ∈ [ 0 , 1 ] d k")을 PDF 글꼴·기준선으로 $LaTeX$로.
+        # 정리(&lt; → <, 𝑡 → t)를 먼저 해야 PDF 글자와 맞춰 볼 수 있다.
+        raw, inline = inline_math.restore(clean_extracted(raw), pdf)
     wd.raw_md.write_text(clean_extracted(raw), encoding="utf-8")
 
     final = wd.raw_md.read_text(encoding="utf-8")
@@ -95,6 +98,7 @@ def extract(
         "garbled_chars": final.count("�") + moji_left,
         "garbled_repaired": repaired + moji_fixed,
         "glyphs_restored": glyphs,  # ToUnicode를 글리프 이름으로 고친 코드 수
+        "inline_math": inline,  # PDF 좌표로 되살린 인라인 수식 수
         "source": str(source.resolve()),
         "python": sys.version.split()[0],
         "ok": True,

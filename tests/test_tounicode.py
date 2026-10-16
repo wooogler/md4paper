@@ -117,3 +117,49 @@ def test_unreadable_pdf_is_not_fatal(tmp_path):
     src = tmp_path / "junk.pdf"
     src.write_bytes(b"not a pdf")
     assert tounicode.repair(src, tmp_path / "out.pdf") == 0
+
+
+# 실제 사례(미리보기로 다시 저장한 ACM 원고)의 수식 글꼴: ToUnicode가 U+FFFF가 아니라 엉뚱한 글자다
+# — 𝑡→'C', ℓ→'✓', 𝐻→U+0000. 이름은 멀쩡하다.
+GARBLED_MATH_CMAP = b"""1 begincodespacerange <00><FF> endcodespacerange
+4 beginbfrange
+<21><21><0043>
+<22><22><0000>
+<23><23><2713>
+<24><24><0039>
+endbfrange
+"""
+
+
+def _font(cmap: bytes, names: list[str]):
+    pytest.importorskip("pypdf")
+    from pypdf.generic import (ArrayObject, DecodedStreamObject, DictionaryObject, NameObject,
+                               NumberObject)
+
+    stream = DecodedStreamObject()
+    stream.set_data(cmap)
+    return DictionaryObject({
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/Encoding"): DictionaryObject({NameObject("/Differences"): ArrayObject(
+            [NumberObject(33)] + [NameObject(n) for n in names])}),
+        NameObject("/ToUnicode"): stream,
+    })
+
+
+def test_garbled_math_font_trusts_glyph_names():
+    font = _font(GARBLED_MATH_CMAP, ["/u1D461", "/u1D43B", "/uni2113", "/u1D457"])
+    assert tounicode.fix_font(font) == 4
+    mapping, _, _ = parse_cmap(font["/ToUnicode"].get_data())
+    assert mapping == {0x21: "\U0001d461", 0x22: "\U0001d43b", 0x23: "ℓ", 0x24: "\U0001d457"}
+
+
+def test_one_odd_entry_in_a_sane_font_is_kept():
+    # 과반이 이름과 맞는 글꼴은 믿는다 — 하나 어긋난 항목은 글꼴 제작자의 의도일 수 있다
+    cmap = b"""1 begincodespacerange <00><FF> endcodespacerange
+3 beginbfchar
+<21> <0061>
+<22> <0062>
+<23> <007E>
+endbfchar"""
+    font = _font(cmap, ["/a", "/b", "/similar"])
+    assert tounicode.fix_font(font) == 0
