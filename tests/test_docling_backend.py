@@ -808,3 +808,36 @@ def test_apply_footnotes_rescues_definition_leaked_into_body():
     # 증거가 다른 번호면 걷지 않는다 (우연한 숫자+URL 문단)
     out2, tips2 = _apply_footnotes(md, ["1 https://x"], [{"num": 1, "before": "foo", "page": 1}])
     assert "3" not in tips2 and "techcrunch" in out2.split("## Footnotes")[0]
+
+
+class _Page:
+    def __init__(self, height=792.0):
+        self.size = type("S", (), {"height": height})()
+
+
+def test_running_footer_in_deep_acm_margin_is_dropped_and_unmerged():
+    """ACM 투고 원고의 푸터는 아래에서 16% — 세 쪽 넘게 되풀이되면 지우고, 문단에 낀 것도 뗀다."""
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
+    merged = _Item("Rankings and selections Manuscript submitted to ACM naturally provide pairs.",
+                   4, 110.0, 540.0, 300.0)
+    tail = _Item("PBO has been widely used in HCI to Manuscript submitted to ACM", 5, 110.0, 540.0, 300.0)
+    body = _bodies(1) + _bodies(2)
+    doc = _Doc(foot + [merged, tail] + body)
+    doc.pages = {p: _Page() for p in (1, 2, 3, 4, 5)}
+    assert _drop_running_heads(doc) == 5
+    assert merged.text == "Rankings and selections naturally provide pairs."
+    assert tail.text == "PBO has been widely used in HCI to"  # 쪽 끝 문단 — 다음 쪽 아이템과 이어진다
+    assert [it.text for it in doc.texts] == [merged.text, tail.text] + [b.text for b in body]
+
+
+def test_outer_band_line_on_two_pages_is_kept():
+    """바깥 띠(10~20%)의 줄이 두 쪽에만 나오면 본문일 수 있다 — 지우지 않는다."""
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    lines = [_Item("This sentence closes the page body.", p, 110.0, 400.0, 131.0) for p in (1, 2)]
+    doc = _Doc(lines)
+    doc.pages = {p: _Page() for p in (1, 2)}
+    assert _drop_running_heads(doc) == 0
+    assert len(doc.texts) == 2

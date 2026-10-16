@@ -20,7 +20,8 @@ def run_extract(
     backend: str = extract_stage.DEFAULT_BACKEND, ocr: bool = False,
     force: bool = False,
 ) -> dict:
-    src_hash = hash_text(f"{source}:{backend}:ocr={ocr}")
+    # 추출기 버전도 해시에 넣는다 — 추출이 나아지면(수식 복원 등) 같은 PDF도 다시 변환할 때 반영된다
+    src_hash = hash_text(f"{source}:{backend}:ocr={ocr}:v{extract_stage.EXTRACT_VERSION}")
     if not force and wd.is_fresh("extract", src_hash) and wd.raw_md.exists() and not _stale_raw(wd):
         return {"skipped": True}
     meta = extract_stage.extract(source, wd, backend=backend, ocr=ocr)

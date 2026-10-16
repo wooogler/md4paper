@@ -23,6 +23,10 @@ from md4paper.extract.text_clean import (
 from md4paper.extract import inline_math, tounicode
 from md4paper.workdir import WorkDir
 
+# 추출 결과를 바꾸는 개선을 넣을 때마다 올린다 — 기존 논문을 다시 변환하면 추출부터 새로 한다.
+# 2: 수식 글꼴 ToUnicode 복구 · 인라인 수식 $LaTeX$ · 깊은 여백의 러닝 푸터
+EXTRACT_VERSION = 2
+
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"
 

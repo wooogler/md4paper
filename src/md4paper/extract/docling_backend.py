@@ -650,6 +650,10 @@ _BOILERPLATE_RE = re.compile(
 # 합쳐진 변형("<venue> <저자목록>")도 잡히도록, 알려진 반복 문구를 빼고 남는 잔여가 짧으면 제거한다.
 _RUNHEAD_BAND = 0.10       # 페이지 높이의 위/아래 이 비율 안 (좌표계 원점과 무관하게 가장자리 거리로)
 _RUNHEAD_MIN_PAGES = 2     # 서로 다른 쪽 이만큼에 나와야 러닝 헤더로 인정
+# ACM 투고 원고(acmsmall review)는 여백이 깊어 푸터 "Manuscript submitted to ACM"이 아래에서 16%쯤에
+# 있다. 그 바깥 띠까지 보되, 본문일 가능성이 커지는 만큼 더 많은 쪽에서 되풀이돼야 인정한다.
+_RUNHEAD_OUTER_BAND = 0.20
+_RUNHEAD_OUTER_MIN_PAGES = 3
 _RUNHEAD_MAX_CHARS = 200   # 이보다 길면 러닝 헤더가 아니라 본문 문단
 _RUNHEAD_MIN_CHARS = 8     # 쪽번호처럼 짧은 건 시그니처로 안 씀 (본문 오탐 위험)
 _RUNHEAD_RESIDUE = 0.4     # 반복 문구를 뺀 잔여가 원문의 이 비율 미만이면 러닝 헤더 줄로 본다
@@ -667,7 +671,7 @@ def _runhead_sig(text: str) -> str:
 
 
 def _edge_items(document) -> list[tuple]:  # noqa: ANN001 — DoclingDocument
-    """페이지 위/아래 띠에 있는 (아이템, 쪽번호, 시그니처) 목록."""
+    """페이지 위/아래 띠에 있는 (아이템, 쪽번호, 시그니처, 바깥 띠인가) 목록."""
     out: list[tuple] = []
     for it in getattr(document, "texts", []):
         text = (getattr(it, "text", "") or "").strip()
@@ -684,8 +688,9 @@ def _edge_items(document) -> list[tuple]:  # noqa: ANN001 — DoclingDocument
         if not height:
             continue
         lo, hi = min(b.t, b.b), max(b.t, b.b)
-        if min(lo, height - hi) <= height * _RUNHEAD_BAND:  # 좌표 원점(상단/하단) 무관
-            out.append((it, page, _runhead_sig(text)))
+        edge = min(lo, height - hi)  # 좌표 원점(상단/하단) 무관
+        if edge <= height * _RUNHEAD_OUTER_BAND:
+            out.append((it, page, _runhead_sig(text), edge > height * _RUNHEAD_BAND))
     return out
 
 
@@ -699,25 +704,59 @@ def _drop_running_heads(document) -> int:  # noqa: ANN001 — DoclingDocument
 
     edge = _edge_items(document)
     pages_by_sig: dict[str, set[int]] = defaultdict(set)
-    for _, page, sig in edge:
+    inner_pages: dict[str, set[int]] = defaultdict(set)
+    for _, page, sig, outer in edge:
         pages_by_sig[sig].add(page)
-    repeated = {sig for sig, pages in pages_by_sig.items() if len(pages) >= _RUNHEAD_MIN_PAGES}
+        if not outer:
+            inner_pages[sig].add(page)
+    repeated = {sig for sig, pages in pages_by_sig.items()
+                if len(inner_pages[sig]) >= _RUNHEAD_MIN_PAGES or len(pages) >= _RUNHEAD_OUTER_MIN_PAGES}
     if not repeated:
         return 0
     ordered = sorted(repeated, key=len, reverse=True)  # 긴 것부터 빼야 부분 문구에 안 먹힌다
     to_remove = []
-    for it, _, sig in edge:
+    phrases: set[str] = set()  # 통째로 러닝 헤더였던 줄의 원문 — 본문에 섞여 들어간 것도 떼어낸다
+    for it, _, sig, outer in edge:
+        if outer and sig not in repeated:
+            continue  # 바깥 띠는 그 줄 자체가 충분히 되풀이될 때만
         residue = sig
         for known in ordered:
             residue = residue.replace(known, " ")
         if len(" ".join(residue.split())) < len(sig) * _RUNHEAD_RESIDUE:
             to_remove.append(it)
+            if sig in repeated and len(sig) >= _RUNHEAD_MERGED_MIN_CHARS:
+                phrases.add(" ".join(it.text.split()))
     for it in to_remove:
         try:
             document.delete_items(node_items=[it])
         except Exception:  # noqa: BLE001 — 삭제 실패해도 치명적이지 않음
             pass
-    return len(to_remove)
+    return len(to_remove) + _strip_merged_running_heads(document, phrases)
+
+
+# 쪽이 넘어가는 문단에 푸터가 끼어 합쳐지면("Rankings and selections Manuscript submitted to ACM
+# naturally provide") 아이템이 따로 없어 지울 수 없다 — 이미 러닝 헤더로 확인된 문구만 문장 속에서 뗀다.
+_RUNHEAD_MERGED_MIN_CHARS = 15
+
+
+def _strip_merged_running_heads(document, phrases: set[str]) -> int:  # noqa: ANN001
+    if not phrases:
+        return 0
+    pattern = re.compile(r"\s*(?:" + "|".join(
+        r"\s+".join(re.escape(w) for w in p.split()) for p in sorted(phrases, key=len, reverse=True)
+    ) + r")(?=\s|$)")  # 쪽 끝 문단이면 아이템 끝에 붙어 있다
+    stripped = 0
+    for it in getattr(document, "texts", []):
+        text = getattr(it, "text", "") or ""
+        if not any(p.split()[0] in text for p in phrases):
+            continue
+        new, n = pattern.subn("", text)
+        if n and new.strip():  # 문구만 있던 아이템은 위에서 지웠다 — 여기선 본문에 낀 것만
+            it.text = new
+            if hasattr(it, "orig"):
+                it.orig = new
+            stripped += n
+    return stripped
 
 
 def _body_labels() -> set:

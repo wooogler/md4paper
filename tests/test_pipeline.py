@@ -69,11 +69,17 @@ def test_manifest_roundtrip(wd):
 def test_status_resume(wd):
     src = CORPUS / "sample_arxiv.md"
     pipeline.run_extract(src, wd)
-    h = __import__("md4paper.workdir", fromlist=["hash_text"]).hash_text(f"{src}:docling:ocr=False")
+    from md4paper.extract import EXTRACT_VERSION
+    from md4paper.workdir import hash_text
+
+    h = hash_text(f"{src}:docling:ocr=False:v{EXTRACT_VERSION}")
     assert wd.is_fresh("extract", h)
     # 두 번째 extract는 스킵
     meta = pipeline.run_extract(src, wd)
     assert meta.get("skipped") is True
+    # 옛 추출기로 만든 결과는 다시 뽑는다 (추출 개선이 재변환에 반영되게)
+    wd.mark_done("extract", hash_text(f"{src}:docling:ocr=False"))
+    assert not pipeline.run_extract(src, wd).get("skipped")
 
 
 def test_parse_headings_ignores_fenced_code():
