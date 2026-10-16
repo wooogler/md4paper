@@ -151,6 +151,8 @@ def build(raw_md: str, wd: WorkDir, flavor: Flavor = Flavor.STANDARD, provider=N
                            if is_head else "skip")
         else:
             final_level = marker_level if needs_review else level
+            if needs_review and numbering.is_front_matter_label(text):
+                needs_review = False  # 앞부분 라벨은 번호가 없는 게 정상 — 원래 레벨 그대로
         # 이전 논문에서 이 헤더 이름에 대해 사용자가 정한 선택이 있으면 그걸 적용
         auto_level = final_level
         remembered = prefs.lookup(text)

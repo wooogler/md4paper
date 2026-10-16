@@ -95,3 +95,12 @@ def test_level_capped_at_6():
     assert d.depth == 7
     _, level, _ = numbering.relevel(["1.1.1.1.1.1.1 Deep"])[0]
     assert level == 6
+
+
+def test_front_matter_labels():
+    assert numbering.is_front_matter_label("CCS Concepts: · Human-centered computing → Interactive systems.")
+    assert numbering.is_front_matter_label("ACM Reference Format:")
+    assert numbering.is_front_matter_label("Additional Key Words and Phrases")
+    assert numbering.is_front_matter_label("Index Terms—Agents, preferences")
+    assert not numbering.is_front_matter_label("Keyword Extraction for Search")  # 본문 제목
+    assert not numbering.is_front_matter_label("Design Implications")

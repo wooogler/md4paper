@@ -45,6 +45,26 @@ _UNNUMBERED_KEYWORDS = {
     "ethics statement",
 }
 
+# 논문 앞부분의 서지·분류 라벨 (ACM·IEEE 템플릿). 번호가 없는 게 정상이라 리뷰 대상이 아니다.
+# 라벨 뒤에 내용이 붙어 한 줄로 나오기도 해서("CCS Concepts: · Human-centered …") 앞머리로 본다.
+_FRONT_MATTER_LABELS = (
+    "ccs concepts",
+    "acm reference format",
+    "additional key words and phrases",
+    "keywords",
+    "author keywords",
+    "index terms",
+    "general terms",
+    "acm classification",
+)
+
+
+def is_front_matter_label(text: str) -> bool:
+    """CCS Concepts · ACM Reference Format · Keywords 같은 앞부분 라벨인가."""
+    t = re.sub(r"\s+", " ", text).strip().lower()
+    return any(re.match(re.escape(label) + r"(?:$|[\s:.\-–—])", t) for label in _FRONT_MATTER_LABELS)
+
+
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}
 
 

@@ -784,3 +784,24 @@ def test_stale_extract_with_noncharacters_is_redone(wd, tmp_path):
     assert pipeline.run_extract(src, wd) == {"skipped": True}
     wd.raw_md.write_text("# Title\n\nWe de\uffffne it.\n", encoding="utf-8")  # 옛 추출 결과
     assert pipeline.run_extract(src, wd) != {"skipped": True}
+
+
+def test_acm_front_matter_labels_are_not_flagged_for_review(wd):
+    """CCS Concepts·ACM Reference Format은 번호가 없는 게 정상 — 원래 레벨 그대로, 리뷰 표시 없이."""
+    raw = (
+        "# A Paper Title\n\n"
+        "## CCS Concepts: · Human-centered computing → Interactive systems and tools.\n\n"
+        "## ACM Reference Format:\n\nAnonymous. 2018. A Paper Title.\n\n"
+        "# 1 Introduction\n\nBody.\n\n"
+        "## Design Notes\n\nAn unnumbered body heading still needs a look.\n\n"
+        "# 2 Method\n\nBody.\n"
+    )
+    wd.ensure()
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    m = build.build(raw, wd)
+    by = {s.text: s for s in m.sections}
+    for label in ("CCS Concepts: · Human-centered computing → Interactive systems and tools.",
+                  "ACM Reference Format:"):
+        assert by[label].needs_review is False
+        assert by[label].level == 2
+    assert by["Design Notes"].needs_review is True
