@@ -31,6 +31,35 @@ def _format_reference(r) -> str:  # noqa: ANN001 — RefEntry
     return ". ".join(parts).strip() or r.raw.strip()
 
 
+def citation_tooltips(wd: WorkDir) -> dict[str, dict]:
+    """본문 인용 번호 → {text: 서지정보, url: DOI/arXiv, title: 제목} (프리뷰 호버 툴팁용).
+
+    url은 툴팁에서 새 창으로 열리는 링크, title은 '제목 복사'(구글 스콜라 검색용)에 쓴다.
+    파싱 전이면 빈 dict. 섹션 정보가 필요 없어 모바일 HTML(§mobile)도 이걸 바로 쓴다.
+    """
+    from md4paper.cite.apply import load_cached_refs
+
+    tips: dict[str, dict] = {}
+    for r in load_cached_refs(wd):
+        tips[r.label] = {
+            "text": _format_reference(r),
+            "url": r.url() or "",
+            "title": (r.title or "").strip(),
+        }
+    return tips
+
+
+def footnote_tooltips(wd: WorkDir) -> dict[str, str]:
+    """각주 번호 → 내용 (본문 위첨자 링크 #fn-N 호버 툴팁용). 없으면 빈 dict."""
+    if not wd.footnotes_json.exists():
+        return {}
+    try:
+        data = json.loads(wd.footnotes_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
 class UIController:
     """paper.md4/ 작업 디렉토리 위의 리뷰 상태."""
 
@@ -343,31 +372,10 @@ class UIController:
         return apply_links(self.wd, refs, self.manifest.citation_parts, self.manifest.reference_links)
 
     def citation_tooltips(self) -> dict[str, dict]:
-        """본문 인용 번호 → {text: 서지정보, url: DOI/arXiv, title: 제목} (프리뷰 호버 툴팁용).
-
-        url은 툴팁에서 새 창으로 열리는 링크, title은 '제목 복사'(구글 스콜라 검색용)에 쓴다.
-        파싱 전이면 빈 dict.
-        """
-        from md4paper.cite.apply import load_cached_refs
-
-        tips: dict[str, dict] = {}
-        for r in load_cached_refs(self.wd):
-            tips[r.label] = {
-                "text": _format_reference(r),
-                "url": r.url() or "",
-                "title": (r.title or "").strip(),
-            }
-        return tips
+        return citation_tooltips(self.wd)
 
     def footnote_tooltips(self) -> dict[str, str]:
-        """각주 번호 → 내용 (본문 위첨자 링크 #fn-N 호버 툴팁용). 없으면 빈 dict."""
-        if not self.wd.footnotes_json.exists():
-            return {}
-        try:
-            data = json.loads(self.wd.footnotes_json.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-        return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+        return footnote_tooltips(self.wd)
 
     # --- 수동 편집 (번역 전 손보기) ---
     def save_en_markdown(self, text: str) -> None:

@@ -15,7 +15,10 @@ from pathlib import Path
 
 from md4paper import config, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
-from md4paper.ui import annotations, chat_panel, desktop, find_bar, jobs, mdrender, scroll_memory, spa, tabstore
+from md4paper.ui import (
+    annotations, chat_panel, desktop, find_bar, jobs, mdrender, reanchor, scroll_memory, sentpair, spa,
+    tabstore,
+)
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir, paper_title, set_pinned, set_project
 
@@ -449,11 +452,7 @@ _ANNO_HTML = """
     var el = node && (node.nodeType === 1 ? node : node.parentElement);
     return el && el.closest ? el.closest('.anno-scope') : null;
   }
-  function textNodes(root){
-    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null), out = [], n;
-    while ((n = w.nextNode())) out.push(n);
-    return out;
-  }
+""" + sentpair.JS + reanchor.JS + """
   function absOffset(scope, container, offset){   // Range.toString()은 textContent와 같은 텍스트만 센다
     var r = document.createRange(); r.selectNodeContents(scope);
     try { r.setEnd(container, offset); } catch (e) { return -1; }
@@ -481,38 +480,6 @@ _ANNO_HTML = """
       var d = Math.abs(j - a.start); if (d < bd){ bd = d; best = j; } from = j + 1;
     }
     return best >= 0 ? [best, best + q.length] : null;
-  }
-  // 평문 오프셋 구간들을 텍스트 노드를 쪼개 감싼다 (구간끼리 겹치지 않아야 한다).
-  // 자를 지점을 먼저 다 모은 뒤 노드별로 뒤에서 앞으로 자른다 — 한 노드를 쪼개도 다른 노드의
-  // 오프셋은 그대로고, 같은 노드 안에서는 뒷쪽부터 잘라야 앞 오프셋이 살아남는다.
-  // 감싸도 textContent는 그대로라 하이라이트 앵커(오프셋)와 문장 span이 서로를 망가뜨리지 않는다.
-  function wrapRanges(scope, segs, make){
-    var ns = textNodes(scope), nodes = [], groups = [], t = 0, i, k, z;
-    for (i = 0; i < ns.length; i++){ var L = ns[i].nodeValue.length; nodes.push([ns[i], t, t + L]); t += L; }
-    for (i = 0; i < segs.length; i++){
-      for (k = 0; k < nodes.length; k++){
-        var s0 = nodes[k][1], e0 = nodes[k][2];
-        if (e0 <= segs[i].s || s0 >= segs[i].e) continue;
-        var a0 = Math.max(segs[i].s - s0, 0), b0 = Math.min(segs[i].e - s0, e0 - s0);
-        if (b0 <= a0) continue;
-        var g = null;
-        for (z = 0; z < groups.length; z++) if (groups[z][0] === nodes[k][0]) { g = groups[z]; break; }
-        if (!g){ g = [nodes[k][0], []]; groups.push(g); }
-        g[1].push({a: a0, b: b0, seg: segs[i]});
-      }
-    }
-    for (i = 0; i < groups.length; i++){
-      var node = groups[i][0], hs = groups[i][1];
-      hs.sort(function(x, y){ return y.a - x.a; });
-      for (k = 0; k < hs.length; k++){
-        var h = hs[k];
-        if (h.b < node.nodeValue.length) node.splitText(h.b);
-        var target = h.a > 0 ? node.splitText(h.a) : node;
-        var el = make(h.seg);
-        target.parentNode.replaceChild(el, target);
-        el.appendChild(target);
-      }
-    }
   }
   function paint(scope, hits){        // hits: [{a, s, e}] — 겹쳐도 되도록 경계로 잘라 칠한다
     var pts = {}, i, k;
@@ -583,7 +550,20 @@ _ANNO_HTML = """
           for (i = 1; i < hits.length; i++)
             if (Math.abs(hits[i].row - b.row) < Math.abs(pick.row - b.row)) pick = hits[i];
         }
-        if (!pick) continue;
+        if (!pick){
+          // 문구가 바뀌었다(재변환·재번역) — 공백만 다른 같은 문구, 아니면 가장 비슷한 문장으로
+          var same = sc.filter(function(c){ return c.getAttribute('data-side') === b.side; });
+          var f = fuzzyFind(b, same);
+          if (!f) continue;
+          placed.push({it: items[j], an: b, sc: f.sc, s: f.s, e: f.e});
+          if (f.sure && f.sc.classList.contains('sbs-cell')){
+            var ft = f.sc.textContent;
+            b.quote = ft.slice(f.s, f.e); b.row = f.row; b.start = f.s; b.end = f.e;
+            b.prefix = ft.slice(Math.max(0, f.s - CTX), f.s); b.suffix = ft.slice(f.e, f.e + CTX);
+            repaired = true;
+          }
+          continue;
+        }
         placed.push({it: items[j], an: b, sc: pick.sc, s: pick.s, e: pick.s + b.quote.length});
         if (firm && pick.sc.classList.contains('sbs-cell')){
           b.row = pick.row; b.start = pick.s; b.end = pick.s + b.quote.length;
@@ -894,117 +874,6 @@ _ANNO_HTML = """
   // 행에 처음 마우스를 올릴 때만 그 행의 두 셀을 문장으로 쪼개 짝을 지어 span으로 감싼다(지연 처리).
   // 논문 한 편의 문단이 수백 개라 전부 미리 처리하면 첫 렌더가 무거워진다.
   var hoverRow = null, hoverPair = null;
-
-  // 블록 경계 — <p>a</p><p>b</p>의 textContent는 "ab"라 경계 문자가 없다. 블록별로 나눠
-  // 문장을 쪼개지 않으면 앞 문단의 끝과 뒤 문단의 첫 문장이 한 문장으로 붙는다.
-  var BLOCK = /^(P|LI|H1|H2|H3|H4|H5|H6|BLOCKQUOTE|PRE|TD|TH|FIGCAPTION|DT|DD)$/;
-  function blockRanges(scope){
-    var ns = textNodes(scope), out = [], t = 0, cur = null;
-    for (var i = 0; i < ns.length; i++){
-      var el = ns[i].parentElement, L = ns[i].nodeValue.length;
-      while (el && el !== scope && !BLOCK.test(el.tagName)) el = el.parentElement;
-      if (!cur || cur.el !== el){ cur = {el: el, s: t, e: t + L}; out.push(cur); }
-      else cur.e = t + L;
-      t += L;
-    }
-    return out;
-  }
-
-  // 문장 끝처럼 보이지만 아닌 것들: et al. · e.g. · 0.5 · 3.1 · 이니셜(A. Jelson) ·
-  // 괄호 안(인용 덩어리 [3, Adams et al., 2022]) · 마침표 뒤가 소문자로 이어지는 경우.
-  // ABBR 앞의 "줄머리 또는 공백·여는괄호" 조건은 꼭 필요하다 — 없으면 "critical." "systems." 처럼
-  // al·ch·ms로 끝나는 흔한 낱말이 죄다 약어로 잡혀 문장이 안 잘린다.
-  var ABBR = /(?:^|[\\s(\\[\\u201c"'])(?:e\\.g|i\\.e|cf|vs|etc|al|Fig|Figs|Eq|Eqs|Sec|Secs|Tab|No|Dr|Mr|Mrs|Ms|Prof|St|approx|resp|Ref|Refs|pp|Vol|Ch|Inc|Ltd|Univ)\\.$/i;
-  var CLOSERS = '.!?\\u2026"\\u2019\\u201d\\')]';
-  function trimRange(txt, s, e){
-    while (s < e && /\\s/.test(txt.charAt(s))) s++;
-    while (e > s && /\\s/.test(txt.charAt(e - 1))) e--;
-    return e > s ? {s: s, e: e} : null;
-  }
-  // 짝이 맞는 괄호 안쪽만 표시한다. 짝 없이 열린 괄호 하나가 남은 문단(추출이 흔히 그렇다)에서
-  // 그 뒤 전체가 "괄호 안"이 돼 한 문장으로 뭉치던 것을 막는다.
-  function bracketMask(txt, s0, e0){
-    var n = e0 - s0, delta = [], stack = [], mask = [], run = 0, i;
-    for (i = 0; i <= n; i++) delta[i] = 0;
-    for (i = s0; i < e0; i++){
-      var c = txt.charAt(i);
-      if (c === '(' || c === '[' || c === '{') stack.push(i);
-      else if (c === ')' || c === ']' || c === '}'){
-        if (stack.length){ var o = stack.pop(); delta[o - s0]++; delta[i - s0 + 1]--; }
-      }
-    }
-    for (i = 0; i < n; i++){ run += delta[i]; mask[i] = run > 0; }
-    return mask;
-  }
-  function sentences(txt, s0, e0){
-    var out = [], start = s0, i, r, inBracket = bracketMask(txt, s0, e0);
-    for (i = s0; i < e0; i++){
-      if (inBracket[i - s0] || '.!?\\u2026'.indexOf(txt.charAt(i)) < 0) continue;
-      var j = i + 1;
-      while (j < e0 && CLOSERS.indexOf(txt.charAt(j)) >= 0) j++;   // 닫는 따옴표·괄호까지 문장에 포함
-      if (j < e0 && !/\\s/.test(txt.charAt(j))) continue;          // 0.5 · 3.1 처럼 붙어 있으면 문장 끝이 아님
-      var head = txt.slice(start, i + 1);
-      if (ABBR.test(head) || /(^|[\\s(\\[])[A-Z]\\.$/.test(head)) continue;
-      var k = j; while (k < e0 && /\\s/.test(txt.charAt(k))) k++;
-      if (k < e0 && /[a-z,;]/.test(txt.charAt(k))) continue;       // 소문자로 이어지면 아직 한 문장
-      r = trimRange(txt, start, j); if (r) out.push(r);
-      start = k; i = k - 1;
-    }
-    r = trimRange(txt, start, e0); if (r) out.push(r);
-    return out;
-  }
-  function sentsOf(scope){
-    var txt = scope.textContent, bs = blockRanges(scope), out = [], i;
-    for (i = 0; i < bs.length; i++) out = out.concat(sentences(txt, bs[i].s, bs[i].e));
-    return out;
-  }
-
-  // 문장 수가 같으면 순서대로 1:1 (번역이 문장을 지킨 흔한 경우 — 추측이 아니다).
-  // 다르면 길이비 DP로 1:2·2:1·누락까지 허용해 맞춘다. 어림짐작이므로 절반 넘게 짝을 못 지으면
-  // 아예 포기하고 문단 표시로 물러난다 — 틀린 짝을 보여 주느니 안 보여 주는 게 낫다.
-  var MOVES = [[1, 1, 0], [1, 2, 1.4], [2, 1, 1.4], [1, 0, 4], [0, 1, 4]];
-  function pairUp(E, K){
-    var m = E.length, n = K.length, i, j, a, out = [];
-    if (!m || !n) return null;
-    if (m === n){ for (i = 0; i < m; i++) out.push([[i], [i]]); return out; }
-    var eL = [], kL = [], totE = 0, totK = 0;
-    for (i = 0; i < m; i++){ eL.push(E[i].e - E[i].s); totE += eL[i]; }
-    for (j = 0; j < n; j++){ kL.push(K[j].e - K[j].s); totK += kL[j]; }
-    var r = totK / Math.max(1, totE), INF = 1e18, d = [], bk = [];
-    for (i = 0; i <= m; i++){
-      d.push([]); bk.push([]);
-      for (j = 0; j <= n; j++){ d[i].push(INF); bk[i].push(null); }
-    }
-    d[0][0] = 0;
-    for (i = 0; i <= m; i++) for (j = 0; j <= n; j++){
-      if (d[i][j] >= INF) continue;
-      for (var t = 0; t < MOVES.length; t++){
-        var di = MOVES[t][0], dj = MOVES[t][1];
-        if (i + di > m || j + dj > n) continue;
-        var x = 0, y = 0;
-        for (a = 0; a < di; a++) x += eL[i + a];
-        for (a = 0; a < dj; a++) y += kL[j + a];
-        var c = d[i][j] + Math.abs(x * r - y) / Math.sqrt(Math.max(1, x * r + y)) + MOVES[t][2];
-        if (c < d[i + di][j + dj]){ d[i + di][j + dj] = c; bk[i + di][j + dj] = [i, j, di, dj]; }
-      }
-    }
-    if (d[m][n] >= INF) return null;
-    var path = [], p = [m, n];
-    while (p[0] || p[1]){
-      var b = bk[p[0]][p[1]]; if (!b) return null;
-      path.push(b); p = [b[0], b[1]];
-    }
-    path.reverse();
-    var solo = 0;
-    for (i = 0; i < path.length; i++){
-      var es = [], ks = [];
-      for (a = 0; a < path[i][2]; a++) es.push(path[i][0] + a);
-      for (a = 0; a < path[i][3]; a++) ks.push(path[i][1] + a);
-      if (!es.length || !ks.length) solo++;
-      out.push([es, ks]);
-    }
-    return solo * 2 > out.length ? null : out;
-  }
 
   function rowCells(row){
     return [].slice.call(document.querySelectorAll('.sbs-grid.sbs-two .sbs-cell[data-row="' + row + '"]'));
@@ -4767,6 +4636,24 @@ def build_home(state: dict) -> None:
         name, data = bulk_zip(roots, which, config.resolve_export_target())
         await desktop.deliver(name, data)
 
+    async def download_mobile() -> None:
+        """선택한 논문들을 폰에서 읽는 HTML 한 장으로 (§mobile) — 동기화 폴더에 두면 밖에서도 열린다."""
+        from md4paper.ui import mobile
+
+        roots = [Path(p) for p in selected]
+        if not roots:
+            ui.notify("선택된 논문이 없습니다.", type="warning")
+            return
+        n = ui.notification(f"모바일 HTML 만드는 중… ({len(roots)}편)", spinner=True, timeout=None)
+        try:
+            data = await run.io_bound(mobile.build, roots)
+        except Exception as e:  # noqa: BLE001
+            ui.notify(f"모바일 HTML을 만들지 못했습니다: {e}", type="negative")
+            return
+        finally:
+            n.dismiss()
+        await desktop.deliver(mobile.file_name(len(roots)), data.encode("utf-8"), media_type="text/html")
+
     async def save_bulk_to_library() -> None:
         """선택한 논문들을 각자의 자리(프로젝트 폴더 > 공통 저장 위치)로 내보내기."""
         if not _any_library_dirs():
@@ -4891,6 +4778,8 @@ def build_home(state: dict) -> None:
             ui.label(f"{len(selected)}개 선택").classes("text-sm font-semibold text-primary")
             ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")).props("dense outline")
             ui.button("한국어 zip", icon="download", on_click=lambda: download_bulk("ko")).props("dense outline")
+            ui.button("모바일 HTML", icon="smartphone", on_click=download_mobile).props("dense outline no-caps") \
+                .tooltip("폰에서 읽는 HTML 한 장 (원문·번역·문단 대조) — iCloud Drive·구글 드라이브에 저장하면 밖에서도 열립니다")
             mv = ui.button("프로젝트로 이동", icon="folder_special").props("dense outline no-caps") \
                 .tooltip("선택한 논문을 한 묶음으로 — 저장 위치의 사본도 함께 옮깁니다")
             with mv, ui.menu():
