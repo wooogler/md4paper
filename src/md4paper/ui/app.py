@@ -301,6 +301,14 @@ _ANNO_CSS = """
   box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 /* 짝을 못 찾은 문장 — 파랑(=짝 있음)과 구별되게 무채색으로 */
 .sent[data-solo].sent-hl { background: rgba(130,130,130,.20); }
+/* 한 언어만 볼 때 — 반대쪽 문단은 숨은 셀로 같이 그려 두고, 올린 문장의 짝을 툴팁으로 보여 준다 */
+.sbs-ghost { display: none !important; }
+#md-sent-tip { position: fixed; z-index: 9990; max-width: 520px; pointer-events: none; opacity: 0;
+  background: #fffdf7; color: #2b2b2b; border: 1px solid #e6e1d3; border-radius: 9px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.14); padding: 8px 12px; font-size: 13.5px; line-height: 1.6;
+  word-break: keep-all; overflow-wrap: break-word; transition: opacity .1s ease; }
+#md-sent-tip.open { opacity: 1; }
+#md-sent-tip .st-side { display: block; font-size: 10.5px; color: #9a9384; margin-bottom: 2px; }
 
 /* 하이라이트 — 배경색은 JS가 인라인으로(팔레트). 글자색은 밝은 형광 위라 항상 어둡게 고정한다
    (다크 모드의 옅은 글자색 그대로면 노랑 위에서 읽히지 않는다). */
@@ -388,6 +396,8 @@ body.ma-open .md4-steps { padding-right: var(--ma-w); }
   .sbs-grid.sbs-two .sbs-cell.sbs-hl { box-shadow: inset 2px 0 0 rgba(90,150,230,.45); }
   .sent.sent-hl { background: rgba(90,150,230,.22); }
   .sent[data-solo].sent-hl { background: rgba(150,150,150,.20); }
+  #md-sent-tip { background: #262624; color: #e2e0da; border-color: #3a3935; }
+  #md-sent-tip .st-side { color: #8d8a82; }
   #md-anno-pop, #md-anno-panel { background: #1f1f1f; border-color: #3a3a3a; color: #d4d4d4; }
   #md-anno-pop textarea { background: #262626; border-color: #3a3a3a; }
   .apop-quote, .ap-side, .ap-foot, .ap-empty { color: #8f8f8f; }
@@ -874,10 +884,42 @@ _ANNO_HTML = """
   // 행에 처음 마우스를 올릴 때만 그 행의 두 셀을 문장으로 쪼개 짝을 지어 span으로 감싼다(지연 처리).
   // 논문 한 편의 문단이 수백 개라 전부 미리 처리하면 첫 렌더가 무거워진다.
   var hoverRow = null, hoverPair = null;
+  // 두 컬럼(.sbs-two)이면 짝 문장을 칠하고, 한 컬럼(.sbs-tip — 반대쪽은 숨은 셀)이면 툴팁으로 보여 준다
+  var PAIR_CELL = '.sbs-grid.sbs-two .sbs-cell, .sbs-grid.sbs-tip .sbs-cell';
+  var stip = document.getElementById('md-sent-tip');
+  if (!stip){ stip = document.createElement('div'); stip.id = 'md-sent-tip'; document.body.appendChild(stip); }
+  var stipTimer = null;
 
   function rowCells(row){
-    return [].slice.call(document.querySelectorAll('.sbs-grid.sbs-two .sbs-cell[data-row="' + row + '"]'));
+    return [].slice.call(document.querySelectorAll(
+      '.sbs-grid.sbs-two .sbs-cell[data-row="' + row + '"], .sbs-grid.sbs-tip .sbs-cell[data-row="' + row + '"]'));
   }
+  function hideTip(){ clearTimeout(stipTimer); stipTimer = null; stip.classList.remove('open'); }
+  // 올린 문장(hov)의 짝을 숨은 셀에서 찾아 툴팁으로. 짝을 못 찾은 문장(solo)은 띄우지 않는다.
+  function showTip(id, hov){
+    hideTip();
+    if (!hov || hov.hasAttribute('data-solo')) return;
+    var ghost = hov.closest('.sbs-cell').parentElement.querySelector(
+      '.sbs-ghost[data-row="' + hov.closest('.sbs-cell').getAttribute('data-row') + '"]');
+    if (!ghost) return;
+    var parts = ghost.querySelectorAll('[data-pair="' + id + '"]'), txt = '', i;
+    for (i = 0; i < parts.length; i++) txt += parts[i].textContent;
+    txt = txt.replace(/\s+/g, ' ').trim();
+    if (!txt) return;
+    stipTimer = setTimeout(function(){
+      if (hoverPair !== id) return;
+      stip.innerHTML = '<span class="st-side">' + (ghost.getAttribute('data-side') === 'ko' ? '번역' : '원문') + '</span>';
+      stip.appendChild(document.createTextNode(txt));
+      // 문장 첫 줄 아래(자리가 없으면 위)에 — 문장이 여러 줄이면 커서가 있는 줄 기준
+      var rs = hov.getClientRects(), r = rs[0] || hov.getBoundingClientRect();
+      for (i = 0; i < rs.length; i++) if (lastY >= rs[i].top && lastY <= rs[i].bottom){ r = rs[i]; break; }
+      stip.style.left = '0px'; stip.style.top = '0px'; stip.classList.add('open');
+      var w = stip.offsetWidth, h = stip.offsetHeight, x = Math.min(Math.max(8, lastX - 40), innerWidth - w - 8);
+      var y = r.bottom + 8; if (y + h > innerHeight - 8) y = Math.max(8, r.top - h - 8);
+      stip.style.left = x + 'px'; stip.style.top = y + 'px';
+    }, 280);
+  }
+  var lastX = 0, lastY = 0;
   function prepareRow(cells){
     var en = null, ko = null, i;
     for (i = 0; i < cells.length; i++){
@@ -929,6 +971,7 @@ _ANNO_HTML = """
   }
   function setPair(id){
     if (id === hoverPair) return;
+    if (!id) hideTip();
     var on = document.querySelectorAll('.sent-hl'), i;
     for (i = 0; i < on.length; i++) on[i].classList.remove('sent-hl');
     hoverPair = id;
@@ -941,8 +984,11 @@ _ANNO_HTML = """
     for (var i = 0; i < on.length; i++) on[i].classList.remove('sbs-hl');
     hoverRow = null; setPair(null);
   }
+  document.addEventListener('mousemove', function(e){ lastX = e.clientX; lastY = e.clientY; }, {passive: true});
+  document.addEventListener('scroll', hideTip, true);
+  document.addEventListener('mousedown', hideTip, true);
   document.addEventListener('mouseover', function(e){
-    var cell = e.target.closest ? e.target.closest('.sbs-grid.sbs-two .sbs-cell') : null;
+    var cell = e.target.closest ? e.target.closest(PAIR_CELL) : null;
     if (!cell){ if (hoverRow !== null) clearHover(); return; }
     var row = cell.getAttribute('data-row'), fresh = false;
     if (row !== hoverRow){
@@ -957,7 +1003,12 @@ _ANNO_HTML = """
       var under = document.elementFromPoint(e.clientX, e.clientY);
       t = under && under.closest ? under.closest('[data-pair]') : null;
     }
+    var before = hoverPair;
     setPair(t ? t.getAttribute('data-pair') : null);
+    if (cell.parentElement.classList.contains('sbs-tip') && hoverPair !== before){
+      // 인용·각주 링크 위에선 그쪽 툴팁에 자리를 내준다
+      if (hoverPair && !e.target.closest('a')) showTip(hoverPair, t); else hideTip();
+    }
   });
 
   setTimeout(applyAll, 400);   // 첫 렌더 안전망 (이후엔 뷰어가 __mdAnnoApply를 부른다)
@@ -2458,7 +2509,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     ui.markdown(single or "_아직 번역 안 됨 — 용어집 탭에서 번역을 실행하세요._", extras=_md)
 
     # 뷰어 표시 상태 — 원문/번역/PDF 패널 토글 + 목차 + 텍스트↔PDF 분할 비율 + PDF 스크롤 싱크
-    viewer_state = {"en": True, "ko": True, "pdf": False, "toc": True, "split": 58, "sync": True}
+    viewer_state = {"en": True, "ko": True, "pdf": False, "toc": True, "split": 58, "sync": True,
+                    "stip": True}  # stip: 한 언어만 볼 때 문장 짝 툴팁
 
     def _row_scroll_js(k: int) -> str:  # 정렬 그리드의 k번째 행으로 스크롤
         return (f"document.querySelector('.sbs-grid [data-row=\"{k}\"]')"
@@ -2721,10 +2773,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         def text_area() -> None:
             two = show_en and show_ko and aligned
+            # 한 언어만 볼 때 반대쪽을 숨은 셀로 같이 그린다 — 문장에 올리면 그 짝을 툴팁으로(JS)
+            ghost = aligned and show_en != show_ko and viewer_state["stip"]
             if aligned or show_en:
                 # 정렬 그리드 (원문/번역 컬럼 토글). 정렬 실패 시엔 EN만 그리드로(그때 KO 컬럼 생략).
                 with ui.element("div").classes("vwrap"):
-                    two_cls = " sbs-two" if two else ""
+                    two_cls = " sbs-two" if two else (" sbs-tip" if ghost else "")
                     with ui.element("div").classes(f"sbs-grid{two_cls}").style(
                             f"--sbs-cols:{'1fr 1fr' if two else '1fr'}"):
                         for k, (enb, kob, head) in enumerate(rows):
@@ -2743,6 +2797,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                 with ui.element("div").classes(f"sbs-cell anno-scope{sep}").props(
                                         f"data-row={k} data-side=ko" + ("" if anchored else page_prop)):
                                     ui.markdown(kob or "", extras=_md).classes("md-preview sbs-md")
+                            if ghost:  # anno-scope·data-page 없이 — 메모·찾기·PDF 싱크가 이 셀을 모른다
+                                with ui.element("div").classes("sbs-cell sbs-ghost").props(
+                                        f"data-row={k} data-side={'ko' if show_en else 'en'}"):
+                                    ui.markdown((kob or "") if show_en else enb, extras=_md).classes("md-preview sbs-md")
                     if two:
                         ui.element("div").classes("vcol-handle")
                 if two:
@@ -2823,6 +2881,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                           on_click=lambda: _vtoggle("sync")).props(
                     "flat dense round " + ("color=primary" if viewer_state["sync"] else "color=grey-6")) \
                     .tooltip("스크롤 시 PDF 페이지 따라오기 " + ("(켜짐)" if viewer_state["sync"] else "(꺼짐)"))
+            if has_ko and viewer_state["en"] != viewer_state["ko"]:  # 한 언어만 볼 때 — 문장 짝 툴팁
+                ui.button(icon="translate", on_click=lambda: _vtoggle("stip")).props(
+                    "flat dense round " + ("color=primary" if viewer_state["stip"] else "color=grey-6")) \
+                    .tooltip("문장에 마우스를 올리면 " + ("번역" if viewer_state["en"] else "원문")
+                             + " 문장 보기 " + ("(켜짐)" if viewer_state["stip"] else "(꺼짐)"))
             ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
@@ -5507,7 +5570,8 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     def shell() -> None:
         ui.add_head_html(spa.HEAD_HTML + _PREPAINT_HTML)
         spa.make_header()
-        ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view})
+        # w-full: 없으면 sub_pages 상자가 내용 폭으로 줄어(큰 화면에서 1275px) 변환·번역 탭 splitter가 좁아진다
+        ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view}).classes("w-full")
 
     port = pick_port(port)
     state["port"] = port  # 새 창(형제 웹뷰 프로세스)이 가리킬 주소를 만들 때 쓴다
