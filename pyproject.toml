@@ -15,7 +15,9 @@ dependencies = [
     # 추가 설치 부담이 없고, PyMuPDF(AGPL)와 달리 BSD-3/Apache-2.0이라 라이선스 제약이 없다.
     "pypdfium2>=4",
     # PDF 추출 백엔드 — docling(MIT). torch 등 무거운 스택을 동반하지만 단일 백엔드로 유지.
-    "docling>=2.114",
+    # 2.140 하한: 그 전(2.114 + docling-parse 7.8)은 글꼴이 바뀌는 자리마다 줄 셀을 끊어 공백을 끼우고
+    # ("Decision Points ."), 어떤 줄은 띄어쓰기를 통째로 놓쳤다("Wedefine", "ACMReference").
+    "docling>=2.140",
     # opencv 상한 고정: docling의 rapidocr가 opencv-python(상한 없음)을 요구해 깨진 5.0.0.93이
     # 뽑히면 'cv2 has no attribute setNumThreads'로 변환이 실패한다. 정상 바이너리가 있는 4.x로 제한.
     "opencv-python>=4.6,<5",

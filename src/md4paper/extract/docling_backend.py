@@ -1221,6 +1221,9 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         md, join_stats["spaces_restored"] = spacing.restore_spaces(md, space_ref)
         if join_stats["spaces_restored"]:
             _restore_heading_spaces(wd, space_ref)  # headings.json도 같은 텍스트로 (페이지 매칭 키)
+        # 본문 밖으로 뺀 각주·저자 주석도 같은 띄어쓰기 복원을 거친다 (아래에서 본문에 다시 붙는다)
+        footnotes = [spacing.restore_spaces(f, space_ref)[0] for f in footnotes]
+        author_notes = [spacing.restore_spaces(n, space_ref)[0] for n in author_notes]
         md = _place_author_notes(md, author_notes)  # 저자 주석(∗ …)은 앞부분에 (문서 끝 각주 아님)
         # 각주: 본문 마커를 위첨자 링크로, 내용은 문서 끝 목록 + 구조화 저장(호버 툴팁용)
         if footnotes:

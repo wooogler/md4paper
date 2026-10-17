@@ -228,20 +228,8 @@ def _emphasize_line(line: str, start: int, at: dict[int, int]) -> tuple[str, int
             edits.append((s, e, st))
     for s, e, st in reversed(edits):
         mk = _MARK[st]
-        # Docling은 글꼴이 바뀌는 자리에 공백을 끼운다("Decision Points ." / "( Identification").
-        # 강조 경계가 바로 그 자리라, 구두점 앞뒤의 그 공백은 걷는다(".05" 같은 수는 빼고).
-        tail = line[e:]
-        if _GLUE_AFTER.match(tail) and e + 1 in at:
-            tail = tail[1:]
-        head = line[:s]
-        if _GLUE_BEFORE.search(head) and s - 2 in at:
-            head = head[:-1]
-        line = head + mk + line[s:e] + mk + tail
+        line = line[:s] + mk + line[s:e] + mk + line[e:]
     return line, len(edits)
-
-
-_GLUE_AFTER = re.compile(r" [.,;:!?)\]](?![\d.])")
-_GLUE_BEFORE = re.compile(r"[(\[] $")
 
 
 def apply(md: str, stream: str, bits: list[int]) -> tuple[str, int]:

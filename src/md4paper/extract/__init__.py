@@ -26,7 +26,8 @@ from md4paper.workdir import WorkDir
 # 추출 결과를 바꾸는 개선을 넣을 때마다 올린다 — 기존 논문을 다시 변환하면 추출부터 새로 한다.
 # 2: 수식 글꼴 ToUnicode 복구 · 인라인 수식 $LaTeX$ · 깊은 여백의 러닝 푸터
 # 3: 본문 굵게·기울임을 PDF 글꼴로 되살림 (**…** / *…*)
-EXTRACT_VERSION = 3
+# 4: docling 2.140 + 원본에서 맞닿은 글리프 사이에 Docling이 끼운 공백 제거 ("Points ." → "Points.")
+EXTRACT_VERSION = 4
 
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"

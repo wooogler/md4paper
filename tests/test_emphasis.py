@@ -143,9 +143,9 @@ def test_narrative_citation_with_italic_et_al_is_linked():
     assert _NARRATIVE_CITE.search("as shown by Wei *et al.* (2021), prompts").group(0) == "Wei *et al.* (2021)"
 
 
-def test_space_docling_puts_at_the_font_switch_before_punctuation_is_dropped():
-    # Docling은 글꼴이 바뀌는 자리에 공백을 끼운다 — 강조 경계의 구두점 앞뒤 공백만 걷는다
-    line = "proceed as Decision Points . The term ( grounding ) and p < .05 stay."
+def test_marks_hug_the_words_and_leave_spacing_alone():
+    # Docling이 글꼴 경계에 끼운 공백은 spacing이 글리프 간격으로 미리 걷는다 — 강조는 띄어쓰기를 안 바꾼다
+    line = "proceed as Decision Points. The term (grounding) and p < .05 stay."
     out, _ = _apply(line, ("proceed as ", 0), ("Decision Points", IT), (". The term (", 0), ("grounding", IT),
                     (") and p < .05 stay.", 0))
     assert out == "proceed as *Decision Points*. The term (*grounding*) and p < .05 stay."
