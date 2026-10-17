@@ -30,7 +30,8 @@ from md4paper.workdir import WorkDir
 # 5: 선 없는 표에서 한 행으로 뭉친 본문 행을 PDF 기준선으로 다시 나눔
 # 6: 표 셀로 들어간 투고본 여백 줄 번호 제거 · headings.json에서도 줄 번호 제거
 # 7: 표 셀·목록 항목으로 들어간 러닝 푸터 제거 (같은 문구 + 다른 쪽 푸터와 같은 높이)
-EXTRACT_VERSION = 7
+# 8: 셀 상자가 다른 행의 줄을 덮어 엉킨 표 행 구간을 PDF 줄 기준선으로 다시 지음
+EXTRACT_VERSION = 8
 
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"
