@@ -16,7 +16,7 @@ from pathlib import Path
 from md4paper import config, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
-    annotations, chat_panel, desktop, find_bar, jobs, mdrender, reanchor, scroll_memory, sentpair, spa,
+    annotations, chat_panel, desktop, figrefs, find_bar, jobs, mdrender, reanchor, scroll_memory, sentpair, spa,
     tabstore, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
@@ -1290,15 +1290,18 @@ _IMG_ZOOM_HTML = """
   }
   window.__mdImgCopied = function(){ flash('copy'); };
 
+  function openZoom(src, alt){
+    img.src = src;
+    cap.textContent = alt || '';
+    box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
+    if (img.complete) fit(); else img.onload = fit;
+  }
+  window.__mdImgZoomOpen = openZoom;   // 본문의 그림·표 참조(figrefs.py) 클릭도 이 뷰어로 연다
   document.addEventListener('click', function(ev){
     var t = ev.target;
     if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.md-preview')) return;
     ev.preventDefault();             // 그림을 감싼 링크가 있어도 이동하지 않게
-    img.src = t.currentSrc || t.src;
-    var alt = t.getAttribute('alt') || t.getAttribute('title') || '';
-    cap.textContent = alt;
-    box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
-    if (img.complete) fit(); else img.onload = fit;
+    openZoom(t.currentSrc || t.src, t.getAttribute('alt') || t.getAttribute('title') || '');
   });
   box.addEventListener('click', function(ev){
     if (moved) { moved = false; return; }               // 드래그 끝의 클릭은 닫기가 아니다
@@ -2308,6 +2311,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_body_html(_CITE_TIP_HTML)
     spa.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
     spa.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
+    # 본문 그림·표 참조 호버 → 썸네일, 클릭 → 확대 (그림은 위 확대 뷰어, 마크다운 표는 표 오버레이)
+    spa.add_css(figrefs.CSS)
+    fig_js = figrefs.index_js(served_markdown(ctrl.en_markdown() or "", tok),
+                              served_markdown(ctrl.ko_markdown() or "", tok))
+    spa.add_body_html(f"<script>{fig_js}</script>")
+    spa.add_body_html(figrefs.HTML)
 
     def zoomed_file(e) -> Path | None:  # noqa: ANN001 — GenericEventArguments
         """확대 뷰어가 넘긴 `/wdimages/<토큰>/<파일>` → 이 논문의 out/images 안 실제 파일."""
