@@ -88,6 +88,23 @@ def source_from_direct_url(raw: str | None) -> Source | None:
     return Source(owner=gh[0], repo=gh[1], commit=vcs["commit_id"], ref=vcs.get("requested_revision"))
 
 
+def env_root() -> Path:
+    """md4paper가 깔린 실제 가상환경 폴더.
+
+    맥 앱 아이콘으로 띄우면 sys.prefix가 번들(`md4paper.app/Contents`)이다 — 런처가 번들 안에
+    pyvenv.cfg 심볼릭 링크를 두기 때문(§launcher). 그 링크를 따라가야 uv tool 폴더가 나온다.
+    """
+    cfg = Path(sys.prefix) / "pyvenv.cfg"
+    return cfg.resolve().parent if cfg.exists() else Path(sys.prefix)
+
+
+def tool_exe() -> Path:
+    """그 가상환경의 `md4paper` 실행 파일 (업데이트 뒤 `md4paper app`으로 런처를 새로 만들 때)."""
+    if sys.platform.startswith("win"):
+        return env_root() / "Scripts" / f"{DIST}.exe"
+    return env_root() / "bin" / DIST
+
+
 def installed_source() -> Source | None:
     """지금 돌고 있는 md4paper가 GitHub에서 uv tool로 깐 것이면 그 출처. 아니면 None(검사 안 함)."""
     if os.environ.get("MD4PAPER_NO_UPDATE_CHECK"):
@@ -97,7 +114,7 @@ def installed_source() -> Source | None:
     except metadata.PackageNotFoundError:
         return None
     src = source_from_direct_url(raw)
-    if src is None or not (Path(sys.prefix) / "uv-receipt.toml").exists():
+    if src is None or not (env_root() / "uv-receipt.toml").exists():
         return None  # uv tool 설치본이 아니면 다시 깔 방법을 모른다
     return src
 
@@ -197,7 +214,7 @@ def _relaunch_posix() -> str:
 def posix_script(src: Source, uv: str, pid: int, log: Path, relaunch: bool = True) -> str:
     """앱(pid)이 끝나길 기다렸다가 다시 깔고, 런처를 새로 만들고, 다시 켜는 sh 스크립트."""
     q = shlex.quote
-    exe = q(str(Path(sys.prefix) / "bin" / DIST))
+    exe = q(str(tool_exe()))
     fail_alert = ""
     if sys.platform == "darwin":
         fail_alert = ("osascript -e 'display alert \"md4paper 업데이트 실패\" message "
@@ -224,7 +241,7 @@ def windows_script(src: Source, uv: str, pid: int, log: Path, relaunch: bool = T
     def ps(v: str) -> str:
         return "'" + v.replace("'", "''") + "'"
 
-    exe = Path(sys.prefix) / "Scripts" / f"{DIST}.exe"
+    exe = tool_exe()
     lines = [
         f"Start-Transcript -Append -Path {ps(str(log))} | Out-Null",
         f"try {{ Wait-Process -Id {pid} -Timeout 60 -ErrorAction SilentlyContinue }} catch {{}}",

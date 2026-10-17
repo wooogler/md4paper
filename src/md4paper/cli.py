@@ -972,8 +972,7 @@ def update_cmd(check_only: bool) -> None:
     click.echo("앱이 열려 있으면 닫은 뒤 진행하세요. 설치 중…")
     if subprocess.run([uv, "tool", "install", "--force", src.spec], check=False).returncode != 0:
         raise click.ClickException("설치에 실패했습니다.")
-    subprocess.run([str(Path(sys.prefix) / ("Scripts" if sys.platform.startswith("win") else "bin") / "md4paper"),
-                    "app"], check=False)
+    subprocess.run([str(updater.tool_exe()), "app"], check=False)
     click.echo(click.style("업데이트 완료.", fg="green"))
 
 

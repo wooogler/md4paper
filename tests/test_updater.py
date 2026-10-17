@@ -80,3 +80,16 @@ def test_version_label_has_version():
     from md4paper import __version__
 
     assert updater.version_label().startswith(f"v{__version__}")
+
+
+def test_env_root_follows_app_bundle_symlink(tmp_path, monkeypatch):
+    """맥 앱 번들로 띄우면 sys.prefix가 번들이다 — pyvenv.cfg 링크를 따라 실제 uv tool 폴더로."""
+    tool = tmp_path / "tools" / "md4paper"
+    tool.mkdir(parents=True)
+    (tool / "pyvenv.cfg").write_text("home = /x\n")
+    contents = tmp_path / "md4paper.app" / "Contents"
+    contents.mkdir(parents=True)
+    (contents / "pyvenv.cfg").symlink_to(tool / "pyvenv.cfg")
+    monkeypatch.setattr(updater.sys, "prefix", str(contents))
+    assert updater.env_root() == tool.resolve()
+    assert updater.tool_exe().parent.parent == tool.resolve()
