@@ -592,6 +592,51 @@ class UIController:
 
         return pdfio.page_count(pdf)
 
+    def section_pages(self) -> dict[str, int]:
+        """섹션 id → PDF 페이지(1-based). 구조 단계가 쪽을 못 단 섹션(run-in 소제목 등)은 원본 PDF에서
+        제목을 찾아 채운다 — 앞뒤 섹션의 쪽 사이에서만 찾으므로 엉뚱한 쪽의 같은 문구는 잡지 않는다.
+
+        뷰어가 텍스트 스크롤에 PDF를 따라오게 할 때 쓴다. 쪽이 비면 그 섹션은 앞 섹션의 쪽을 따라가서,
+        긴 절 안의 소제목들을 읽는 동안 PDF가 몇 쪽씩 뒤처졌다.
+        """
+        import re
+
+        secs = self.manifest.sections
+        out = {s.id: s.page for s in secs if s.page}
+        if len(out) == len(secs):
+            return out
+        if getattr(self, "_page_keys", None) is None:
+            from md4paper import pdfio
+
+            pdf = self.source_pdf()
+            texts = pdfio.page_texts(pdf) if pdf else []
+            self._page_keys = [re.sub(r"[^0-9a-z]+", "", t.lower()) for t in texts]
+        keys = self._page_keys
+        if not keys:
+            return out
+        lo = 1
+        for i, s in enumerate(secs):
+            if s.page:
+                lo = s.page
+                continue
+            hi = next((t.page for t in secs[i + 1:] if t.page), len(keys))
+            title = re.sub(r"[^0-9a-z]+", "", re.sub(r"<[^>]+>", "", s.text).lower())
+            if len(title) < 4:
+                continue
+            hit = next((p for p in range(lo, min(hi, len(keys)) + 1) if title in keys[p - 1]), None)
+            if hit:
+                out[s.id] = lo = hit
+        return out
+
+    def pdf_page_sizes(self) -> list[tuple[float, float]]:
+        """페이지별 (폭, 높이) pt — 그림이 뜨기 전에도 PDF 패널의 쪽 높이를 잡아 두는 데 쓴다."""
+        pdf = self.source_pdf()
+        if not pdf:
+            return []
+        from md4paper import pdfio
+
+        return pdfio.page_sizes(pdf)
+
     def pdf_page_png(self, page: int = 0, zoom: float = 1.5) -> bytes | None:
         """PDF 한 페이지를 PNG 바이트로 렌더 (원본 대조용). 없으면 None."""
         pdf = self.source_pdf()

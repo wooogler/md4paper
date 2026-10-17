@@ -1572,6 +1572,36 @@ def align_rows(en: str, ko: str) -> list[tuple[str, str, tuple[int, str] | None]
     return rows
 
 
+def _head_key(text: str) -> str:
+    """헤더 비교용 지문 — 태그·마크다운 표기·공백을 걷은 영숫자."""
+    return re.sub(r"[^0-9a-z]+", "", re.sub(r"<[^>]+>", "", text).lower())
+
+
+def row_pages(rows: list, smap: list[dict], page_by_id: dict) -> dict[int, int]:
+    """뷰어 행 → PDF 페이지(0-based). 헤더가 있는 행을 렌더된 헤더(section map)와 **제목으로** 순서대로 맞춘다.
+
+    개수가 1:1일 때만 대응시키면 헤더 하나만 어긋나도(제목 행 등) 문서 전체가 PDF 싱크를 잃는다 —
+    'PDF를 열었는데 보던 쪽이 안 나오는' 원인이었다. 앞에서부터 가까운 몇 개 안에서 같은 제목을 찾고,
+    못 찾은 헤더는 건너뛴다(그 행은 위쪽 최근 페이지를 따른다).
+    """
+    out: dict[int, int] = {}
+    keys = [_head_key(e.get("text", "")) for e in smap]
+    j = 0
+    for k, row in enumerate(rows):
+        head = row[2]
+        if not head:
+            continue
+        hk = _head_key(head[1])
+        hit = next((i for i in range(j, min(j + 4, len(smap))) if hk and keys[i] == hk), None)
+        if hit is None:
+            continue
+        j = hit + 1
+        pg = page_by_id.get(smap[hit]["id"])
+        if pg:
+            out[k] = pg - 1
+    return out
+
+
 def _pdf_page_count(data: bytes) -> int:
     """업로드 바이트에서 PDF 페이지 수 (진행바 추정용). 실패 시 0."""
     from md4paper import pdfio
@@ -2334,7 +2364,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         md = ctrl.en_markdown() if md is None else md
         if not md:
             return ""
-        page_by_id = {s.id: s.page for s in ctrl.manifest.sections}
+        page_by_id = ctrl.section_pages()
         return anchored_markdown(served_markdown(md, tok, ctrl.wd.out_images), ctrl.section_map(), page_by_id, jump=True)
 
     def toggle_edit(on: bool) -> None:
@@ -2554,22 +2584,39 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 컨테이너는 재렌더마다 새 요소라 리스너가 쌓이지 않는다(요소당 1회).
     def _pdf_sync_js(scroll_sel: str) -> str:
         return ("""
-        (function(){
+        (function bind(attempt){
+          // 재렌더와 같은 메시지로 오므로 새 패널이 DOM에 붙기 전에 돌 수 있다 — 그때 그냥 돌아가면
+          // PDF를 켜도 싱크가 영영 안 붙어 1쪽에 머문다. 생길 때까지 잠깐씩 다시 시도한다(~3초).
           var sc=document.querySelector('%s'), pv=document.querySelector('.vpdf');
-          if(!sc || !pv || sc.dataset.pdfsync) return;
-          var cells=[].slice.call(sc.querySelectorAll('[data-page]'));
-          if(!cells.length) return;
+          var cells=sc ? [].slice.call(sc.querySelectorAll('[data-page]')) : [];
+          if(!sc || !pv || !cells.length){
+            if(attempt<60) setTimeout(function(){ bind(attempt+1); }, 50);
+            return;
+          }
+          if(sc.dataset.pdfsync) return;
           sc.dataset.pdfsync='1';
-          var last=-1, tick=false;
+          var last=-1, tick=false, tries=0;
+          // PDF를 막 연 직후엔 패널이 아직 자리를 안 잡아 scrollTop이 0에 묶인다 — 한 번 옮기고 '맞췄다'로
+          // 치면 보던 쪽 대신 1쪽에 멈춘다. 그 쪽이 실제로 패널 맨 위에 올 때까지 잠깐씩 다시 맞춘다(~3초).
+          function aligned(img){
+            // 패널 폭이 0인 순간엔 모든 쪽 그림이 높이 0으로 맨 위에 겹쳐 '이미 맞음'처럼 보인다
+            if(!pv.clientHeight || !img.getBoundingClientRect().height) return false;
+            var d=img.getBoundingClientRect().top - pv.getBoundingClientRect().top;
+            return Math.abs(d)<=2 || (d>0 && pv.scrollTop>=pv.scrollHeight-pv.clientHeight-1);
+          }
+          function settle(){
+            var img=document.getElementById('pdfpage-'+last); if(!img) return;
+            if(!aligned(img)) pv.scrollTop += img.getBoundingClientRect().top - pv.getBoundingClientRect().top;
+            if(!aligned(img) && ++tries<100) setTimeout(settle, 30);  // rAF는 가려진 창에서 느려진다
+          }
           function sync(){ tick=false;
             var top=sc.getBoundingClientRect().top+6, pg=+cells[0].dataset.page;
             for(var i=0;i<cells.length;i++){ if(cells[i].getBoundingClientRect().top<=top) pg=+cells[i].dataset.page; else break; }
-            if(pg!==last && !isNaN(pg)){ last=pg; var img=document.getElementById('pdfpage-'+pg);
-              if(img) pv.scrollTop += img.getBoundingClientRect().top - pv.getBoundingClientRect().top; }
+            if(pg!==last && !isNaN(pg)){ last=pg; tries=0; settle(); }
           }
-          sc.addEventListener('scroll', function(){ if(!tick){ tick=true; requestAnimationFrame(sync); } });
+          sc.addEventListener('scroll', function(){ if(!tick){ tick=true; setTimeout(sync, 16); } });
           sync();
-        })();
+        })(0);
         """ % scroll_sel)
 
     _PDF_SYNC_JS = _pdf_sync_js(".sbs-grid")  # 뷰어 정렬 그리드용
@@ -2706,16 +2753,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     """
 
     def _pdf_pane() -> None:
-        n = ctrl.pdf_page_count()
+        sizes = ctrl.pdf_page_sizes()
         with ui.element("div").classes("vpdf"):
-            if n == 0:
+            if not sizes:
                 ui.label("원본 PDF를 찾을 수 없습니다.").classes("text-sm text-gray-500")
                 return
+            # width/height를 적어 두면 그림이 뜨기 전에도 쪽마다 제 높이를 차지한다. 없으면 lazy 그림이
+            # 모두 높이 0으로 시작해, 'PDF 열기 → 보던 쪽으로 이동'이 엉뚱한 곳(첫 쪽 근처)에 떨어진다.
             imgs = "".join(
                 f'<img id="pdfpage-{i}" src="/pdfpage/{tok}/{i}" loading="lazy" title="p.{i + 1}" '
+                f'width="{round(w)}" height="{round(h)}" '
                 'style="width:100%;height:auto;display:block;margin:0 auto 10px;max-width:900px;'
                 'border:1px solid #e0e0e0;border-radius:6px"/>'
-                for i in range(n)
+                for i, (w, h) in enumerate(sizes)
             )
             ui.html(f'<div id="pdf-pages" style="width:100%">{imgs}</div>')
 
@@ -2745,15 +2795,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         # 섹션 → PDF 페이지(0-based). 목차 클릭 점프 + 텍스트 스크롤 시 PDF 따라오기(싱크)에 쓴다.
         smap = sorted(ctrl.section_map(), key=lambda x: x["out_line"])
-        page_by_id = {s.id: s.page for s in ctrl.manifest.sections}
-        row_page0: dict[int, int] = {}  # 정렬 행 인덱스 → PDF 페이지(0-based)
-        if aligned:
-            head_rows = [k for k, (_e, _k, h) in enumerate(rows) if h]
-            if len(head_rows) == len(smap):  # 정렬 행 ↔ 렌더된 헤더가 1:1일 때만 페이지 대응
-                for i, k in enumerate(head_rows):
-                    pg = page_by_id.get(smap[i]["id"])
-                    if pg:
-                        row_page0[k] = pg - 1
+        page_by_id = ctrl.section_pages()
+        # 정렬 행 인덱스 → PDF 페이지(0-based). 번역이 없어 원문만 보는 그리드도 같은 행 구조라 똑같이 단다.
+        row_page0 = row_pages(rows, smap, page_by_id)
 
         def _entry_js(text_js: str, page0: int | None) -> str:
             if show_pdf and page0 is not None:
@@ -3209,10 +3253,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         # 섹션 자체 페이지가 없으면(run-in 헤더 등은 headings.json에 없어 page가 비어 있음)
         # 문서 순서상 '직전에 페이지가 있는 섹션'으로 근사한다 — 나란히 보기의 스크롤 싱크가
         # '위쪽 최근 data-page'로 PDF를 맞추는 것과 동일한 동작(그래서 둘 다 켜면 되던 것).
+        pages = ctrl.section_pages()  # 쪽이 빈 소제목은 PDF에서 제목을 찾아 채운 쪽
         last_pg: int | None = None
         for s in m.sections:  # cands가 줄 순서로 정렬돼 sections도 문서 순서
-            if s.page:
-                last_pg = int(s.page) - 1
+            if pages.get(s.id):
+                last_pg = int(pages[s.id]) - 1
             if s.id == sid:
                 return last_pg
         return None

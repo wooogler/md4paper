@@ -39,6 +39,15 @@ def page_count(src) -> int:  # noqa: ANN001
         return 0
 
 
+def page_sizes(src) -> list[tuple[float, float]]:  # noqa: ANN001
+    """페이지별 (폭, 높이) pt. 열기 실패면 빈 목록."""
+    try:
+        with open_document(src) as doc:
+            return [tuple(doc[i].get_size()) for i in range(len(doc))]
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def render_page_png(src, page: int, zoom: float = 1.5) -> bytes | None:  # noqa: ANN001
     """페이지 한 장을 PNG 바이트로. 범위 밖이거나 실패하면 None."""
     import io
@@ -56,6 +65,15 @@ def full_text(src) -> str:  # noqa: ANN001
     """전체 페이지 텍스트를 공백으로 이어 붙인다 (깨진 글자 복구 대조용)."""
     with open_document(src) as doc:
         return " ".join(doc[p].get_textpage().get_text_range() for p in range(len(doc)))
+
+
+def page_texts(src) -> list[str]:  # noqa: ANN001
+    """페이지별 텍스트. 열기 실패면 빈 목록."""
+    try:
+        with open_document(src) as doc:
+            return [doc[p].get_textpage().get_text_range() for p in range(len(doc))]
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def first_page_text(src) -> str:  # noqa: ANN001

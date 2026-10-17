@@ -615,3 +615,30 @@ def test_extract_outdated_follows_recorded_version(ctrl):
     assert ctrl.extract_outdated()
     ctrl.wd.mark_done("extract", "h", version=extract.EXTRACT_VERSION)
     assert not ctrl.extract_outdated()
+
+
+def test_row_pages_matches_headings_by_title_not_count():
+    from md4paper.ui.app import row_pages
+
+    rows = [("# Title", None, (1, "Title")), ("p", None, None), ("## 1 Intro", None, (2, "1 Intro")),
+            ("## Stray heading", None, (2, "Stray heading")), ("## 2 Method", None, (2, "2 Method"))]
+    smap = [{"id": "a", "text": "Title"}, {"id": "b", "text": "1 Intro"}, {"id": "c", "text": "2 Method"}]
+    # 헤더 수가 1:1이 아니어도(가운데 낱 헤더) 나머지는 제 쪽을 단다
+    assert row_pages(rows, smap, {"a": 1, "b": 2, "c": 5}) == {0: 0, 2: 1, 4: 4}
+
+
+def test_section_pages_fills_missing_pages_from_pdf_text(ctrl, tmp_path, monkeypatch):
+    from md4paper import pdfio
+
+    _as_pdf_source(ctrl, tmp_path)
+    secs = ctrl.manifest.sections
+    for s in secs:
+        s.page = None
+    secs[0].page, secs[-1].page = 1, 3
+    mid = secs[len(secs) // 2]
+    texts = ["front", "nothing here", f"... {mid.text.upper()} ..."]
+    monkeypatch.setattr(pdfio, "page_texts", lambda src: texts)
+    pages = ctrl.section_pages()
+    assert pages[secs[0].id] == 1 and pages[secs[-1].id] == 3
+    assert pages[mid.id] == 3  # 앞뒤 섹션 쪽(1~3) 사이에서 제목을 찾았다
+    assert secs[1].id not in pages or pages[secs[1].id] in (1, 2, 3)
