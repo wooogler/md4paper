@@ -9,7 +9,10 @@
 감싸도 textContent는 그대로라 하이라이트 앵커(평문 오프셋)와 문장 짝 span이 영향을 받지 않는다.
 감싸는 요소는 `<a>`다 — 하이라이트·문장 짝 스크립트가 이미 `a` 위에서는 자리를 비켜 준다.
 
-맵 키는 `fig-3` / `tab-1` (로마 숫자 `Table II` → `tab-2`). 하위 그림 참조("Figure 2a")는 2로.
+섹션 참조("Section 3.4", "§3.2", "부록 A.1", "3.4절")도 같은 길로 감싼다 — 호버하면 그 섹션 헤더를,
+클릭하면 같은 쪽(원문/번역) 헤더로 스크롤한다. 섹션 맵은 서버가 아니라 렌더된 헤더에서 짓는다.
+
+맵 키는 `fig-3` / `tab-1` / `sec-3.4` (로마 숫자 `Table II` → `tab-2`). 하위 그림 참조("Figure 2a")는 2로.
 캡션 번호와 맞는 것만 맵에 들어가므로, 없는 번호는 감싸지도 띄우지도 않는다.
 """
 
@@ -162,6 +165,7 @@ def index_js(en_md: str, ko_md: str = "") -> str:
 CSS = """
 .md-preview a.md-figref { color: inherit; text-decoration: none; cursor: zoom-in;
   border-bottom: 1px dotted rgba(35,131,226,.55); }
+.md-preview a.md-figref[data-fig^="sec-"] { cursor: pointer; }
 .md-preview a.md-figref:hover { border-bottom-color: #2383e2; color: #2383e2; }
 #md-fig-tip { position: fixed; z-index: 10000; display: none; max-width: 360px; padding: 6px;
   background: #2b2b2e; color: #eee; border-radius: 8px; cursor: zoom-in;
@@ -177,6 +181,9 @@ CSS = """
 #md-fig-tip .mft-tbl td, #md-fig-tip .mft-tbl th { border: 1px solid #ddd; padding: 1px 4px; white-space: nowrap; }
 #md-fig-tip .mft-cap { margin-top: 5px; max-height: 3.9em; overflow: hidden; color: #cfcfcf; }
 #md-fig-tip .mft-cap b { color: #fff; }
+#md-fig-tip.sec { cursor: pointer; padding: 6px 10px; max-width: 420px; font-size: 13px; font-weight: 600; }
+.md-preview .md-sec-flash { animation: md-sec-flash 1.6s ease-out; border-radius: 4px; }
+@keyframes md-sec-flash { 0%, 30% { background: rgba(35,131,226,.22); } 100% { background: transparent; } }
 #md-tbl-view { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10001; display: none;
   align-items: center; justify-content: center; background: rgba(0,0,0,.82); }
 #md-tbl-view.open { display: flex; }
@@ -211,6 +218,40 @@ HTML = """
     for (var i = 0; i < t.length; i++){ var v = ROMAN[t[i]], w = ROMAN[t[i + 1]] || 0; n += v < w ? -v : v; }
     return n;
   }
+  // 섹션 참조: "Section 3.4", "Sec. 5", "§3.2.1", "부록 A.1", "Appendix B" / 한국어 "3.4절".
+  // 번호가 본문 헤더("## 3.4 결과", "# A Appendix")에 실제로 있을 때만 감싼다 — 맵은 DOM 헤더에서 짓는다.
+  var SECRE = /(?<![A-Za-z\\u3131-\\u318e\\uac00-\\ud7a3])([Ss]ections?|SECTIONS?|[Ss]ecs?\\.|§§?|섹션|절|[Aa]ppendix|[Aa]ppendices|APPENDIX|부록)(\\s*|\\u00a0)(\\d+(?:\\.\\d+)*|[A-Z](?:\\.\\d+)*)(?![0-9A-Za-z]|\\.\\d)/g;
+  var SECRE2 = /(?<![0-9.A-Za-z])(\\d+(?:\\.\\d+)*)(\\s?)절(?![차반대약감단])/g;
+  var SECMORE = /^(\\s*(?:,|;|and|&|–|-|및|와|과)\\s*)(\\d+(?:\\.\\d+)*|[A-Z](?:\\.\\d+)*)(?![0-9A-Za-z]|\\.\\d)/;
+  var HNUM = /^\\s*(Appendix\\s+|APPENDIX\\s+|부록\\s+)?([A-Z]|\\d+)((?:\\.\\d+)*)\\.?(?:\\s+|$)/;
+  var secCache = null;
+  function headText(h){
+    var t = '';
+    for (var c = h.firstChild; c; c = c.nextSibling)
+      if (!(c.nodeType === 1 && c.classList.contains('md-sec-jump'))) t += c.textContent;
+    return t.replace(/\\s+/g, ' ').trim();
+  }
+  function secIndex(){                    // {"sec-3.4": [헤더 요소들(원문·번역 셀마다)]}
+    if (secCache) return secCache;
+    var idx = {};
+    [].forEach.call(document.querySelectorAll('.md-preview h1, .md-preview h2, .md-preview h3, .md-preview h4, .md-preview h5, .md-preview h6'), function(h){
+      if (h.closest('.sbs-ghost')) return;  // 숨은 짝 셀의 헤더로는 이동할 수 없다
+      var t = headText(h), m = HNUM.exec(t);
+      if (!m) return;
+      // 한 글자 번호("A Study of …")는 부록 헤더일 때만 — 제목 첫 단어 'A'를 섹션 A로 보지 않게
+      if (/^[A-Z]$/.test(m[2]) && !m[3] && !m[1] && !/appendix|부록/i.test(t)) return;
+      var k = 'sec-' + m[2] + m[3];
+      (idx[k] = idx[k] || []).push(h);
+    });
+    secCache = idx;
+    return idx;
+  }
+  function secKey(tok){                   // "Appendix B"에 B 헤더가 없으면 B.1로
+    var idx = secIndex(), k = 'sec-' + tok;
+    if (idx[k]) return k;
+    if (/^[A-Z]$/.test(tok) && idx[k + '.1']) return k + '.1';
+    return null;
+  }
   function kindOf(w){ return (/^Tab|^표/.test(w)) ? 'tab-' : 'fig-'; }
   function anyMap(){ var m = window.__mdFigRefs || {}; return m.en || {}; }
   var SKIP = 'a, code, pre, blockquote, h1, h2, h3, h4, h5, h6, script, style, textarea, .md-figref, math';
@@ -230,6 +271,25 @@ HTML = """
       }
       RE.lastIndex = Math.max(RE.lastIndex, at);
     }
+    SECRE.lastIndex = 0;
+    while ((m = SECRE.exec(s))){
+      var sk = secKey(m[3]);
+      if (sk) cuts.push({s: m.index, e: m.index + m[0].length, key: sk});
+      var at2 = SECRE.lastIndex, rest2 = s.slice(at2), m2;   // "Sections 3 and 4"
+      while ((m2 = SECMORE.exec(rest2))){
+        var sk2 = secKey(m2[2]), b0 = at2 + m2[1].length, b1 = at2 + m2[0].length;
+        if (sk2) cuts.push({s: b0, e: b1, key: sk2});
+        at2 = b1; rest2 = s.slice(at2);
+      }
+      SECRE.lastIndex = Math.max(SECRE.lastIndex, at2);
+    }
+    SECRE2.lastIndex = 0;
+    while ((m = SECRE2.exec(s))){
+      var sk3 = secKey(m[1]);
+      if (sk3) cuts.push({s: m.index, e: m.index + m[0].length, key: sk3});
+    }
+    cuts.sort(function(x, y){ return x.s - y.s; });
+    cuts = cuts.filter(function(c, i){ return !i || c.s >= cuts[i - 1].e; });   // 겹치면 앞 것만
     for (var i = cuts.length - 1; i >= 0; i--){
       var c = cuts[i], mid = n.splitText(c.s); mid.splitText(c.e - c.s);
       var a = document.createElement('a');
@@ -239,7 +299,7 @@ HTML = """
   }
   function scan(root){
     var map = anyMap();
-    if (!Object.keys(map).length || !root.querySelectorAll) return;
+    if (!root.querySelectorAll) return;
     var roots = root.matches && root.matches('.md-preview') ? [root]
       : [].slice.call(root.querySelectorAll('.md-preview'));
     if (!roots.length && root.closest && root.closest('.md-preview')) roots = [root];
@@ -257,6 +317,7 @@ HTML = """
   // 맵이 바뀌었다(논문 전환) — 앞 논문 맵으로 감싼 것을 다 풀고 다시 훑는다.
   // 일부만 풀면 "Tables 2 and 3"처럼 앞 번호에 기대는 뒤 번호를 놓친다.
   window.__mdFigRefScan = function(){
+    secCache = null;
     [].forEach.call(document.querySelectorAll('a.md-figref'), function(a){
       var p = a.parentNode;
       while (a.firstChild) p.insertBefore(a.firstChild, a);
@@ -265,16 +326,35 @@ HTML = """
     scan(document.body);
   };
   scan(document.body);
+  // 헤더가 새로 그려지면 섹션 맵이 바뀐다 — 앞서 그려진 셀이 뒤 섹션을 가리킬 수 있으니
+  // 잠시 뒤 문서 전체를 한 번 더 훑는다(이미 감싼 곳은 건너뛰므로 덧감싸지 않는다).
+  var resecT = null;
   new MutationObserver(function(muts){
+    var heads = false;
     for (var i = 0; i < muts.length; i++)
       for (var j = 0; j < muts[i].addedNodes.length; j++){
         var a = muts[i].addedNodes[j];
-        if (a.nodeType === 1 && !a.classList.contains('md-figref')) scan(a);
+        if (a.nodeType !== 1 || a.classList.contains('md-figref')) continue;
+        if (/^H[1-6]$/.test(a.tagName) || (a.querySelector && a.querySelector('h1, h2, h3, h4, h5, h6'))) heads = true;
+        else scan(a);
       }
+    if (heads){
+      secCache = null;
+      clearTimeout(resecT);
+      resecT = setTimeout(function(){ secCache = null; scan(document.body); }, 120);
+    }
   }).observe(document.body, {childList: true, subtree: true});
 
+  function sideOf(el){ var c = el.closest('[data-side]'); return c ? c.getAttribute('data-side') : null; }
+  function secHead(a){                    // 참조와 같은 쪽(원문/번역)의 헤더, 없으면 아무 쪽
+    var hs = secIndex()[a.getAttribute('data-fig')] || [], side = sideOf(a);
+    for (var i = 0; i < hs.length; i++) if (hs[i].isConnected && sideOf(hs[i]) === side) return hs[i];
+    for (i = 0; i < hs.length; i++) if (hs[i].isConnected) return hs[i];
+    return null;
+  }
   function entry(a){
     var m = window.__mdFigRefs || {}, key = a.getAttribute('data-fig');
+    if (key.indexOf('sec-') === 0){ var h = secHead(a); return h ? {key: key, head: h} : null; }
     var cell = a.closest('[data-side]'), side = cell ? cell.getAttribute('data-side') : 'en';
     var e = (m[side] || {})[key] || (m.en || {})[key];
     return e ? {key: key, e: e} : null;
@@ -293,6 +373,12 @@ HTML = """
     var it = entry(a); if (!it) return;
     clearTimeout(hideT);
     cur = it;
+    tip.classList.toggle('sec', !!it.head);
+    if (it.head){                         // 섹션: 헤더 글자만 (클릭 = 그 헤더로 이동)
+      tip.innerHTML = '<div class="mft-sec">' + esc(headText(it.head)) + '</div>';
+      tip.classList.add('open'); place(a);
+      return;
+    }
     var body = it.e.src ? '<img src="' + esc(it.e.src) + '" alt="">'
       : '<div class="mft-tbl">' + it.e.html + '</div>';
     tip.innerHTML = body + (it.e.cap ? '<div class="mft-cap"><b>' + label(it.key) + '.</b> ' + esc(it.e.cap) + '</div>' : '');
@@ -301,8 +387,14 @@ HTML = """
     var im = tip.querySelector('img'); if (im && !im.complete) im.onload = function(){ if (cur === it) place(a); };
   }
   function hideSoon(){ clearTimeout(hideT); hideT = setTimeout(function(){ tip.classList.remove('open'); cur = null; }, 180); }
+  function jump(h){
+    h.scrollIntoView({behavior: 'smooth', block: 'start'});
+    h.classList.remove('md-sec-flash'); void h.offsetWidth; h.classList.add('md-sec-flash');
+    setTimeout(function(){ h.classList.remove('md-sec-flash'); }, 1700);
+  }
   function openBig(it){
     tip.classList.remove('open');
+    if (it.head){ cur = null; if (it.head.isConnected) jump(it.head); return; }
     var cap = label(it.key) + '. ' + (it.e.cap || '');
     if (it.e.src){ if (window.__mdImgZoomOpen) window.__mdImgZoomOpen(it.e.src, cap); return; }
     view.querySelector('.mtv-cap').innerHTML = '<b>' + label(it.key) + '.</b> ' + esc(it.e.cap || '');
@@ -334,7 +426,7 @@ HTML = """
   document.addEventListener('keydown', function(ev){
     if (ev.key === 'Escape' && view.classList.contains('open')) closeView();
   });
-  window.addEventListener('scroll', function(){ if (cur) { tip.classList.remove('open'); cur = null; } }, true);
+  window.addEventListener('scroll', function(ev){ if (cur && !tip.contains(ev.target)) { tip.classList.remove('open'); cur = null; } }, true);
 })();
 </script>
 """
