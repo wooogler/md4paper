@@ -88,3 +88,41 @@ def test_other_column_must_start_a_line_at_each_new_row():
     # 첫 열은 두 줄이지만 둘째 열은 한 줄뿐 — 행이 뭉쳤다는 확증이 없다
     t, tp, glyphs = _table(["Who", "What"], ["One single answer"])
     assert tables._split_table(t, tp, glyphs, H, TableData) == 0
+
+
+def _tangled():
+    """셀 상자 하나가 아래 두 행의 줄까지 덮어 Docling이 행 순서를 엉클어 놓은 2열 표 (ScoutSteer 표 4 끝부분)."""
+    col1_x = 100 + W * 41 + 3
+    c0 = [(120, "Adoption intent"), (132, "Willingness to use for flight booking"),
+          (144, "Willingness to use for restaurant recom-"), (156, "mendations")]
+    c1 = [(132, "How likely to book a flight?"), (144, "How likely to find a restaurant for"), (156, "dinner?")]
+    glyphs = [g for base, s in c0 for g in _glyphs(100, base, s)]
+    glyphs += [g for base, s in c1 for g in _glyphs(col1_x, base, s)]
+    r1 = col1_x + W * 36
+    cells = [_cell(0, 0, 100, 112, col1_x - 3, 160, "Adoption intent Willingness to use for restaurant recom-"),
+             _cell(0, 1, col1_x, 136, r1, 160, "How likely to find a restaurant for"),
+             _cell(1, 0, 100, 124, col1_x - 20, 134, "Willingness to use for flight booking"),
+             _cell(1, 1, col1_x, 124, r1 - 30, 134, "How likely to book a flight?"),
+             _cell(2, 0, 100, 148, col1_x - 60, 160, "mendations"),
+             _cell(2, 1, col1_x, 148, r1 - 100, 160, "dinner?")]
+    t = SimpleNamespace(data=TableData(num_rows=3, num_cols=2, table_cells=cells))
+    return t, _TextPage(glyphs), glyphs
+
+
+def test_rows_tangled_by_an_overlapping_cell_are_rebuilt_in_pdf_order():
+    t, tp, glyphs = _tangled()
+    assert tables._rebuild_tangled_rows(t, tp, glyphs, H, TableData) == 3
+    assert _rows(t) == [["Adoption intent"],
+                        ["Willingness to use for flight booking", "How likely to book a flight?"],
+                        ["Willingness to use for restaurant recom-mendations",
+                         "How likely to find a restaurant for dinner?"]]
+
+
+def test_slightly_overlapping_boxes_are_left_alone():
+    # 이웃 행 상자가 몇 pt 겹치는 정도로는 그 행의 줄을 통째로 덮지 못한다
+    t, tp, glyphs = _table(["Who"], ["Which party engaged?"])
+    cells = t.data.table_cells + [_cell(2, 0, 100, 128, 140, 138, "What"),
+                                  _cell(2, 1, 200, 128, 300, 138, "What work occurred?")]
+    glyphs += _glyphs(100, 136, "What") + _glyphs(200, 136, "What work occurred?")
+    t.data = TableData(num_rows=3, num_cols=2, table_cells=cells)
+    assert tables._rebuild_tangled_rows(t, tp, glyphs, H, TableData) == 0
