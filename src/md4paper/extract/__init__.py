@@ -29,7 +29,8 @@ from md4paper.workdir import WorkDir
 # 4: docling 2.140 + 원본에서 맞닿은 글리프 사이에 Docling이 끼운 공백 제거 ("Points ." → "Points.")
 # 5: 선 없는 표에서 한 행으로 뭉친 본문 행을 PDF 기준선으로 다시 나눔
 # 6: 표 셀로 들어간 투고본 여백 줄 번호 제거 · headings.json에서도 줄 번호 제거
-EXTRACT_VERSION = 6
+# 7: 표 셀·목록 항목으로 들어간 러닝 푸터 제거 (같은 문구 + 다른 쪽 푸터와 같은 높이)
+EXTRACT_VERSION = 7
 
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"

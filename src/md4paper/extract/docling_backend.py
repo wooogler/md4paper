@@ -731,7 +731,68 @@ def _drop_running_heads(document) -> int:  # noqa: ANN001 — DoclingDocument
             document.delete_items(node_items=[it])
         except Exception:  # noqa: BLE001 — 삭제 실패해도 치명적이지 않음
             pass
-    return len(to_remove) + _strip_merged_running_heads(document, phrases)
+    edges: dict[str, list[float]] = defaultdict(list)  # 반복 문구가 놓인 가장자리 거리
+    for it, _, sig, _ in edge:
+        if sig in repeated:
+            edges[sig].append(_edge_distance(document, it.prov[0]))
+    return (len(to_remove) + _strip_merged_running_heads(document, phrases)
+            + _drop_listed_running_heads(document, edges) + _drop_table_running_heads(document, edges))
+
+
+# 표가 쪽 아래까지 걸치면 Docling이 푸터("Manuscript submitted to ACM")를 표의 마지막 행으로 넣는다.
+# 다른 쪽에서 러닝 헤더/푸터로 확인된 문구이고 **같은 높이**(가장자리 거리 오차 이내)에 있을 때만 그 셀을 지운다.
+_RUNHEAD_EDGE_TOL = 4.0
+
+
+def _edge_distance(document, prov) -> float:  # noqa: ANN001 — DoclingDocument, ProvenanceItem
+    """쪽 위/아래 가장자리까지의 거리(pt) — 좌표 원점과 무관."""
+    height = float(document.pages[int(prov.page_no)].size.height)
+    b = prov.bbox
+    return min(min(b.t, b.b), height - max(b.t, b.b))
+
+
+def _at_known_edge(dist: float, known: list[float] | None) -> bool:
+    return bool(known) and any(abs(dist - k) <= _RUNHEAD_EDGE_TOL for k in known)
+
+
+def _drop_listed_running_heads(document, edges: dict[str, list[float]]) -> int:  # noqa: ANN001
+    """목록 항목으로 잘못 분류된 푸터("- Manuscript submitted to ACM") — list_item은 _edge_items가
+    보지 않으므로(진짜 목록 보호) 문구 전체가 러닝 헤더이고 같은 높이일 때만 따로 지운다."""
+    gone = []
+    for it in getattr(document, "texts", []):
+        label = str(getattr(it, "label", "")).replace("DocItemLabel.", "").lower()
+        if label != "list_item" or not getattr(it, "prov", None):
+            continue
+        if _at_known_edge(_edge_distance(document, it.prov[0]), edges.get(_runhead_sig(it.text or ""))):
+            gone.append(it)
+    for it in gone:
+        try:
+            document.delete_items(node_items=[it])
+        except Exception:  # noqa: BLE001 — 삭제 실패해도 치명적이지 않음
+            pass
+    return len(gone)
+
+
+def _drop_table_running_heads(document, edges: dict[str, list[float]]) -> int:  # noqa: ANN001
+    if not edges:
+        return 0
+    dropped = 0
+    for t in getattr(document, "tables", []):
+        prov = getattr(t, "prov", None)
+        if not prov or not t.data.table_cells:
+            continue
+        height = float(document.pages[int(prov[0].page_no)].size.height)
+        gone = []
+        for c in t.data.table_cells:
+            if c.bbox is None:
+                continue
+            dist = min(min(c.bbox.t, c.bbox.b), height - max(c.bbox.t, c.bbox.b))
+            if _at_known_edge(dist, edges.get(_runhead_sig(c.text or ""))):
+                gone.append(c)
+        if gone:
+            _remove_table_cells(t, gone)
+            dropped += len(gone)
+    return dropped
 
 
 # 쪽이 넘어가는 문단에 푸터가 끼어 합쳐지면("Rankings and selections Manuscript submitted to ACM
@@ -913,8 +974,6 @@ def _drop_table_gutters(document, extents: list[tuple[int, float, float]]) -> in
     여백에 들어갈 수 없다. 그런 셀을 지우고, 그래서 비게 된 열·행을 걷어낸다. gutter 위치는 같은
     홀짝 쪽 것을 쓴다(반대쪽 여백의 x는 이 쪽 본문 안쪽일 수 있다).
     """
-    from docling_core.types.doc import TableData
-
     dropped = 0
     for t in getattr(document, "tables", []):
         prov = getattr(t, "prov", None)
@@ -930,40 +989,46 @@ def _drop_table_gutters(document, extents: list[tuple[int, float, float]]) -> in
             return any(x0 - _GUTTER_ALIGN_TOL <= min(b.l, b.r) and max(b.l, b.r) <= x1 + _GUTTER_ALIGN_TOL
                        for x0, x1 in bands)
 
-        data = t.data
-        gone = [c for c in data.table_cells if in_gutter(c)]
+        gone = [c for c in t.data.table_cells if in_gutter(c)]
         if not gone:
             continue
         dropped += sum(len(c.text.split()) for c in gone)
-        gone_ids = {id(c) for c in gone}
-        keep = [c for c in data.table_cells if id(c) not in gone_ids]
-        # 지운 셀이 있던 열·행 중 남은 글자가 없는 것만 걷어낸다 (원래 빈 열·행은 그대로)
-        filled_cols = {k for c in keep if c.text.strip()
-                       for k in range(c.start_col_offset_idx, c.end_col_offset_idx)}
-        filled_rows = {k for c in keep if c.text.strip()
-                       for k in range(c.start_row_offset_idx, c.end_row_offset_idx)}
-        drop_cols = {k for c in gone for k in range(c.start_col_offset_idx, c.end_col_offset_idx)} - filled_cols
-        drop_rows = {k for c in gone for k in range(c.start_row_offset_idx, c.end_row_offset_idx)} - filled_rows
-
-        def shift(i: int, dropped_at: set[int]) -> int:
-            return i - sum(1 for k in dropped_at if k < i)
-
-        cells = []
-        for c in keep:
-            upd = {
-                "start_col_offset_idx": shift(c.start_col_offset_idx, drop_cols),
-                "end_col_offset_idx": shift(c.end_col_offset_idx, drop_cols),
-                "start_row_offset_idx": shift(c.start_row_offset_idx, drop_rows),
-                "end_row_offset_idx": shift(c.end_row_offset_idx, drop_rows),
-            }
-            if upd["end_col_offset_idx"] > upd["start_col_offset_idx"] and \
-                    upd["end_row_offset_idx"] > upd["start_row_offset_idx"]:
-                upd["col_span"] = upd["end_col_offset_idx"] - upd["start_col_offset_idx"]
-                upd["row_span"] = upd["end_row_offset_idx"] - upd["start_row_offset_idx"]
-                cells.append(c.model_copy(update=upd))
-        t.data = TableData(num_rows=data.num_rows - len(drop_rows), num_cols=data.num_cols - len(drop_cols),
-                           table_cells=cells)
+        _remove_table_cells(t, gone)
     return dropped
+
+
+def _remove_table_cells(t, gone: list) -> None:  # noqa: ANN001 — TableItem, [TableCell]
+    """표에서 셀을 지우고, 그래서 비게 된 열·행을 걷어낸다 (원래 빈 열·행은 그대로)."""
+    from docling_core.types.doc import TableData
+
+    data = t.data
+    gone_ids = {id(c) for c in gone}
+    keep = [c for c in data.table_cells if id(c) not in gone_ids]
+    filled_cols = {k for c in keep if c.text.strip()
+                   for k in range(c.start_col_offset_idx, c.end_col_offset_idx)}
+    filled_rows = {k for c in keep if c.text.strip()
+                   for k in range(c.start_row_offset_idx, c.end_row_offset_idx)}
+    drop_cols = {k for c in gone for k in range(c.start_col_offset_idx, c.end_col_offset_idx)} - filled_cols
+    drop_rows = {k for c in gone for k in range(c.start_row_offset_idx, c.end_row_offset_idx)} - filled_rows
+
+    def shift(i: int, dropped_at: set[int]) -> int:
+        return i - sum(1 for k in dropped_at if k < i)
+
+    cells = []
+    for c in keep:
+        upd = {
+            "start_col_offset_idx": shift(c.start_col_offset_idx, drop_cols),
+            "end_col_offset_idx": shift(c.end_col_offset_idx, drop_cols),
+            "start_row_offset_idx": shift(c.start_row_offset_idx, drop_rows),
+            "end_row_offset_idx": shift(c.end_row_offset_idx, drop_rows),
+        }
+        if upd["end_col_offset_idx"] > upd["start_col_offset_idx"] and \
+                upd["end_row_offset_idx"] > upd["start_row_offset_idx"]:
+            upd["col_span"] = upd["end_col_offset_idx"] - upd["start_col_offset_idx"]
+            upd["row_span"] = upd["end_row_offset_idx"] - upd["start_row_offset_idx"]
+            cells.append(c.model_copy(update=upd))
+    t.data = TableData(num_rows=data.num_rows - len(drop_rows), num_cols=data.num_cols - len(drop_cols),
+                       table_cells=cells)
 
 
 # 로고/배지 판정 크기(pt) — 이보다 작은 그림은 CC 라이선스 배지·학회 로고 등으로 보고 제거

@@ -888,3 +888,51 @@ def test_outer_band_line_on_two_pages_is_kept():
     doc.pages = {p: _Page() for p in (1, 2)}
     assert _drop_running_heads(doc) == 0
     assert len(doc.texts) == 2
+
+
+def _at(table, row, col, top, bottom):
+    """표 셀 하나를 쪽 위에서 top~bottom(TOPLEFT) 자리로 옮긴다."""
+    cells = table.data.table_cells
+    k = next(i for i, c in enumerate(cells) if (c.start_row_offset_idx, c.start_col_offset_idx) == (row, col))
+    cells[k] = cells[k].model_copy(update={"bbox": cells[k].bbox.model_copy(update={"t": top, "b": bottom})})
+
+
+def test_running_footer_swallowed_into_table_is_dropped():
+    """쪽 아래까지 걸친 표의 마지막 행에 들어간 푸터 — 다른 쪽 푸터와 같은 높이일 때만 지운다."""
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
+    table = _Table(4, [[("Mental demand", 114.0, 240.0), ("How mentally demanding?", 253.0, 500.0)],
+                       [("Manuscript submitted to ACM", 110.0, 243.0), ("", 253.0, 500.0)]])
+    _at(table, 1, 0, 661.0, 669.0)  # 아래에서 123pt — 다른 쪽 푸터(bottom=123)와 같은 높이
+    doc = _Doc(foot)
+    doc.pages = {p: _Page() for p in (1, 2, 3, 4)}
+    doc.tables = [table]
+    assert _drop_running_heads(doc) == 4
+    assert table.rows() == [["Mental demand", "How mentally demanding?"]]
+
+
+def test_running_footer_text_elsewhere_in_table_is_kept():
+    """같은 문구라도 푸터 높이가 아닌 표 셀(본문 속 인용 등)은 그대로 둔다."""
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
+    table = _Table(4, [[("Venue", 114.0, 240.0)], [("Manuscript submitted to ACM", 114.0, 240.0)]])
+    doc = _Doc(foot)
+    doc.pages = {p: _Page() for p in (1, 2, 3, 4)}
+    doc.tables = [table]
+    assert _drop_running_heads(doc) == 3
+    assert table.rows() == [["Venue"], ["Manuscript submitted to ACM"]]
+
+
+def test_running_footer_labelled_as_list_item_is_dropped():
+    """Docling이 푸터를 목록 항목으로 잘못 분류한 쪽 — 같은 높이면 지우고, 진짜 목록 항목은 둔다."""
+    from md4paper.extract.docling_backend import _drop_running_heads
+
+    foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
+    listed = _Item("Manuscript submitted to ACM", 4, 110.0, 230.0, 131.0, label="list_item")
+    real = _Item("Manuscript submitted to ACM", 4, 110.0, 230.0, 400.0, label="list_item")
+    doc = _Doc(foot + [listed, real])
+    doc.pages = {p: _Page() for p in (1, 2, 3, 4)}
+    assert _drop_running_heads(doc) == 4
+    assert doc.texts == [real]
