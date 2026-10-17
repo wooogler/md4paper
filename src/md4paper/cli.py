@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -941,6 +942,39 @@ def app_cmd(do_remove: bool, dest: Path | None, also_desktop: bool) -> None:
         click.echo(click.style(
             f"  참고: 아이콘으로 띄우면 셸 환경변수({', '.join(env_only)})는 상속되지 않습니다 — "
             "홈 화면의 'AI 설정'에 키를 저장하세요.", fg="yellow"))
+
+
+@cli.command("update")
+@click.option("--check", "check_only", is_flag=True, help="새 버전이 있는지만 확인")
+def update_cmd(check_only: bool) -> None:
+    """GitHub에서 새 버전을 받아 다시 설치 (앱도 켤 때마다 확인해 알려 줍니다)."""
+    from md4paper import updater
+
+    src = updater.installed_source()
+    if src is None:
+        raise click.ClickException("GitHub에서 uv tool로 설치한 md4paper가 아닙니다 — "
+                                   "저장소에서 실행 중이면 `git pull`이 업데이트입니다.")
+    try:
+        upd = updater.check(src)
+    except Exception as e:  # noqa: BLE001 — httpx 오류 등
+        raise click.ClickException(f"업데이트 확인 실패: {e}") from e
+    if upd is None:
+        click.echo(f"최신 버전입니다 ({src.commit[:7]}).")
+        return
+    click.echo(f"새 버전: {upd.current[:7]} → {upd.latest[:7]}" + (f" ({upd.ahead}개 변경)" if upd.ahead else ""))
+    for m in upd.messages[:15]:
+        click.echo(f"  · {m}")
+    if check_only:
+        return
+    uv = updater.find_uv()
+    if uv is None:
+        raise click.ClickException("uv를 찾지 못했습니다 — 설치 스크립트를 다시 실행하세요.")
+    click.echo("앱이 열려 있으면 닫은 뒤 진행하세요. 설치 중…")
+    if subprocess.run([uv, "tool", "install", "--force", src.spec], check=False).returncode != 0:
+        raise click.ClickException("설치에 실패했습니다.")
+    subprocess.run([str(Path(sys.prefix) / ("Scripts" if sys.platform.startswith("win") else "bin") / "md4paper"),
+                    "app"], check=False)
+    click.echo(click.style("업데이트 완료.", fg="green"))
 
 
 @cli.command()

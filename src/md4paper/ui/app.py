@@ -17,7 +17,7 @@ from md4paper import config, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
     annotations, chat_panel, desktop, find_bar, jobs, mdrender, reanchor, scroll_memory, sentpair, spa,
-    tabstore,
+    tabstore, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir, paper_title, set_pinned, set_project
@@ -5572,9 +5572,14 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         spa.make_header()
         # w-full: 없으면 sub_pages 상자가 내용 폭으로 줄어(큰 화면에서 1275px) 변환·번역 탭 splitter가 좁아진다
         ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view}).classes("w-full")
+        update_banner.install(state)  # 새 버전 알림 — 셸에 붙어 탭을 옮겨도 남는다
 
     port = pick_port(port)
     state["port"] = port  # 새 창(형제 웹뷰 프로세스)이 가리킬 주소를 만들 때 쓴다
+
+    @fastapi_app.on_startup
+    def _check_update() -> None:
+        update_banner.start_check(state)  # 켤 때마다 GitHub에 새 커밋이 있는지 (백그라운드)
 
     @fastapi_app.on_shutdown
     def _close_extra_windows() -> None:

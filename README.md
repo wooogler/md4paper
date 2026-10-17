@@ -88,6 +88,8 @@ irm https://raw.githubusercontent.com/wooogler/md4paper/main/install.ps1 | iex
 
 끝나면 Launchpad·시작 메뉴에 **md4paper 아이콘**이 생깁니다. 눌러서 여세요
 (→ [앱으로 열기](#앱으로-열기--아이콘-등록-선택)). 같은 줄을 다시 실행하면 최신 버전으로 업데이트됩니다.
+앱을 켤 때마다 GitHub에 새 커밋이 있는지 확인해 오른쪽 아래에 알려 주고, **업데이트하고 다시 시작**을 누르면
+앱이 닫혔다가 새 버전으로 다시 열립니다(터미널에서는 `md4paper update`, 끄려면 `MD4PAPER_NO_UPDATE_CHECK=1`).
 
 - **무엇을 하나** — uv(파이썬까지 관리하는 패키지 관리자)가 없으면 설치하고, `uv tool install`로
   md4paper를 넣고, `md4paper app`으로 아이콘을 등록합니다. 스크립트는 [install.sh](install.sh) ·
