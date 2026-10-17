@@ -20,12 +20,13 @@ from md4paper.extract.text_clean import (
     repair_mojibake_from_pdf,
     sniff_text_coverage,
 )
-from md4paper.extract import inline_math, tounicode
+from md4paper.extract import emphasis, inline_math, tounicode
 from md4paper.workdir import WorkDir
 
 # 추출 결과를 바꾸는 개선을 넣을 때마다 올린다 — 기존 논문을 다시 변환하면 추출부터 새로 한다.
 # 2: 수식 글꼴 ToUnicode 복구 · 인라인 수식 $LaTeX$ · 깊은 여백의 러닝 푸터
-EXTRACT_VERSION = 2
+# 3: 본문 굵게·기울임을 PDF 글꼴로 되살림 (**…** / *…*)
+EXTRACT_VERSION = 3
 
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"
@@ -92,6 +93,9 @@ def extract(
         # 납작해진 인라인 수식("x ( k ) i ∈ [ 0 , 1 ] d k")을 PDF 글꼴·기준선으로 $LaTeX$로.
         # 정리(&lt; → <, 𝑡 → t)를 먼저 해야 PDF 글자와 맞춰 볼 수 있다.
         raw, inline = inline_math.restore(clean_extracted(raw), pdf)
+        # 본문 굵게·기울임 — Docling이 버리는 글꼴 정보를 PDF에서 읽어 **…** / *…* 로.
+        # 인라인 수식 뒤에 해야 $…$ 안을 건드리지 않는다.
+        raw, emph = emphasis.restore(raw, pdf)
     wd.raw_md.write_text(clean_extracted(raw), encoding="utf-8")
 
     final = wd.raw_md.read_text(encoding="utf-8")
@@ -103,6 +107,7 @@ def extract(
         "garbled_repaired": repaired + moji_fixed,
         "glyphs_restored": glyphs,  # ToUnicode를 글리프 이름으로 고친 코드 수
         "inline_math": inline,  # PDF 좌표로 되살린 인라인 수식 수
+        "emphasis": emph,  # PDF 글꼴로 되살린 굵게·기울임 구간 수
         "source": str(source.resolve()),
         "python": sys.version.split()[0],
         "ok": True,

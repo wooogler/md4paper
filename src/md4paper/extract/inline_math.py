@@ -60,6 +60,7 @@ class Glyph:
     x1: float
     y: float  # 기준선
     gap: bool = False  # 줄 안에서 앞 글자와 사이에 공백이 있다
+    style: int = 0  # 글꼴의 굵게(1)·기울임(2) 비트 — 강조 복원(emphasis)이 쓴다
 
 
 @dataclass
@@ -74,10 +75,27 @@ class Island:
 
 # --- 글자 읽기 -------------------------------------------------------------------------
 
+# 글꼴 이름으로 본 굵게·기울임. 서술자(굵기·기울기)가 틀린 글꼴이 흔해(LinLibertineTBI는 굵기 375,
+# LinBiolinumTBO는 기울기 0) 이름과 서술자 중 하나라도 그렇다고 하면 그런 것으로 본다.
+_BOLD_NAME = re.compile(r"Bold|Black|Heavy|Semi-?bold|Demi|Medium|Medi$|Bd\b|CMBX|CMB\d|SFBX|LMRomanDemi",
+                        re.I)
+_BOLD_SUFFIX = re.compile(r"-B[IO]?$|,Bold|T[BZ][IO]?$|bx\d")
+_ITALIC_NAME = re.compile(r"Ital|Oblique|Slant|Kursiv|CMTI|CMSL|CMBXTI|CMBXSL|SFTI|SFSL|SFIT", re.I)
+_ITALIC_SUFFIX = re.compile(r"-It\b|-It[A-Z]|-B?[IO]$|,Italic|T[BZ]?[IO]$")
+
+
+def font_style(name: str, weight: int, angle: int | None) -> int:
+    """글꼴의 굵게(1)·기울임(2) 비트 — 이름 또는 서술자(굵기 ≥ 600, 기울기 ≠ 0)."""
+    bold = bool(_BOLD_NAME.search(name) or _BOLD_SUFFIX.search(name)) or weight >= 600
+    italic = bool(_ITALIC_NAME.search(name) or _ITALIC_SUFFIX.search(name)) or bool(angle)
+    return int(bold) | (2 if italic else 0)
+
+
 def _page_glyphs(textpage) -> list[Glyph]:  # noqa: ANN001
     import pypdfium2.raw as C
 
     names: dict[int, str] = {}
+    styles: dict[int, int] = {}
     out: list[Glyph] = []
     n = textpage.count_chars()
     i = 0
@@ -102,6 +120,10 @@ def _page_glyphs(textpage) -> list[Glyph]:  # noqa: ANN001
             buf = ctypes.create_string_buffer(k)
             C.FPDFFont_GetBaseFontName(font, buf, k)
             names[key] = re.sub(r"^[A-Z]{6}\+", "", buf.value.decode("latin-1"))
+            angle = ctypes.c_int(0)
+            has_angle = C.FPDFFont_GetItalicAngle(font, ctypes.byref(angle))
+            styles[key] = font_style(names[key], C.FPDFFont_GetWeight(font),
+                                     angle.value if has_angle else None)
         scale = 1.0
         if C.FPDFText_GetMatrix(textpage, i, m):
             scale = abs(m.a * m.d - m.b * m.c) ** 0.5 or 1.0
@@ -109,7 +131,8 @@ def _page_glyphs(textpage) -> list[Glyph]:  # noqa: ANN001
         C.FPDFText_GetCharOrigin(textpage, i, x, y)
         left, _, right, _ = textpage.get_charbox(i)
         if size > 0:
-            out.append(Glyph(i, ch, names.get(key, ""), size, left, right, y.value))
+            out.append(Glyph(i, ch, names.get(key, ""), size, left, right, y.value,
+                             style=styles.get(key, 0)))
         i += step
     return out
 

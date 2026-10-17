@@ -128,8 +128,9 @@ _YEAR_SUFFIX = re.compile(r"\b((?:18|19|20)\d{2})([a-z])?\b")
 # 연도를 품은 괄호 인용:  (Wei et al., 2021)  /  (A et al., 2021; B, 2022b)
 _PAREN_CITE = re.compile(r"\(([^()]{0,400}?(?:18|19|20)\d{2}[a-z]?[^()]{0,200}?)\)")
 # 서술형 인용:  Wei et al. (2021)  /  Brown and Mann (2020)  /  Casanueva (2022)
+# 'et al.'을 기울여 조판한 논문은 추출 결과가 "Wei *et al.* (2021)"이다 — 강조 표시째 받는다.
 _NARRATIVE_CITE = re.compile(
-    r"\b[A-Z][A-Za-zÀ-ÿ'’\-]+(?:\s+et\s+al\.?|\s+and\s+[A-Z][A-Za-zÀ-ÿ'’\-]+)?\s*"
+    r"\b[A-Z][A-Za-zÀ-ÿ'’\-]+(?:\s+\*?et\s+al\.?\*?|\s+and\s+[A-Z][A-Za-zÀ-ÿ'’\-]+)?\s*"
     r"\((?:18|19|20)\d{2}[a-z]?\)"
 )
 

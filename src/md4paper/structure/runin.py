@@ -17,8 +17,12 @@ _LIST_PREFIX_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 _RUNIN_NUM_RE = re.compile(r"^(\d+(?:\.\d+)+)\s+([A-Z][^.]{2,140}?)\.\s+(\S.*)$")
 _NUM_TITLE_MAX_WORDS = 20
 # 강조형(이탤릭·볼드, 번호 유무 무관): "*Length.* 본문…" / "**Length.** 본문…" / "*4.1.3 Title.* 본문…"
-# 여는·닫는 마커는 같은 종류·개수(1~2개)여야 한다(백레퍼런스 \1).
-_RUNIN_EMPH_RE = re.compile(r"^([*_]{1,2})((?:\d[\d.]*\s+)?[A-Z][^*_]{1,60}?)\.\1\s+([A-Z]\S.*)$")
+# 여는·닫는 마커는 같은 종류·개수(1~3개, 굵은 기울임은 ***)여야 한다(백레퍼런스 \1).
+# 마침표는 강조 안("*Title.*")이든 밖("*Title*.")이든 — 추출기는 PDF에서 마침표의 글꼴을 따른다.
+_RUNIN_EMPH_RE = re.compile(
+    r"^([*_]{1,3})((?:\d[\d.]*\s+)?[A-Z][^*_]{1,60}?)(?:\.\1|\1\.)\s+([A-Z]\S.*)$")
+# 본문 강조 표시(**…** / *…*) — 강조형에 안 맞는 줄은 이것을 걷어 낸 평문으로 다시 본다
+_EMPH_MARK_RE = re.compile(r"\*{1,3}")
 # 콜론형(번호도 강조도 없음): "Prompt Instruction Editor: 본문…"
 # 추출기가 굵게 표시를 잃어버리면 일반 문장과 형태가 같아진다 → 콜론 앞이 "짧은 타이틀케이스 구"이고
 # 뒤가 대문자로 시작하는 충분히 긴 문장일 때만 소제목으로 본다.
@@ -69,7 +73,40 @@ def _is_runin_title(phrase: str) -> bool:
 
 
 def detect(line: str) -> tuple[str | None, str, str, bool] | None:
-    """run-in 헤더 감지. 반환: (번호|None, 제목, 나머지 본문, 이탤릭이었나) 또는 None."""
+    """run-in 헤더 감지. 반환: (번호|None, 제목, 나머지 본문, 이탤릭이었나) 또는 None.
+
+    추출기가 본문 강조를 되살리면 "*4.1.1 긴 제목.* 본문"·"***Label***: 본문"처럼 강조형 정규식에
+    안 맞는 run-in이 생긴다. 강조 표시를 걷은 평문으로 먼저 판정하고(강조가 없던 때와 같은 제목),
+    본문은 원래 줄에서 잘라 그 안의 강조를 살린다(본문 쪽 표시가 짝이 안 맞으면 평문 본문).
+    평문으로 안 잡히는 줄만 강조형("*Short title*. 본문")으로 본다.
+    """
+    if "*" not in line:
+        return _detect(line)
+    keep = [m.span() for m in _EMPH_MARK_RE.finditer(line)]
+    plain, pos = [], []
+    k = 0
+    for i, ch in enumerate(line):
+        while k < len(keep) and keep[k][1] <= i:
+            k += 1
+        if k < len(keep) and keep[k][0] <= i < keep[k][1]:
+            continue
+        plain.append(ch)
+        pos.append(i)
+    hit = _detect("".join(plain))
+    if hit is None:
+        return _detect(line)
+    num, title, body, _ = hit
+    at = pos[len(plain) - len(body)] if body else len(line)
+    while at > 0 and line[at - 1] == "*":
+        at -= 1  # 본문 첫 낱말의 여는 강조 표시까지
+    orig = line[at:]
+    marks = [len(m) for m in _EMPH_MARK_RE.findall(orig)]
+    if len(marks) % 2 or marks[0::2] != marks[1::2]:
+        orig = body  # 제목 강조의 닫는 표시가 본문에 걸렸다 — 평문 본문
+    return num, title, orig, _LIST_PREFIX_RE.sub("", line, count=1).startswith(("*", "_"))
+
+
+def _detect(line: str) -> tuple[str | None, str, str, bool] | None:
     unlisted = _LIST_PREFIX_RE.sub("", line, count=1)  # 리스트로 뭉개진 run-in도 잡는다
     was_list = unlisted != line  # 원래 리스트 항목('- …')이었나
     line = unlisted
