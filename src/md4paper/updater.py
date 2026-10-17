@@ -119,6 +119,30 @@ def installed_source() -> Source | None:
     return src
 
 
+def _skip_path() -> Path:
+    from md4paper.config import CONFIG_DIR
+
+    return CONFIG_DIR / "update.json"
+
+
+def skipped() -> str:
+    """'이 버전 건너뛰기'로 넘긴 커밋 — 이 커밋까지는 알리지 않는다(더 새 커밋이 오면 다시 알림)."""
+    try:
+        return str(json.loads(_skip_path().read_text(encoding="utf-8")).get("skip") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+
+
+def set_skipped(commit: str | None) -> None:
+    """건너뛸 커밋을 기억(None이면 지운다)."""
+    path = _skip_path()
+    if not commit:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"skip": commit}), encoding="utf-8")
+
+
 def version_label() -> str:
     """홈 화면에 보일 버전 — `v0.1.0 · edfaf79`(설치본) / `v0.1.0 · 개발본 edfaf79`(저장소에서 실행)."""
     from md4paper import __version__

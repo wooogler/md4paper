@@ -93,3 +93,12 @@ def test_env_root_follows_app_bundle_symlink(tmp_path, monkeypatch):
     monkeypatch.setattr(updater.sys, "prefix", str(contents))
     assert updater.env_root() == tool.resolve()
     assert updater.tool_exe().parent.parent == tool.resolve()
+
+
+def test_skip_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(updater, "_skip_path", lambda: tmp_path / "cfg" / "update.json")
+    assert updater.skipped() == ""
+    updater.set_skipped(NEW)
+    assert updater.skipped() == NEW
+    updater.set_skipped(None)
+    assert updater.skipped() == ""
