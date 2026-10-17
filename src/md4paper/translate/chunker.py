@@ -20,7 +20,10 @@ _PROTECT_PATTERNS = [
     re.compile(r"<figure>.*?</figure>", re.DOTALL),  # HTML 플레이버 그림
     re.compile(r"!\[[^\]]*\]\([^)]*\)"),  # 이미지
     re.compile(r"!?\[\[[^\]]*\]\]"),  # Obsidian 위키링크 임베드
-    re.compile(r"\[[^\]]*\]\([^)]*\)"),  # 마크다운 링크 (인용 링크 포함)
+    # 인용 묶음 `[[15, Chen 2025](#ref-15); [16, …](#ref-16)]`은 바깥 괄호까지 한 덩어리로.
+    # 링크만 떼면 `[⟦MD4_1⟧]` 대신 `⟦MD4_1⟧]`처럼 짝 잃은 `]`가 모델에게 넘어간다.
+    re.compile(r"\[\[[^\[\]]*\]\([^)]*\)(?:\s*[;,]\s*\[[^\[\]]*\]\([^)]*\))*\]"),
+    re.compile(r"\[[^\[\]]*\]\([^)]*\)"),  # 마크다운 링크 — 링크 텍스트에 `[`를 삼키지 않는다
     re.compile(r"https?://[^\s)]+"),  # raw URL
     # autoref 상호참조는 영어 유지 (Figure 3, Table 2, Section 4.1, Eq. 5 …)
     re.compile(

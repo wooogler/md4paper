@@ -234,3 +234,43 @@ def test_enforce_keep_reverts_translated_keep_terms():
     assert "데이터-프롬프트 공진화" not in out                 # keep 용어 모두 영어로 복원
     assert out.count("Data-Prompt Co-Evolution") == 2         # 단독+병기 둘 다
     assert "테스트 세트" in out                                # translate 용어는 그대로
+
+
+def test_switching_model_retranslates_and_records_model(converted):
+    """재번역 때 모델을 바꾸면 캐시를 쓰지 않고 다시 번역하고, status.json에 그 모델이 남는다."""
+    from md4paper.ui.controller import UIController
+
+    calls = {"n": 0}
+
+    def count(system: str, user: str) -> str:
+        calls["n"] += 1
+        return _body(user)
+
+    def prov(model: str) -> FakeProvider:
+        return FakeProvider(complete_fn=count, parse_fn=lambda s, u, sc: FAKE_GLOSSARY, model=model)
+
+    pipeline.run_translate(converted, prov("m-a"))
+    first = calls["n"]
+    assert first >= 1
+    assert pipeline.last_translate_model(converted) == ("fake", "m-a")
+    assert UIController(converted).translate_model() == "fake/m-a"  # UI 드롭다운 기본값
+
+    pipeline.run_translate(converted, prov("m-a"))
+    assert calls["n"] == first  # 같은 모델 → 전부 캐시
+
+    pipeline.run_translate(converted, prov("m-b"))
+    assert calls["n"] == 2 * first  # 다른 모델 → 전부 새로 번역
+    st = converted.load_status()["translate"]
+    assert (st["provider"], st["model"]) == ("fake", "m-b")
+
+
+def test_translate_model_options_lists_keyed_providers(converted, monkeypatch):
+    from md4paper import config
+    from md4paper.ui.controller import UIController
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    ctrl = UIController(converted)
+    opts = ctrl.translate_model_options()
+    assert all(k.startswith("anthropic/") for k in opts if k != ctrl.translate_model())
+    assert f"anthropic/{config.MODEL_TIERS['anthropic'][-1]}" in opts
+    assert ctrl.translate_model() in opts  # 기본값(키 없는 전역 기본이어도)은 항상 고를 수 있다

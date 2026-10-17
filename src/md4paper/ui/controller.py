@@ -505,6 +505,37 @@ class UIController:
 
         return pipeline.run_translate(self.wd, provider, korean_style=korean_style, on_progress=on_progress)
 
+    def translate_model(self) -> str:
+        """번역 모델 드롭다운의 기본값 'provider/model' — 이 논문을 마지막에 번역한 모델, 없으면 전역 기본."""
+        from md4paper import config, pipeline
+
+        last = pipeline.last_translate_model(self.wd)
+        if last is not None:
+            return "/".join(last)
+        provider = config.resolve_provider()
+        return f"{provider}/{config.resolve_model(provider)}"
+
+    def translate_model_options(self) -> dict[str, str]:
+        """번역 모델 드롭다운 {'provider/model': 라벨}. 키가 있는 제공사만, 각 사 저렴→비쌈.
+
+        지난 번역 모델이 목록 밖(구세대·--model 직접 지정)이어도 기본값으로 보이도록 끼워 넣는다.
+        """
+        from md4paper import config
+        from md4paper.llm.base import PRICING
+
+        keys = config.key_status()
+        opts: dict[str, str] = {}
+        for prov in config.PROVIDERS:
+            if not keys.get(prov):
+                continue
+            for mid in config.MODEL_TIERS.get(prov, ()):
+                pr = PRICING.get(mid)
+                opts[f"{prov}/{mid}"] = f"{prov} · {mid}" + (f" (${pr[0]:g}/${pr[1]:g})" if pr else "")
+        cur = self.translate_model()
+        if cur not in opts:
+            opts = {cur: cur.replace("/", " · ", 1), **opts}
+        return opts
+
     def export_zip(self, which: str, target: str = "universal") -> tuple[str, bytes]:
         """en/ko 마크다운 + 참조 이미지를 zip 바이트로 묶어 반환. 반환: (파일명, bytes).
 

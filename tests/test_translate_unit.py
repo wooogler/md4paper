@@ -88,6 +88,23 @@ def test_protect_restore_roundtrip():
     assert chunker.restore(protected, store) == text
 
 
+def test_protect_citation_group_keeps_brackets_balanced():
+    # 인용 링크만 떼면 `⟦MD4_1⟧]`처럼 짝 잃은 `]`가 남아 모델이 센티넬째 지웠다 (Peerception 4.2.1)
+    text = ("set [[41, Lu et al. 2025, Identifying Aspects](#ref-41)]: methods, and "
+            "[[7, Bly 1993, Media](#ref-7); [18, Gaver 1992, RAVE](#ref-18)] and a [plain](http://x.io).")
+    protected, store = chunker.protect(text)
+    assert "]" not in protected and "[" not in protected  # 괄호가 센티넬 밖에 홀로 남지 않는다
+    assert len(store) == 3  # 인용 묶음 2개 + 일반 링크 1개
+    assert chunker.restore(protected, store) == text
+
+
+def test_protect_link_inside_brackets_does_not_swallow_open_bracket():
+    text = "see ([2, Doe 2020, X](#ref-2), Appx.) here"
+    protected, store = chunker.protect(text)
+    assert protected.startswith("see (⟦MD4_")
+    assert chunker.restore(protected, store) == text
+
+
 def test_protect_fenced_code():
     text = "before\n```\narr[1] = $x$\n```\nafter"
     protected, store = chunker.protect(text)
@@ -195,6 +212,28 @@ def test_translate_chunk_reports_dropped_sentinel():
     assert len(missing) == 1
     assert any("링크" in p for p in validate(src, out))  # 겉으로는 링크 수로 보이고
     assert missing  # 진짜 이유는 센티넬 유실이다
+
+
+def test_retry_names_dropped_sentinel_and_its_place():
+    """재시도 메시지가 '몇 개 빠뜨림'이 아니라 어느 토큰을 원문 어디에 넣을지 짚는다.
+
+    실측: 문장 중간 인용을 한국어 어순으로 옮기며 흘리는데, 개수만 알려 준 재시도는 같은 곳을
+    또 흘려 섹션 전체가 영어로 남았다 (Peerception 4.2.1).
+    """
+    from md4paper.llm.base import FakeProvider
+
+    systems: list[str] = []
+
+    def drop_first_time(system: str, user: str) -> str:
+        systems.append(system)
+        return user.replace("⟦MD4_1⟧", "", 1) if len(systems) == 1 else user
+
+    src = "Uses model [[1, A 2020, X](#ref-1)] and the COARSE label set [[2, B 2021, Y](#ref-2)]: a, b."
+    out, st, problems = engine.translate_with_retry(
+        FakeProvider(complete_fn=drop_first_time, model="fake"), "SYS", src)
+    assert (st, problems, out) == ("retried", [], src)
+    assert "⟦MD4_1⟧" not in systems[0]
+    assert "⟦MD4_1⟧: 원문 「…" in systems[1] and "COARSE label set ⟦MD4_1⟧: a, b." in systems[1]
 
 
 def engine_fake_dropping_one_sentinel():

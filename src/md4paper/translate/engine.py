@@ -89,6 +89,33 @@ def translate_chunk(
     return chunker.restore(out, store), missing
 
 
+_HINT_CHARS = 60  # 빠뜨린 토큰 앞뒤로 보여 줄 원문 길이
+
+
+def _missing_hint(source: str, missing: list[str], protect_headings: bool) -> str:
+    """빠뜨린 ⟦MD4_n⟧이 원문 어디에 있었는지 — '몇 개 빠뜨림'만으로는 같은 곳을 또 빠뜨린다.
+
+    모델이 문장을 한국어 어순으로 재구성하며 문장 중간의 인용을 통째로 흘리는 일이 잦다
+    ("…the COARSE label set ⟦MD4_2⟧: methodology, …" → 실측 8회 중 4회 유실). 어느 토큰을
+    어느 문맥에 다시 넣어야 하는지 짚어 줘야 재시도가 그 자리를 지킨다.
+    """
+    if not missing:
+        return ""
+    protected, _ = chunker.protect(source, protect_headings=protect_headings)  # 결정론적 — 같은 센티넬
+    lines = []
+    for key in missing:
+        i = protected.find(key)
+        if i < 0:
+            continue
+        before = protected[max(0, i - _HINT_CHARS):i].replace("\n", " ")
+        after = protected[i + len(key):i + len(key) + _HINT_CHARS].replace("\n", " ")
+        lines.append(f"- {key}: 원문 「…{before}{key}{after}…」")
+    if not lines:
+        return ""
+    return ("\n빠뜨린 토큰과 원문 위치 — 번역문의 같은 의미 자리에 반드시 그대로 넣어라"
+            "(인용이면 그 인용이 뒷받침하는 말 바로 뒤):\n" + "\n".join(lines))
+
+
 def translate_with_retry(
     provider: Provider, system_prompt: str, source: str, *, max_retries: int = 1,
     protect_headings: bool = False, context_tail: str = "",
@@ -114,6 +141,7 @@ def translate_with_retry(
             + "\n\n[재시도] 직전 번역이 다음 구조를 어겼다: "
             + ", ".join(problems)
             + ". 이번엔 마크다운 구조를 정확히 보존하라."
+            + _missing_hint(source, missing, protect_headings)
         )
     # 두 번 실패 → 영어 원문 통과 (구조는 확실히 보존). 위반 목록도 함께 돌려준다.
     # 위반 항목을 주석에 적어 둔다 — 이유를 문서 자체가 들고 있어야 나중에 왜 실패했는지 알 수 있다

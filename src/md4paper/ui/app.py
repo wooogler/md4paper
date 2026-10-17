@@ -3071,7 +3071,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def do_translate() -> None:
             gloss_autosave()
             try:
-                prov = config.build_provider()  # 변환에 쓰던 기본 프로바이더
+                # 고른 번역 모델 — 지난번과 다르면 캐시 키가 바뀌어 전체를 새 모델로 다시 번역한다
+                p_name, _, m_name = (model_pick.value or ctrl.translate_model()).partition("/")
+                prov = config.build_provider(p_name, m_name)
             except RuntimeError as e:
                 ui.notify(str(e), type="negative")
                 return
@@ -3123,7 +3125,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 timer.deactivate()
                 finish_translate(job)
 
-            timer = ui.timer(0.3, tick)
+            # 진행 바 옆(고정 영역)에 단다 — '실패 섹션 재번역' 버튼은 failure_panel 안에 있고 시작하며
+            # 그 패널을 새로 그리므로, 클릭 문맥에 달면 타이머가 지워진 슬롯에 붙어 진행이 멈춘다.
+            with bar.parent_slot:
+                timer = ui.timer(0.3, tick)
             tick()
 
         def finish_translate(job: jobs.Job) -> None:
@@ -3183,6 +3188,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.button("행 추가", icon="add", on_click=add_gloss_row).props("outline")
                 translate_btn = ui.button("이 용어집으로 번역 실행", icon="translate",
                                           on_click=do_translate).props("color=secondary")
+                model_pick = ui.select(ctrl.translate_model_options(), value=ctrl.translate_model(),
+                                       label="번역 모델").props("dense outlined options-dense") \
+                    .classes("min-w-[16rem]") \
+                    .tooltip("기본은 이 논문을 지난번에 번역한 모델입니다. 다른 모델을 고르면 캐시를 쓰지 않고 "
+                             "전체를 그 모델로 다시 번역합니다(실패 섹션 재번역도 이 모델로).")
             bar = ui.linear_progress(value=0, show_value=False) \
                 .props("size=14px rounded color=secondary").classes("w-full")
             bar.visible = False

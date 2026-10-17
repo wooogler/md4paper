@@ -203,9 +203,19 @@ def run_translate(wd, provider, korean_style=None, on_progress=None, force: bool
     summary = _apply(wd, provider, style, on_progress=on_progress)
     # 실패 이유를 status.json에 남긴다 — 안 남기면 세션이 끝나는 순간 "왜 영어로 남았는지"를
     # 알 방법이 사라진다(실패 청크는 캐시에도 안 들어가므로 사후 재구성이 불가능하다).
+    # 어느 모델로 번역했는지도 남긴다 — 재번역 화면이 이걸 기본값으로 띄운다(모르면 매번 전역 기본).
     wd.mark_done("translate", hash_text(f"{style}:{provider.model}"), style=style,
+                 provider=getattr(provider, "name", ""), model=provider.model,
                  passthrough=summary.get("passthrough", 0), failures=summary.get("failures", {}))
     return summary
+
+
+def last_translate_model(wd) -> tuple[str, str] | None:
+    """이 논문을 마지막으로 번역한 (프로바이더, 모델). 기록이 없으면(옛 번역 포함) None."""
+    entry = wd.load_status().get("translate")
+    if not isinstance(entry, dict) or not entry.get("provider") or not entry.get("model"):
+        return None
+    return entry["provider"], entry["model"]
 
 
 def convert(

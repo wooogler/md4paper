@@ -1071,7 +1071,7 @@ def translate(
         # 개수만 알려 주면 원인을 못 좁힌다 — 어느 섹션이 어떤 불변식을 어겼는지까지 적는다.
         for sid, reason in (summary.get("failures") or {}).items():
             click.echo(click.style(f"    · {sid} — {reason}", fg="yellow"))
-    click.echo(f"비용 ≈ ${summary.get('cost_usd', 0):.4f} → {wd.ko_md}")
+    click.echo(f"모델 {prov.name}/{prov.model} · 비용 ≈ ${summary.get('cost_usd', 0):.4f} → {wd.ko_md}")
 
 
 def _md4_dirs(path: Path) -> list[Path]:
