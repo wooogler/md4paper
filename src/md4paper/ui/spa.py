@@ -69,17 +69,30 @@ def make_header() -> None:
 
 
 def add_css(css: str) -> None:
-    """스타일을 넣는다 — 같은 창(클라이언트)에 이미 넣은 것이면 건너뛴다."""
+    """스타일을 넣는다 — 같은 창(클라이언트)에 이미 넣은 것이면 건너뛴다.
+
+    `ui.add_css`는 연결 전이면 head HTML에만 붙인다. 그런데 셸이 첫 응답을 보낸 뒤 연결되기 전에
+    화면을 다시 짓는 경로(CLI로 논문을 지정해 띄움 → `index_view`의 `ui.navigate.to`가 백그라운드
+    태스크로 리뷰 화면을 지음)에서는 head가 이미 나가 버려 그 CSS가 영영 브라우저에 닿지 않는다.
+    그래서 연결 전이면 head에도 싣고, 연결 뒤 실행될 스크립트로도 한 번 더 넣는다 — 같은 키의
+    `<style>`이 있으면 건너뛰므로 둘 다 닿아도 한 번만 들어간다."""
     from nicegui import context, ui
 
     client = context.client
     seen: set = getattr(client, _CSS_ATTR, None) or set()
-    key = hashlib.sha1(css.encode("utf-8")).hexdigest()
+    key = hashlib.sha1(css.encode("utf-8")).hexdigest()[:16]
     if key in seen:
         return
     seen.add(key)
     setattr(client, _CSS_ATTR, seen)
-    ui.add_css(css)
+    if not client.has_socket_connection:
+        ui.add_head_html(f'<style data-md4-css="{key}">{css}</style>')
+    # 연결 전에 부르면 메시지가 쌓였다가 연결 직후 실행된다
+    client.run_javascript(
+        f"(function(k,c){{if(document.querySelector('style[data-md4-css=\"'+k+'\"]'))return;"
+        f"var s=document.createElement('style');s.dataset.md4Css=k;s.textContent=c;"
+        f"document.head.appendChild(s);}})({json.dumps(key)},{json.dumps(css)});"
+    )
 
 
 def add_body_html(code: str) -> None:
