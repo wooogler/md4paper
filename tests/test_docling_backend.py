@@ -688,6 +688,53 @@ def test_drop_line_numbers_ignores_running_header_page_numbers():
     assert hdr in doc.texts
 
 
+class _Table:
+    def __init__(self, page, rows):
+        """rows: [[(text, left, right), …], …] — 셀 bbox는 TOPLEFT, 행마다 11pt씩 내려간다."""
+        from docling_core.types.doc import BoundingBox, CoordOrigin, TableCell, TableData
+
+        cells = [TableCell(text=text, bbox=BoundingBox(l=left, r=right, t=100.0 + 11 * r, b=106.0 + 11 * r,
+                                                       coord_origin=CoordOrigin.TOPLEFT),
+                           start_row_offset_idx=r, end_row_offset_idx=r + 1,
+                           start_col_offset_idx=c, end_col_offset_idx=c + 1)
+                 for r, row in enumerate(rows) for c, (text, left, right) in enumerate(row)]
+        self.prov = [_Prov(page, _Box(80.0, 540.0, 700.0, 300.0))]
+        self.data = TableData(num_rows=len(rows), num_cols=max(len(r) for r in rows), table_cells=cells)
+
+    def rows(self):
+        return [[c.text for c in row] for row in self.data.grid]
+
+
+def _gutter_doc(table):
+    """홀수 쪽 gutter는 x≈47, 짝수 쪽은 x≈84 (ACM 투고본 실측). 표는 4쪽(짝수)."""
+    doc = _Doc(_gutter(1, 1, 52, 47.4, width=11.1) + _bodies(1, left=73.0)
+               + _gutter(2, 53, 52, 84.1, width=11.1) + _bodies(2))
+    doc.tables = [table]
+    return doc
+
+
+def test_drop_line_numbers_removes_gutter_column_from_table():
+    """여백까지 걸친 표에서 Docling이 줄 번호를 첫 열로 만든 경우 — 그 열과 번호뿐인 행을 걷어낸다."""
+    table = _Table(4, [[("1095", 84.1, 95.2), ("Actor", 228.1, 248.2), ("Strength", 380.0, 410.0)],
+                       [("1096", 84.1, 95.2), ("User", 228.1, 243.1), ("0.02", 380.0, 395.0)],
+                       [("1097 1098", 84.1, 95.2), ("", 228.1, 243.1), ("", 380.0, 395.0)],
+                       [("", 84.1, 95.2), ("Agent", 228.1, 250.0), ("0.50", 380.0, 395.0)]])
+    doc = _gutter_doc(table)
+    assert _drop_line_numbers(doc) == 104 + 4
+    assert table.rows() == [["Actor", "Strength"], ["User", "0.02"], ["Agent", "0.50"]]
+
+
+def test_drop_line_numbers_keeps_table_numbers_off_the_gutter():
+    """본문 안쪽 표의 번호 열('Run 1 2 3')과 반대쪽 쪽의 gutter 위치에 놓인 셀은 그대로 둔다."""
+    rows = [[("Run", 84.0, 100.0), ("F1", 389.5, 395.5)],
+            [("1", 86.0, 89.0), ("79.8", 386.3, 396.0)],
+            [("2", 110.2, 112.9), ("79.0", 386.3, 396.0)]]
+    odd = _Table(3, rows)  # 홀수 쪽 gutter는 x≈47 — x≈84는 이 쪽에선 본문 안
+    doc = _gutter_doc(odd)
+    assert _drop_line_numbers(doc) == 104
+    assert odd.rows() == [["Run", "F1"], ["1", "79.8"], ["2", "79.0"]]
+
+
 def test_join_broken_paragraphs_joins_in_a_single_column_paper():
     """1단 조판(arXiv 프리프린트)에서도 바로 아래 이어지는 문단은 결합한다."""
     md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"

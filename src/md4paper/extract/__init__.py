@@ -28,7 +28,8 @@ from md4paper.workdir import WorkDir
 # 3: 본문 굵게·기울임을 PDF 글꼴로 되살림 (**…** / *…*)
 # 4: docling 2.140 + 원본에서 맞닿은 글리프 사이에 Docling이 끼운 공백 제거 ("Points ." → "Points.")
 # 5: 선 없는 표에서 한 행으로 뭉친 본문 행을 PDF 기준선으로 다시 나눔
-EXTRACT_VERSION = 5
+# 6: 표 셀로 들어간 투고본 여백 줄 번호 제거 · headings.json에서도 줄 번호 제거
+EXTRACT_VERSION = 6
 
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"

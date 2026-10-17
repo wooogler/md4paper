@@ -863,6 +863,9 @@ def _drop_line_numbers(document) -> int:  # noqa: ANN001 — DoclingDocument
 
     # 확정된 세로줄의 x 위치 — 홀/짝수 쪽 여백이 좌우로 갈리므로 여러 개가 나온다
     bands = [min(_bbox(it).l for it in g) for gs in gutters.values() for g in gs]
+    # 같은 세로줄의 가로 범위(쪽 홀짝별) — 표 셀이 이 안에 들어 있는지 재는 데 쓴다
+    extents = [(pg % 2, min(_bbox(it).l for it in g), max(_bbox(it).r for it in g))
+               for pg, gs in gutters.items() for g in gs]
     remove: list = []
     for pg, its in cands.items():
         taken = {id(it) for g in gutters[pg] for it in g}
@@ -892,12 +895,75 @@ def _drop_line_numbers(document) -> int:  # noqa: ANN001 — DoclingDocument
         if text != it.text:
             it.text = text
 
+    stripped += _drop_table_gutters(document, extents)
+
     for it in remove:
         try:
             document.delete_items(node_items=[it])
         except Exception:  # noqa: BLE001 — 삭제 실패해도 치명적이지 않음
             pass
     return len(remove) + stripped
+
+
+def _drop_table_gutters(document, extents: list[tuple[int, float, float]]) -> int:  # noqa: ANN001
+    """표 셀로 빨려 들어간 줄 번호를 지운다. 반환: 지운 번호 개수.
+
+    여백까지 걸친 표에서는 Docling이 gutter 번호를 표의 한 열로 만든다("| 1095 | Actor | …").
+    그 셀의 bbox는 확정된 gutter 세로줄의 가로 범위 안에 통째로 들어 있다 — 본문 표의 셀은 그 좁은
+    여백에 들어갈 수 없다. 그런 셀을 지우고, 그래서 비게 된 열·행을 걷어낸다. gutter 위치는 같은
+    홀짝 쪽 것을 쓴다(반대쪽 여백의 x는 이 쪽 본문 안쪽일 수 있다).
+    """
+    from docling_core.types.doc import TableData
+
+    dropped = 0
+    for t in getattr(document, "tables", []):
+        prov = getattr(t, "prov", None)
+        if not prov or not t.data.table_cells:
+            continue
+        parity = int(prov[0].page_no) % 2
+        bands = [(x0, x1) for p, x0, x1 in extents if p == parity] or [(x0, x1) for _, x0, x1 in extents]
+
+        def in_gutter(c) -> bool:  # noqa: ANN001 — TableCell
+            b = c.bbox
+            if b is None or not c.text.split() or not all(_LINE_NO_RE.match(w) for w in c.text.split()):
+                return False
+            return any(x0 - _GUTTER_ALIGN_TOL <= min(b.l, b.r) and max(b.l, b.r) <= x1 + _GUTTER_ALIGN_TOL
+                       for x0, x1 in bands)
+
+        data = t.data
+        gone = [c for c in data.table_cells if in_gutter(c)]
+        if not gone:
+            continue
+        dropped += sum(len(c.text.split()) for c in gone)
+        gone_ids = {id(c) for c in gone}
+        keep = [c for c in data.table_cells if id(c) not in gone_ids]
+        # 지운 셀이 있던 열·행 중 남은 글자가 없는 것만 걷어낸다 (원래 빈 열·행은 그대로)
+        filled_cols = {k for c in keep if c.text.strip()
+                       for k in range(c.start_col_offset_idx, c.end_col_offset_idx)}
+        filled_rows = {k for c in keep if c.text.strip()
+                       for k in range(c.start_row_offset_idx, c.end_row_offset_idx)}
+        drop_cols = {k for c in gone for k in range(c.start_col_offset_idx, c.end_col_offset_idx)} - filled_cols
+        drop_rows = {k for c in gone for k in range(c.start_row_offset_idx, c.end_row_offset_idx)} - filled_rows
+
+        def shift(i: int, dropped_at: set[int]) -> int:
+            return i - sum(1 for k in dropped_at if k < i)
+
+        cells = []
+        for c in keep:
+            upd = {
+                "start_col_offset_idx": shift(c.start_col_offset_idx, drop_cols),
+                "end_col_offset_idx": shift(c.end_col_offset_idx, drop_cols),
+                "start_row_offset_idx": shift(c.start_row_offset_idx, drop_rows),
+                "end_row_offset_idx": shift(c.end_row_offset_idx, drop_rows),
+            }
+            if upd["end_col_offset_idx"] > upd["start_col_offset_idx"] and \
+                    upd["end_row_offset_idx"] > upd["start_row_offset_idx"]:
+                upd["col_span"] = upd["end_col_offset_idx"] - upd["start_col_offset_idx"]
+                upd["row_span"] = upd["end_row_offset_idx"] - upd["start_row_offset_idx"]
+                cells.append(c.model_copy(update=upd))
+        t.data = TableData(num_rows=data.num_rows - len(drop_rows), num_cols=data.num_cols - len(drop_cols),
+                           table_cells=cells)
+    return dropped
 
 
 # 로고/배지 판정 크기(pt) — 이보다 작은 그림은 CC 라이선스 배지·학회 로고 등으로 보고 제거
@@ -1185,8 +1251,8 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
     except Exception as e:  # noqa: BLE001 — 사용자에게 원인 노출
         raise ExtractError(f"docling 변환 실패: {e}") from e
 
-    _save_heading_pages(result.document, wd)
     line_numbers = _drop_line_numbers(result.document)  # 투고 원고 여백의 줄 번호 gutter
+    _save_heading_pages(result.document, wd)  # 줄 번호를 뗀 뒤에 — "53 1 Introduction" 방지
     run_heads = _drop_running_heads(result.document)  # 쪽마다 되풀이되는 러닝 헤더/푸터
     footnotes, boilerplate, author_notes = _relocate_footer_blocks(result.document)
     # 다단 조판에서 뒤집힌 단·열 우선 저자 그리드를 되돌린다 (prov bbox가 살아 있는 마지막 지점)
