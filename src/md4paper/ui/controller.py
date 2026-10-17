@@ -7,6 +7,7 @@ CLI와 같은 아티팩트를 읽고 쓴다(별도 데이터 모델 없음).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from md4paper.ir import Flavor, GlossaryEntry, GlossaryList, Manifest
 from md4paper.review import manifest as manifest_io
@@ -281,6 +282,49 @@ class UIController:
             self._adopt(manifest_io.load(self.wd))
             self.clear_manual_edit()  # en.md를 새로 조립했으므로 직접 편집분은 사라졌다
         return summary
+
+    # --- 재변환 (원본 PDF에서 추출부터 다시) ---
+    def extract_outdated(self) -> bool:
+        """지금 추출기보다 옛 버전으로 뽑은 논문인가 (재변환을 권할 근거)."""
+        from md4paper import pipeline
+
+        return pipeline.extract_outdated(self.wd)
+
+    def reconvert(self, provider=None, on_progress=None) -> dict:  # noqa: ANN001
+        """원본 PDF에서 다시 변환 — 추출 → 수식 → 앞부분 → 구조 → 조립 → 인용.
+
+        추출기가 나아진 것(굵게·기울임, 띄어쓰기 …)을 이미 변환한 논문에 반영하는 길이다.
+        구조는 새 raw.md에서 다시 잡되, 문서 설정과 사용자가 정한 레벨·번역 여부는 레이아웃 수정처럼
+        헤더 이름으로 이어받는다. 직전 상태는 스냅샷으로 남겨 되돌릴 수 있다(레이아웃 수정과 같은 되돌리기).
+        번역(ko.md)은 건드리지 않는다 — 다시 번역해야 새 원문이 반영된다. on_progress(done, total).
+        """
+        from md4paper import pipeline, relayout
+
+        pdf = self.source_pdf()
+        if not pdf or not Path(pdf).exists():
+            raise FileNotFoundError("원본 PDF를 찾을 수 없어 다시 변환할 수 없습니다.")
+        meta = json.loads(self.wd.meta_json.read_text(encoding="utf-8"))
+        old = self.manifest
+        steps = 5
+        progress = on_progress or (lambda done, total: None)
+
+        relayout.snapshot(self.wd)  # 되돌리기 1단계 — 레이아웃 수정과 같은 자리
+        progress(0, steps)
+        new_meta = pipeline.run_extract(Path(pdf), self.wd, backend=meta.get("backend") or "docling",
+                                        ocr=bool(meta.get("ocr")), force=True)
+        progress(1, steps)
+        pipeline.run_formulas(self.wd, provider=provider)
+        progress(2, steps)
+        pipeline.run_frontmatter(self.wd, provider=provider)
+        progress(3, steps)
+        relayout.rebuild(self.wd, old, provider=provider)  # 구조 재구축 + 설정·레벨 이어받기 + 조립
+        progress(4, steps)
+        self._adopt(manifest_io.load(self.wd))
+        self.reapply_citations()  # 파싱해 둔 참고문헌으로 인용 링크 다시 (LLM 없이)
+        self.clear_manual_edit()
+        progress(5, steps)
+        return {"sections": len(self.manifest.sections), "emphasis": new_meta.get("emphasis", 0),
+                "garbled": new_meta.get("garbled_chars", 0), "has_translation": bool(self.ko_markdown())}
 
     def can_undo_layout_fix(self) -> bool:
         from md4paper import relayout

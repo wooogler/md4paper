@@ -25,8 +25,20 @@ def run_extract(
     if not force and wd.is_fresh("extract", src_hash) and wd.raw_md.exists() and not _stale_raw(wd):
         return {"skipped": True}
     meta = extract_stage.extract(source, wd, backend=backend, ocr=ocr)
-    wd.mark_done("extract", src_hash, backend=meta.get("backend"))
+    wd.mark_done("extract", src_hash, backend=meta.get("backend"),
+                 version=extract_stage.EXTRACT_VERSION)
     return meta
+
+
+def extract_outdated(wd: WorkDir) -> bool:
+    """지금 추출기보다 옛 버전으로 추출한 논문인가 — 다시 변환하면 개선이 반영된다.
+
+    버전을 적기 전에 추출한 논문(기록 없음)도 옛 것으로 본다. 아직 추출 전이면 False.
+    """
+    entry = wd.load_status().get("extract")
+    if not isinstance(entry, dict):
+        return False
+    return int(entry.get("version") or 0) < extract_stage.EXTRACT_VERSION
 
 
 def _stale_raw(wd: WorkDir) -> bool:

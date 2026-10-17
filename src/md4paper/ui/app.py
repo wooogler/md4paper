@@ -3093,6 +3093,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 job.message = msg
                 return summary
 
+            if jobs.is_running(ctrl.wd.root, "reconvert"):
+                ui.notify("다시 변환하는 중에는 번역할 수 없습니다 — 끝난 뒤 다시 눌러 주세요.", type="info")
+                return
             job = jobs.start(ctrl.wd.root, "translate", "번역", work, title=_title)
             if job is None:
                 ui.notify("이 논문은 이미 번역 중입니다.", type="info")
@@ -3811,6 +3814,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 .props("color=primary no-caps")
 
     def open_fix_dialog() -> None:
+        if jobs.is_running(ctrl.wd.root, "reconvert"):
+            ui.notify("다시 변환하는 중에는 레이아웃을 수정할 수 없습니다.", type="info")
+            return
         plan = ctrl.layout_fix_plan()
         prov = config.resolve_provider()
         fix_info.text = (f"본문 {plan['chars']:,}자를 {plan['chunks']}개 구간으로 나눠 "
@@ -3820,6 +3826,91 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         fix_status.text = ""
         fix_undo.set_visibility(ctrl.can_undo_layout_fix())
         fix_dialog.open()
+
+    # --- 재변환 (변환 탭) — 원본 PDF에서 추출부터 다시. 추출기 개선을 이미 변환한 논문에 반영한다 ---
+    # 원문이 통째로 바뀌므로 번역·레이아웃 수정과 겹쳐 돌면 서로의 결과를 덮는다 → 하나라도 돌면 막는다.
+    _REWRITES = (("translate", "번역"), ("layout", "레이아웃 수정"), ("reconvert", "다시 변환"))
+
+    with ui.dialog() as rc_dialog, ui.card().classes("gap-3").style("width:520px;max-width:92vw"):
+        ui.label("PDF에서 다시 변환").classes("text-lg font-bold")
+        ui.markdown(
+            "원본 PDF에서 **추출부터 다시** 해서 영어 마크다운을 새로 만듭니다. 추출기가 나아진 점"
+            "(굵게·기울임, 띄어쓰기, 수식 등)이 이 논문에 반영됩니다.\n\n"
+            "정해 둔 **헤더 레벨·번역할 섹션·변환 설정은 그대로 이어받고**, 메모는 바뀐 문장에서 다시 찾습니다. "
+            "마음에 들지 않으면 '레이아웃 자동 수정' 창의 **직전 상태로 되돌리기**로 돌아갈 수 있습니다."
+        ).classes("text-sm")
+        rc_warn = ui.column().classes("gap-1")
+        with ui.row().classes("justify-end w-full gap-2"):
+            ui.button("취소", on_click=rc_dialog.close).props("flat no-caps")
+            ui.button("다시 변환", icon="refresh", on_click=lambda: (rc_dialog.close(), run_reconvert())) \
+                .props("color=primary no-caps")
+
+    def open_reconvert_dialog() -> None:
+        busy = [label for kind, label in _REWRITES if jobs.is_running(ctrl.wd.root, kind)]
+        if busy:
+            ui.notify(f"{busy[0]} 중에는 다시 변환할 수 없습니다 — 끝난 뒤 다시 눌러 주세요.", type="info")
+            return
+        rc_warn.clear()
+        with rc_warn:
+            if ctrl.has_manual_edit():
+                ui.label("직접 편집한 마크다운이 있습니다 — 다시 변환하면 그 편집은 사라집니다.") \
+                    .classes("text-xs text-orange-8")
+            if ctrl.ko_markdown():
+                ui.label("번역은 그대로 둡니다. 새 원문을 번역에 반영하려면 변환 뒤 번역을 다시 실행하세요.") \
+                    .classes("text-xs text-gray-600")
+            if not _has_llm_key():
+                ui.label("API 키가 없어 저자·수식 정리는 규칙으로만 합니다.").classes("text-xs text-gray-600")
+        rc_dialog.open()
+
+    def run_reconvert() -> None:
+        prov = None
+        if _has_llm_key():
+            try:
+                prov = config.build_provider()  # 저자·서지 정리와 수식 변환에 (처음 변환과 같게)
+            except RuntimeError:
+                prov = None
+
+        # 화면 없이 완결 — 탭을 옮겨도 변환·조립·자동 저장은 끝까지 간다
+        def work(job: jobs.Job) -> dict:
+            summary = ctrl.reconvert(prov, job.progress)
+            library.auto_export(ctrl.wd)
+            msg = f"다시 변환했습니다 · 섹션 {summary['sections']}개 · 굵게·기울임 {summary['emphasis']}곳"
+            if summary["has_translation"]:
+                msg += " · 번역은 다시 실행해야 반영됩니다"
+            job.message = msg
+            return summary
+
+        job = jobs.start(ctrl.wd.root, "reconvert", "다시 변환", work, title=_title)
+        if job is None:
+            ui.notify("이미 다시 변환하는 중입니다.", type="info")
+            return
+        ui.notify("PDF에서 다시 변환하는 중… — 다른 탭으로 옮겨도 계속됩니다")
+        attach_reconvert(job)
+        paper_tabs.refresh()
+
+    _RC_STEPS = ("PDF에서 추출 중…", "수식 정리 중…", "저자·서지 정리 중…", "섹션 구조를 다시 잡는 중…",
+                 "인용 링크 다는 중…", "마무리 중…")
+
+    def attach_reconvert(job: jobs.Job) -> None:
+        """진행을 버튼 아래 줄에 보여 주고, 끝나면 페이지를 새로 읽는다 — 원문·그림·구조가 통째로 바뀌었다."""
+        rc_button.disable()
+        rc_banner.set_visibility(True)
+
+        def tick() -> None:
+            if job.running:
+                rc_banner.text = f"다시 변환 중 · {_RC_STEPS[min(job.done, len(_RC_STEPS) - 1)]}"
+                return
+            timer.deactivate()
+            rc_banner.set_visibility(False)
+            rc_button.enable()
+            if job.status == "done":
+                ui.navigate.reload()  # 완료 알림은 새로 읽은 페이지가 '못 본 작업'으로 띄운다
+            elif not job.seen:
+                job.seen = True
+                ui.notify(f"다시 변환 실패: {job.error}", type="negative")
+
+        timer = ui.timer(0.5, tick)
+        tick()
 
     # ===== 단계 패널 (탭 컨트롤은 헤더에) =====
     # 번역까지 끝난 논문은 뷰어를, 아니면 변환 탭을 기본으로 연다.
@@ -3846,6 +3937,20 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         fix_banner.set_visibility(False)
                         if jobs.is_running(ctrl.wd.root, "layout"):
                             attach_layout_fix(jobs.get(ctrl.wd.root, "layout"), own=False)
+
+                        has_src = bool(ctrl.source_pdf())
+                        rc_button = ui.button("PDF에서 다시 변환", icon="refresh", on_click=open_reconvert_dialog) \
+                            .props("outline no-caps color=primary").classes("w-full").tooltip(
+                                "원본 PDF에서 추출부터 다시 — 추출기 개선(굵게·기울임, 띄어쓰기 등)을 반영합니다"
+                                if has_src else "원본 PDF가 없는 논문(마크다운으로 올림)은 다시 변환할 수 없습니다")
+                        if not has_src:
+                            rc_button.disable()
+                        elif ctrl.extract_outdated():
+                            cap("이전 버전 추출기로 변환된 논문입니다 — 다시 변환하면 개선 사항이 반영됩니다.")
+                        rc_banner = ui.label("").classes("text-xs text-primary")
+                        rc_banner.set_visibility(False)
+                        if jobs.is_running(ctrl.wd.root, "reconvert"):
+                            attach_reconvert(jobs.get(ctrl.wd.root, "reconvert"))
 
                         with ui.expansion("변환 설정", icon="settings").classes("w-full"):
                             convert_settings()

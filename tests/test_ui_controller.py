@@ -554,3 +554,64 @@ def test_set_author_parts_shifts_line_anchors(tmp_path):
     assert len(heads) == len(set(heads)), f"헤더가 중복됐다: {heads}"
     assert sum(1 for h in heads if h.endswith("Abstract")) == 1
     assert sum(1 for h in heads if h.endswith("1 Introduction")) == 1
+
+
+def _as_pdf_source(ctrl, tmp_path):
+    """사전 추출 .md로 만든 논문을 'PDF에서 변환한 논문'처럼 꾸민다 (메타의 source만 PDF로)."""
+    import json
+
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 stub")
+    meta = json.loads(ctrl.wd.meta_json.read_text(encoding="utf-8"))
+    meta["source"] = str(pdf)
+    ctrl.wd.meta_json.write_text(json.dumps(meta), encoding="utf-8")
+    return pdf
+
+
+def test_reconvert_reextracts_and_keeps_user_choices(ctrl, tmp_path, monkeypatch):
+    pdf = _as_pdf_source(ctrl, tmp_path)
+    sid = ctrl.manifest.sections[3].id  # "2 Background"
+    ctrl.set_level(sid, 3)
+    ctrl.set_setting("caption_style", "italic")
+    ctrl.save_and_reassemble()
+    ctrl.save_en_markdown(ctrl.en_markdown() + "\nmy edit\n")
+    old_raw = ctrl.wd.raw_md.read_text(encoding="utf-8")
+    seen = {}
+
+    def fake_extract(source, wd, backend="docling", ocr=False, force=False):  # 나아진 추출기 흉내
+        seen.update(source=source, force=force)
+        wd.raw_md.write_text(old_raw.replace("attention", "*attention*", 1), encoding="utf-8")
+        wd.mark_done("extract", "new", version=99)
+        return {"emphasis": 1, "garbled_chars": 0}
+
+    monkeypatch.setattr(pipeline, "run_extract", fake_extract)
+    steps = []
+    summary = ctrl.reconvert(None, lambda d, t: steps.append((d, t)))
+
+    assert seen == {"source": pdf, "force": True}  # 원본 PDF에서, 캐시 무시하고
+    assert steps[-1] == (5, 5)
+    assert summary["emphasis"] == 1
+    assert "*attention*" in ctrl.en_markdown()  # 새 추출 결과로 다시 조립
+    assert "my edit" not in ctrl.en_markdown() and not ctrl.has_manual_edit()
+    # 사용자가 정한 레벨·설정은 이어받는다 (새로 읽어도)
+    again = UIController(ctrl.wd)
+    assert next(s for s in again.manifest.sections if s.text.endswith("Background")).level == 3
+    assert again.manifest.caption_style == "italic"
+    # 직전 상태로 되돌릴 수 있다
+    assert ctrl.can_undo_layout_fix()
+    assert ctrl.undo_layout_fix()
+    assert ctrl.wd.raw_md.read_text(encoding="utf-8") == old_raw
+
+
+def test_reconvert_needs_the_source_pdf(ctrl):
+    with pytest.raises(FileNotFoundError):
+        ctrl.reconvert()
+
+
+def test_extract_outdated_follows_recorded_version(ctrl):
+    from md4paper import extract
+
+    ctrl.wd.mark_done("extract", "h")  # 버전을 적기 전의 논문
+    assert ctrl.extract_outdated()
+    ctrl.wd.mark_done("extract", "h", version=extract.EXTRACT_VERSION)
+    assert not ctrl.extract_outdated()
