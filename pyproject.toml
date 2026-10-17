@@ -21,6 +21,9 @@ dependencies = [
     # opencv 상한 고정: docling의 rapidocr가 opencv-python(상한 없음)을 요구해 깨진 5.0.0.93이
     # 뽑히면 'cv2 has no attribute setNumThreads'로 변환이 실패한다. 정상 바이너리가 있는 4.x로 제한.
     "opencv-python>=4.6,<5",
+    # 새 rapidocr(3.10~)는 headless 판을 요구한다. 두 패키지가 같은 cv2 폴더를 쓰므로, 이쪽만 5.x로
+    # 깔리면 설치 순서에 따라 깨진 cv2가 덮어쓴다 — 같은 상한으로 묶는다.
+    "opencv-python-headless>=4.6,<5",
     # LLM SDKs — 순수 HTTP 클라이언트라 가벼움 (translate/cite에서 사용)
     "openai>=2.0",
     "anthropic>=0.40",
