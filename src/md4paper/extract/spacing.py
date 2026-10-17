@@ -456,7 +456,7 @@ def _fix_seams(line: str, ref: Reference) -> tuple[str, int]:
     toks = line.split(" ")
     norms = [
         "" if not t or _SKIP_TOKEN_RE.search(t) or _MD_MARK_RE.fullmatch(t) or "$" in t
-        else _normalize_token(t)
+        else _normalize_token(_MD_ESCAPE_RE.sub(r"\1", t))  # "create \_query" — 원본엔 \ 가 없다
         for t in toks
     ]
     glue = [False] * len(toks)  # glue[k]: toks[k-1]과 toks[k] 사이 공백을 뺀다
@@ -485,6 +485,7 @@ def _fix_seams(line: str, ref: Reference) -> tuple[str, int]:
 
 
 _SKIP_LINE_RE = re.compile(r"^\s*(!\[|<|\$\$|```|\|?\s*:?-{3,})")  # 그림·HTML·수식 블록·코드·표 구분선
+_MD_ESCAPE_RE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|<>])")  # 마크다운 이스케이프
 _MD_MARK_RE = re.compile(r"#+|[-*+>|]")  # 헤딩·목록·인용·표 표식 — 원본에 없는 글자
 _SKIP_TOKEN_RE = re.compile(r"://|\]\(|^\$|^<|^\[\^|^`")
 

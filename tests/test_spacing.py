@@ -228,3 +228,11 @@ def test_without_glyph_boxes_spacing_is_left_alone():
     ref = Reference.from_texts(["moments as Decision Points. While the screenshot\r\n"])
     md = "moments as Decision Points . While the screenshot\n"
     assert restore_spaces(md, ref) == (md, 0)
+
+
+def test_markdown_escapes_do_not_hide_tokens_from_the_original():
+    """실제 사례(GEPA): 헤딩 "create \\_query\\_ hop2.predict" — 원본엔 \\ 가 없어 못 찾던 토큰."""
+    ref = _laid_out("HotpotQA GPT-4.1 Mini create_query_hop2.predict and summary_1 here\r\n")
+    md = "## HotpotQA GPT-4.1 Mini create \\_query\\_ hop2.predict and summary\\_ 1 here\n"
+    out, _ = restore_spaces(md, ref)
+    assert out == "## HotpotQA GPT-4.1 Mini create\\_query\\_hop2.predict and summary\\_1 here\n"
