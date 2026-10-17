@@ -27,7 +27,8 @@ from md4paper.workdir import WorkDir
 # 2: 수식 글꼴 ToUnicode 복구 · 인라인 수식 $LaTeX$ · 깊은 여백의 러닝 푸터
 # 3: 본문 굵게·기울임을 PDF 글꼴로 되살림 (**…** / *…*)
 # 4: docling 2.140 + 원본에서 맞닿은 글리프 사이에 Docling이 끼운 공백 제거 ("Points ." → "Points.")
-EXTRACT_VERSION = 4
+# 5: 선 없는 표에서 한 행으로 뭉친 본문 행을 PDF 기준선으로 다시 나눔
+EXTRACT_VERSION = 5
 
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"

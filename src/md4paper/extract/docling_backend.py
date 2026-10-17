@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from md4paper.extract import formulas as formula_regions
-from md4paper.extract import spacing
+from md4paper.extract import spacing, tables
 from md4paper.extract.reading_order import _top_left, export_geometry, repair_reading_order
 from md4paper.extract.text_clean import ExtractError, rewrite_image_refs
 from md4paper.workdir import WorkDir
@@ -1191,6 +1191,10 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
     footnotes, boilerplate, author_notes = _relocate_footer_blocks(result.document)
     # 다단 조판에서 뒤집힌 단·열 우선 저자 그리드를 되돌린다 (prov bbox가 살아 있는 마지막 지점)
     order_meta = repair_reading_order(result.document)
+    try:  # 선 없는 표에서 한 행으로 뭉친 본문 행을 PDF 기준선으로 다시 나눈다
+        table_rows = tables.split_collapsed_rows(result.document, source)
+    except Exception:  # noqa: BLE001 — 표 보정 실패가 추출 전체를 막지 않게
+        table_rows = 0
     try:  # 되돌린 뒤의 방출 순서 기하 — 문단 재결합의 근거. 못 얻으면 재결합을 안 할 뿐이다.
         geom = export_geometry(result.document)
     except Exception:  # noqa: BLE001 — 기하 실패가 추출 전체를 막지 않게
@@ -1278,6 +1282,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         "line_numbers_dropped": line_numbers,
         "running_heads_dropped": run_heads,
         "formulas": n_formulas,
+        "table_rows_split": table_rows,
         **order_meta,
         **join_stats,
     }
