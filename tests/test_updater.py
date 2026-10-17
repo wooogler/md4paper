@@ -74,3 +74,9 @@ def test_posix_script_waits_reinstalls_relaunches(tmp_path):
     assert "kill -0 4242" in s
     assert "/u/uv tool install --force 'md4paper[ui,native] @ git+https://github.com/wooogler/md4paper'" in s
     assert s.index("kill -0") < s.index("tool install") < s.index(" app ||")
+
+
+def test_version_label_has_version():
+    from md4paper import __version__
+
+    assert updater.version_label().startswith(f"v{__version__}")

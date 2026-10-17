@@ -33,31 +33,76 @@ def start_check(state: dict) -> None:
             state["update"] = updater.check(src) or False
         except Exception as e:  # noqa: BLE001 — 오프라인·API 한도 등은 조용히 넘긴다
             print(f"업데이트 확인 실패: {e}")
+            state["update_error"] = True
             state["update"] = False
 
     threading.Thread(target=work, name="md4paper-update-check", daemon=True).start()
 
 
+def apply(state: dict) -> None:
+    """업데이트 스크립트를 띄우고 앱을 내린다 (진행 중인 작업이 있으면 거절)."""
+    from nicegui import app, ui
+
+    if list(jobs.running()) or state.get("queue"):
+        ui.notify("진행 중인 변환·번역이 끝난 뒤에 업데이트하세요.", type="warning")
+        return
+    try:
+        log = updater.spawn_update(state["update_src"])
+    except Exception as e:  # noqa: BLE001
+        ui.notify(f"업데이트를 시작하지 못했습니다: {e}", type="negative")
+        return
+    print(f"업데이트 시작 — 로그: {log}")
+    ui.notify("업데이트를 받는 중입니다. 앱이 잠시 닫혔다가 다시 열립니다.", type="info")
+    ui.timer(1.2, app.shutdown, once=True)
+
+
+def version_line(state: dict) -> None:
+    """홈 제목 아래 버전 한 줄 — `v0.1.0 · edfaf79 · 최신 버전`. 새 버전이 있으면 눌러서 업데이트."""
+    from nicegui import ui
+
+    if "version_label" not in state:
+        state["version_label"] = updater.version_label()
+    row = ui.row().classes("items-center gap-1 no-wrap text-xs text-gray-400")
+
+    def status() -> str | None:
+        upd = state.get("update")
+        if state.get("update_src") is None:
+            return ""  # 개발본·pip 설치본 — 검사하지 않는다
+        if upd is None:
+            return "업데이트 확인 중…"
+        if upd:
+            return None  # 버튼으로 그린다
+        return "업데이트 확인 실패 (오프라인?)" if state.get("update_error") else "최신 버전"
+
+    def render() -> None:
+        if state.get("update_src") is not None and state.get("update") is None:
+            return  # 첫 렌더는 이미 그렸다 — 결과가 나오면 다시
+        timer.deactivate()
+        draw()
+
+    def draw() -> None:
+        row.clear()
+        with row:
+            ui.label(state["version_label"])
+            st = status()
+            if st:
+                ui.label(f"· {st}")
+            elif st is None:
+                n = state["update"].ahead
+                ui.button(f"새 버전 있음{f' ({n}개 변경)' if n else ''} — 업데이트",
+                          icon="system_update", on_click=lambda: apply(state)) \
+                    .props("flat dense no-caps size=sm color=indigo")
+
+    draw()
+    timer = ui.timer(1.0, render)
+
+
 def install(state: dict) -> None:
     """셸 페이지가 부른다 — 결과가 나올 때까지 기다렸다가 새 버전이 있으면 배너를 그린다."""
-    from nicegui import app, ui
+    from nicegui import ui
 
     ui.add_css(_CSS)
     box = ui.element("div")
-
-    def apply() -> None:
-        busy = list(jobs.running()) or state.get("queue")
-        if busy:
-            ui.notify("진행 중인 변환·번역이 끝난 뒤에 업데이트하세요.", type="warning")
-            return
-        try:
-            log = updater.spawn_update(state["update_src"])
-        except Exception as e:  # noqa: BLE001
-            ui.notify(f"업데이트를 시작하지 못했습니다: {e}", type="negative")
-            return
-        print(f"업데이트 시작 — 로그: {log}")
-        ui.notify("업데이트를 받는 중입니다. 앱이 잠시 닫혔다가 다시 열립니다.", type="info")
-        ui.timer(1.2, app.shutdown, once=True)
 
     def dismiss() -> None:
         state["update_dismissed"] = True
@@ -82,7 +127,7 @@ def install(state: dict) -> None:
                             ui.label(m)
             with ui.row().classes("justify-end gap-1 mt-2 w-full"):
                 ui.button("나중에", on_click=dismiss).props("flat dense no-caps")
-                ui.button("업데이트하고 다시 시작", icon="system_update", on_click=apply) \
+                ui.button("업데이트하고 다시 시작", icon="system_update", on_click=lambda: apply(state)) \
                     .props("dense unelevated no-caps color=indigo")
 
     timer = ui.timer(1.0, render)

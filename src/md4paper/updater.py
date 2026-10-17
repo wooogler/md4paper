@@ -102,6 +102,29 @@ def installed_source() -> Source | None:
     return src
 
 
+def version_label() -> str:
+    """홈 화면에 보일 버전 — `v0.1.0 · edfaf79`(설치본) / `v0.1.0 · 개발본 edfaf79`(저장소에서 실행)."""
+    from md4paper import __version__
+    from md4paper.config import _project_root
+
+    label = f"v{__version__}"
+    try:
+        src = source_from_direct_url(metadata.distribution(DIST).read_text("direct_url.json"))
+    except metadata.PackageNotFoundError:
+        src = None
+    if src is not None:
+        return f"{label} · {src.commit[:7]}"
+    root = _project_root()
+    if root is not None and (root / ".git").exists():
+        try:
+            sha = subprocess.run(["git", "-C", str(root), "rev-parse", "--short=7", "HEAD"],
+                                 capture_output=True, text=True, check=False, timeout=5).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            sha = ""
+        return f"{label} · 개발본 {sha}".rstrip()
+    return label
+
+
 def check(src: Source, client=None, timeout: float = 6.0) -> Update | None:  # noqa: ANN001 — httpx.Client
     """GitHub에 새 커밋이 있으면 Update, 최신이면 None. 네트워크 오류는 그대로 올린다(호출부가 삼킨다)."""
     import httpx

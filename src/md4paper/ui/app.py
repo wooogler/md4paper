@@ -5216,6 +5216,7 @@ def build_home(state: dict) -> None:
     with ui.column().classes("items-center gap-0 w-full q-pt-sm"):
         ui.label("md4paper").classes("text-2xl font-bold")
         ui.label("논문 PDF를 헤더 정렬 마크다운 + 한국어 번역으로.").classes("text-xs text-gray-500")
+        update_banner.version_line(state)  # v0.1.0 · 커밋 · 최신 여부
         # 프로젝트 전환 줄 — 왼쪽(올리기)과 오른쪽(목록) 둘 다에 걸리는 선택이라 양쪽 위에 둔다.
         project_bar()
 
