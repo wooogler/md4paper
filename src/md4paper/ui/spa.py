@@ -97,11 +97,23 @@ def add_css(css: str) -> None:
 
 def add_body_html(code: str) -> None:
     """본문 HTML(오버레이·스크립트)을 넣는다 — 처음 그리는 페이지면 그대로, 갈아 끼우는 중이면
-    스크립트를 실제로 실행하고 이미 있는 id 요소는 다시 넣지 않는다."""
+    스크립트를 실제로 실행하고 이미 있는 id 요소는 다시 넣지 않는다.
+
+    `add_css`와 같은 경합: 연결 전이라도 첫 응답이 이미 나간 뒤 다시 짓는 화면(CLI로 논문을 지정해
+    띄움)이면 `ui.add_body_html`이 영영 닿지 않는다. 그래서 연결 전이면 본문에 표식 스크립트를 함께
+    싣고, 연결 뒤 실행될 스크립트로도 한 번 더 넣되 표식이 있으면(본문이 닿았으면) 건너뛴다 —
+    어느 쪽으로 닿든 스크립트는 한 번만 돈다."""
     from nicegui import context, ui
 
     client = context.client
-    if not client.has_socket_connection:
-        ui.add_body_html(code)
+    if client.has_socket_connection:
+        client.run_javascript(f"window.__md4AddHtml && window.__md4AddHtml({json.dumps(code)});")
         return
-    client.run_javascript(f"window.__md4AddHtml && window.__md4AddHtml({json.dumps(code)});")
+    key = hashlib.sha1(code.encode("utf-8")).hexdigest()[:16]
+    ui.add_body_html(f'{code}<script>(window.__md4Seen=window.__md4Seen||{{}})["{key}"]=1;</script>')
+    # 연결 전에 부르면 메시지가 쌓였다가 연결 직후 실행된다
+    client.run_javascript(
+        f"(function(k,c){{var s=window.__md4Seen=window.__md4Seen||{{}};"
+        f"if(s[k]||!window.__md4AddHtml)return;s[k]=1;window.__md4AddHtml(c);}})"
+        f"({json.dumps(key)},{json.dumps(code)});"
+    )
