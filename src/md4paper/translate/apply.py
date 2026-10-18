@@ -78,29 +78,35 @@ def _build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict
         do = flags.get(e["id"], True) and e["id"] not in ref_ids
         spans.append(([e["id"]], do, "\n".join(lines[start:end])))
 
-    # 작은 번역 섹션 병합 + 비번역 구간은 그대로 통과
+    # 작은 번역 섹션 병합 + 비번역 구간은 그대로 통과.
+    # 유닛에는 섹션 조각(sections: [(sid, 원문)])도 남긴다 — 캐시를 섹션 단위로도 두기 위해서다.
+    # 병합 경계는 체크 상태에 따라 달라지므로 유닛 해시만으로는 "체크를 풀었다 다시 켠" 섹션을 못 찾는다.
     units: list[dict] = []
     buf_sids: list[str] = []
+    buf_secs: list[tuple[str, str]] = []
     buf_text = ""
 
     def flush() -> None:
-        nonlocal buf_sids, buf_text
+        nonlocal buf_sids, buf_secs, buf_text
         if buf_sids or buf_text.strip():
-            units.append({"sids": buf_sids, "translatable": True, "source": buf_text})
-        buf_sids, buf_text = [], ""
+            units.append({"sids": buf_sids, "translatable": True, "source": buf_text, "sections": buf_secs})
+        buf_sids, buf_secs, buf_text = [], [], ""
 
     for sids, do, text in spans:
         if not do:
             flush()
-            units.append({"sids": sids, "translatable": False, "source": text})
+            units.append({"sids": sids, "translatable": False, "source": text,
+                          "sections": [(sids[0], text)] if sids else []})
             continue
         buf_sids = buf_sids + sids
+        if sids:
+            buf_secs = buf_secs + [(sids[0], text)]
         buf_text = text if not buf_text else buf_text + "\n" + text
         if len(buf_text) >= _MERGE_MIN:
             flush()
     flush()
 
-    # 큰 섹션은 문단 경계로 파트 분할 (같은 sid를 공유)
+    # 큰 섹션은 문단 경계로 파트 분할 (같은 sid를 공유; 파트는 섹션 조각이 아니므로 sections 없음)
     final: list[dict] = []
     for u in units:
         if u["translatable"] and len(u["source"]) > _BIG_SPLIT:
@@ -132,7 +138,7 @@ def stale_section_ids(wd: WorkDir, manifest: Manifest) -> set[str]:
         return set()
     out: set[str] = set()
     for u in _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines()):
-        if u["translatable"] and u["sids"] and hash_text(u["source"]) not in chunks:
+        if u["translatable"] and u["sids"] and _cached_translation(chunks, u) is None:
             out.update(u["sids"])
     return out
 
@@ -147,12 +153,113 @@ def run_glossary(wd: WorkDir, provider: Provider, *, regenerate: bool = True) ->
     return len(gloss.entries)
 
 
+def _split_by_headings(text: str, k: int) -> list[str] | None:
+    """번역된 유닛을 헤더 줄 기준으로 k조각으로 — 섹션 조각 수와 맞을 때만(코드 펜스 안 #는 무시)."""
+    lines = text.split("\n")
+    idx: list[int] = []
+    fence = False
+    for i, ln in enumerate(lines):
+        st = ln.lstrip()
+        if st.startswith("```") or st.startswith("~~~"):
+            fence = not fence
+        elif not fence and re.match(r"^#{1,6}\s", ln):
+            idx.append(i)
+    if len(idx) != k or not idx or idx[0] != 0:
+        return None
+    return ["\n".join(lines[idx[j]:(idx[j + 1] if j + 1 < k else len(lines))]) for j in range(k)]
+
+
+def _cached_translation(cache: dict[str, str], u: dict) -> str | None:
+    """유닛의 보관된 번역 — 유닛 원문 해시로, 없으면 섹션 조각 해시들을 이어 붙여서."""
+    hit = cache.get(hash_text(u["source"]))
+    if hit is not None:
+        return hit
+    secs = u.get("sections") or []
+    if not secs or len(secs) != len(u["sids"]):
+        return None
+    parts: list[str] = []
+    for _sid, text in secs:
+        t = cache.get(hash_text(text))
+        if t is None:
+            return None
+        parts.append(t)
+    return "\n".join(parts)
+
+
+def _remember(cache: dict[str, str], u: dict, translated: str) -> None:
+    """유닛 번역을 캐시에 — 유닛 해시로, 그리고 섹션 조각이 여럿이면 조각별로도."""
+    cache[hash_text(u["source"])] = translated
+    secs = u.get("sections") or []
+    if len(secs) >= 2 and all(sid for sid, _t in secs):
+        pieces = _split_by_headings(translated, len(secs))
+        if pieces is not None:
+            for (_sid, text), piece in zip(secs, pieces):
+                cache[hash_text(text)] = piece
+
+
+def _unit_hashes(u: dict) -> set[str]:
+    return {hash_text(u["source"]), *(hash_text(t) for _s, t in (u.get("sections") or []))}
+
+
+def _cache_keys(korean_style: str, gloss, provider: Provider, manifest: Manifest, system_prompt: str) -> tuple[str, str]:
+    """(현재 키, 옛 키). 캐시는 문체·용어집·모델·헤더/참고문헌 번역 여부가 같을 때만 재사용한다.
+
+    제목·초록·개요(섹션 목록)는 키에 넣지 않는다 — 재변환으로 섹션 제목 하나만 바뀌어도 전부 다시
+    번역하게 되고, 그러면 '체크 안 한 섹션의 기존 번역 유지'도 함께 무너진다. 옛 키(시스템 프롬프트
+    전체)는 기존 캐시를 한 번 더 읽어 주기 위해 남긴다 — 다음 저장부터는 새 키로 쓴다.
+    """
+    tail = f"{provider.model}|headers={manifest.translate_headers}|refs={manifest.translate_references}"
+    return (hash_text(f"v2|{korean_style}|{engine._glossary_block(gloss)}|{tail}"),
+            hash_text(f"{system_prompt}|{tail}"))
+
+
+def _load_cache(wd: WorkDir, keys: tuple[str, ...]) -> dict[str, str]:
+    if not wd.cache_json.exists():
+        return {}
+    try:
+        stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return stored.get("chunks", {}) if stored.get("key") in keys else {}
+
+
+def unticked_without_cache(wd: WorkDir, manifest: Manifest) -> set[str]:
+    """번역 대상에서 뺀 섹션 중, 보관된 번역이 없어 다음 실행 뒤 영어 원문으로 바뀔 섹션 id.
+
+    체크를 풀어도 캐시에 그 원문의 번역이 있으면 run_translate가 그대로 둔다(keep). 없을 때만 영어로
+    돌아가므로, UI가 실행 전에 "이 섹션들은 영어가 됩니다"라고 물을 수 있게 골라 준다. 번역이 아직
+    없으면(첫 번역) 빈 집합 — 잃을 것이 없다. 참고문헌처럼 설정으로 빠진 구간은 체크와 무관하므로 제외.
+    """
+    if not (wd.ko_md.exists() and wd.en_md.exists()):
+        return set()
+    chunks: dict = {}
+    if wd.cache_json.exists():
+        try:
+            chunks = json.loads(wd.cache_json.read_text(encoding="utf-8")).get("chunks", {})
+        except (OSError, json.JSONDecodeError):
+            chunks = {}
+    # 참고문헌은 설정(translate_references)으로 빠지는 것이라 체크와 무관 — 원래도 영어였으니 잃을 게 없다
+    ref_ids = set() if manifest.translate_references else section_ids_by_text(manifest, _REF_KEYWORDS)
+    unticked = {s.id for s in manifest.sections if not s.translate} - ref_ids
+    out: set[str] = set()
+    for u in _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines()):
+        if u["translatable"] or not u["sids"]:
+            continue
+        if any(sid in unticked for sid in u["sids"]) and _cached_translation(chunks, u) is None:
+            out.update(sid for sid in u["sids"] if sid in unticked)
+    return out
+
+
 def run_translate(
-    wd: WorkDir, provider: Provider, korean_style: str, on_progress=None, workers: int | None = None
+    wd: WorkDir, provider: Provider, korean_style: str, on_progress=None, workers: int | None = None,
+    keep_cached: bool = True,
 ) -> dict:
     """번역 실행 → paper.ko.md. 섹션 단위 병렬. on_progress(done, total, status)로 진행 보고.
 
     status: {section_id: 'translating'|'done'|'passthrough'} — 섹션별 진행을 UI에 표시.
+    keep_cached: 번역 대상에서 뺀(체크 해제) 섹션이라도 캐시에 같은 원문의 번역이 있으면 그대로 둔다.
+    "일부만 다시 번역"하려고 나머지를 풀었을 때 그 나머지가 영어로 돌아가 버리는 사고를 막는다.
+    캐시는 덮어쓰지 않고 합치며, 지금 문서에 없는 원문의 항목만 버린다.
     """
     if not wd.en_md.exists():
         raise TranslateError(f"paper.en.md 없음: {wd.en_md}. 먼저 convert를 실행하세요.")
@@ -166,15 +273,8 @@ def run_translate(
     outline = _build_outline(section_map)
     system_prompt = engine.build_system_prompt(korean_style, gloss, title, abstract, outline)
 
-    # 캐시 유효성: 시스템 프롬프트 + 모델 + 헤더/참고문헌 번역 여부가 같아야 재사용
-    cache_key = hash_text(
-        f"{system_prompt}|{provider.model}|headers={manifest.translate_headers}|refs={manifest.translate_references}"
-    )
-    cache: dict[str, str] = {}
-    if wd.cache_json.exists():
-        stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
-        if stored.get("key") == cache_key:
-            cache = stored.get("chunks", {})
+    cache_key, legacy_key = _cache_keys(korean_style, gloss, provider, manifest, system_prompt)
+    cache = _load_cache(wd, (cache_key, legacy_key))
 
     units = _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines())
     total = sum(1 for u in units if u["translatable"])
@@ -189,7 +289,7 @@ def run_translate(
     sid_failed: set[str] = set()
     sid_reasons: dict[str, list[str]] = {}  # 실패 sid → 구조 위반 항목 (UI에 이유 표시)
     status: dict[str, str] = {}
-    counts = {"ok": 0, "retried": 0, "passthrough": 0, "cached": 0}
+    counts = {"ok": 0, "retried": 0, "passthrough": 0, "cached": 0, "kept": 0}
     new_cache: dict[str, str] = {}
     done = [0]
     lock = threading.Lock()
@@ -200,14 +300,20 @@ def run_translate(
 
     def work(u: dict) -> str:
         if not u["translatable"]:
+            kept = _cached_translation(cache, u) if (keep_cached and u["sids"]) else None
+            if kept is not None:  # 체크를 풀었어도 보관된 번역이 있으면 그대로 둔다
+                with lock:
+                    counts["kept"] += 1
+                    _remember(new_cache, u, kept)
+                return kept
             return u["source"]
         with lock:
             for sid in u["sids"]:
                 status.setdefault(sid, "translating")
             report()
-        h = hash_text(u["source"])
-        if h in cache:
-            translated, st, problems = cache[h], "cached", []
+        hit = _cached_translation(cache, u)
+        if hit is not None:
+            translated, st, problems = hit, "cached", []
         else:
             translated, st, problems = engine.translate_with_retry(
                 provider, system_prompt, u["source"],
@@ -216,7 +322,7 @@ def run_translate(
         with lock:
             counts[st] += 1
             if st != "passthrough":
-                new_cache[h] = translated  # 실패(passthrough)는 캐시하지 않음 → 재실행 시 그 섹션만 재시도
+                _remember(new_cache, u, translated)  # 실패(passthrough)는 캐시하지 않음 → 재실행 시 그 섹션만 재시도
             done[0] += 1
             for sid in u["sids"]:
                 sid_done[sid] += 1
@@ -247,8 +353,12 @@ def run_translate(
     ko = postprocess.enforce_keep(ko, gloss)  # keep(원어 유지) 용어가 번역됐으면 영어로 되돌림
     wd.out.mkdir(parents=True, exist_ok=True)
     wd.ko_md.write_text(ko, encoding="utf-8")
+    # 캐시는 합친다 — 이번에 안 쓴 항목도 지금 문서에 그 원문이 남아 있으면 보관(체크를 풀었다가
+    # 다시 켜도 비용 없이 돌아온다). 원문이 사라진 항목만 버린다.
+    current: set[str] = set().union(*(_unit_hashes(u) for u in units)) if units else set()
+    merged = {h: t for h, t in {**cache, **new_cache}.items() if h in current}
     wd.cache_json.write_text(
-        json.dumps({"key": cache_key, "chunks": new_cache}, ensure_ascii=False, indent=2),
+        json.dumps({"key": cache_key, "chunks": merged}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 

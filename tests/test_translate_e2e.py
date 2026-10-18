@@ -313,3 +313,39 @@ def test_stale_sections_track_source_changes(converted):
 
     run_translate(converted, _fake(), "해라체")  # 다시 번역하면 그 유닛만 새로 돌고 낡음은 사라진다
     assert stale_section_ids(converted, m) == set()
+
+
+def test_unticked_sections_keep_existing_translation(converted):
+    """일부만 다시 번역하려고 나머지 체크를 풀어도, 이미 번역해 둔 섹션은 영어로 돌아가지 않는다."""
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate.apply import unticked_without_cache
+    from md4paper.ui.controller import UIController
+
+    def mark(system: str, user: str) -> str:  # 헤더가 아닌 본문 줄마다 표식 — 구조는 그대로
+        return "\n".join(ln + " [KO]" if ln.strip() and not ln.startswith("#") else ln
+                         for ln in _body(user).split("\n"))
+
+    fake = FakeProvider(complete_fn=mark, parse_fn=lambda s, u, sc: FAKE_GLOSSARY, model="fake")
+    run_translate(converted, fake, "해라체")
+    ko_all = converted.ko_md.read_text(encoding="utf-8")
+    n_all = ko_all.count("[KO]")
+    assert n_all >= 2
+
+    ctrl = UIController(converted)
+    ctrl.set_all_translate(False)
+    intro = next(s for s in ctrl.translatable_sections() if "Introduction" in s.text)
+    intro.translate = True
+    manifest_io.save(ctrl.manifest, converted)
+    m = manifest_io.load(converted)
+    assert unticked_without_cache(converted, m) == set()  # 보관된 번역이 있으니 잃을 섹션이 없다
+
+    summary = run_translate(converted, fake, "해라체")
+    ko_again = converted.ko_md.read_text(encoding="utf-8")
+    assert ko_again.count("[KO]") == n_all  # 체크를 푼 섹션의 번역이 그대로 남았다
+    assert summary["kept"] >= 1
+    assert summary["ok"] == 0  # 전부 캐시(선택 섹션)와 보관분(나머지)으로 — 새 호출 없음
+
+    # 캐시가 통째로 사라진 상태라면 → 풀린 섹션은 영어로 바뀔 것이고, 그 섹션들이 경고 대상에 잡힌다
+    converted.cache_json.unlink()
+    losing = unticked_without_cache(converted, m)
+    assert losing and intro.id not in losing
