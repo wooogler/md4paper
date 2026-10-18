@@ -26,6 +26,8 @@ from md4paper.workdir import WorkDir, paper_title, set_pinned, set_project
 _KSTYLE = {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)", "해요체": "해요체 (~해요 · 부드럽게)"}
 # 마크다운 내보내기 형식 — 다운로드 zip에 적용 (설명 없이 이름만)
 _EXPORT_TARGET = {"universal": "범용", "notion": "Notion", "obsidian": "Obsidian"}
+# 목차 제목 언어 — 영어만 / 한국어만 / 둘 다(두 줄)
+_TOC_LANG = {"en": "영어", "ko": "한국어", "both": "병기"}
 # AI 서비스 — 비전문가용 이름 + 키 형식 힌트
 _PROVIDER_NAME = {
     "openai": "OpenAI (ChatGPT 계열)",
@@ -2576,15 +2578,27 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                    "?.scrollIntoView({behavior:'smooth', block:'start'})")
         return js
 
+    def toc_lang() -> str:
+        """목차 제목 언어 — 'en' 영어만 / 'ko' 한국어만 / 'both' 병기. 전역 설정([ui].toc_lang)에 기억."""
+        v = str(config.load_config().get("ui", {}).get("toc_lang", "both"))
+        return v if v in _TOC_LANG else "both"
+
+    def set_toc_lang(v: str) -> None:
+        config.set_section_value("ui", "toc_lang", v)
+        toc_panel.refresh()
+
     @ui.refreshable
     def toc_panel() -> None:
-        """왼쪽 패널의 목차 — 원문 제목과 (정렬된 번역이 있으면) 한국어 제목을 함께.
+        """왼쪽 패널의 목차 — 제목 언어는 영어 / 한국어 / 병기 중 하나(번역이 있을 때만 고를 수 있다).
 
-        한 줄에 둘을 다 쓰면 좁은 패널에서 잘리므로 두 줄로 쌓는다: 지금 보는 언어가 윗줄(진하게),
-        반대쪽이 아랫줄(옅게). 헤더를 번역하지 않아 둘이 같으면 한 줄만.
+        병기는 두 줄로 쌓는다(한 줄에 둘을 다 쓰면 좁은 패널에서 잘린다): 지금 보는 언어가 윗줄(진하게),
+        반대쪽이 아랫줄(옅게). 헤더를 번역하지 않아 둘이 같으면 한 줄만. 한국어 제목이 없는 섹션은
+        어느 모드든 영어로 보여 준다(빈 줄을 두지 않는다).
         """
         info = layout_rows()
         rows = info["rows"]
+        has_ko_titles = info["aligned"] and bool(info["ko"])
+        mode = toc_lang() if has_ko_titles else "en"
         ko_first = viewer_state["ko"] and not viewer_state["en"] and info["aligned"]
         entries = []
         for k, (_enb, kob, head) in enumerate(rows):
@@ -2593,11 +2607,23 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ko_head = _heading_of(kob) if (info["aligned"] and kob) else None
             ko_text = ko_head[1] if ko_head and _head_key(ko_head[1]) != _head_key(head[1]) else None
             entries.append((head[0], head[1], ko_text, k))
+        with ui.row().classes("items-center w-full no-wrap gap-2"):
+            ui.label("목차").classes("md4-panel-title")
+            ui.space()
+            if has_ko_titles:
+                ui.toggle(_TOC_LANG, value=mode, on_change=lambda e: set_toc_lang(e.value)) \
+                    .props("dense no-caps unelevated size=sm toggle-color=primary color=grey-3 text-color=grey-8") \
+                    .classes("conv-viewtoggle md4-toclang").tooltip("목차 제목을 어느 언어로 보일지")
         with ui.element("div").classes("vtoc"):
             if not entries:
                 ui.label("섹션 없음").classes("text-xs text-gray-400 px-2")
             for level, text, ko_text, k in entries:
-                first, second = (ko_text, text) if (ko_first and ko_text) else (text, ko_text)
+                if mode == "ko":
+                    first, second = (ko_text or text), None
+                elif mode == "en":
+                    first, second = text, None
+                else:
+                    first, second = (ko_text, text) if (ko_first and ko_text) else (text, ko_text)
                 item = ui.element("div").classes("vtoc-item").style(
                     f"padding-left:{8 + (max(level, 1) - 1) * 12}px")
                 with item:
@@ -3996,8 +4022,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 with ui.column().classes("md4-panel md4-scroll"):
                     # ---------- 목차 ----------
                     with ui.column().classes("w-full gap-1") as box:
-                        ui.label("목차").classes("md4-panel-title")
-                        toc_panel()
+                        toc_panel()  # 제목 줄(목차 + 언어 선택)까지 안에서 그린다
                     panel_state["boxes"]["toc"] = box
 
                     # ---------- 구조 (옛 변환 탭 왼쪽 열) ----------
