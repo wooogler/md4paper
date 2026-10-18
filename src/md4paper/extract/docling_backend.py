@@ -58,16 +58,17 @@ def _split_author_block(md: str) -> str:
 
 
 # 이어지는 문단 재결합용 — 앞 블록이 종결부호 없이 letter/숫자/쉼표로 끝(문장 미완),
-# 뒤 블록이 소문자/여는 괄호로 시작(= 앞 문장의 연속).
+# 뒤 블록이 소문자/여는 괄호로 시작(= 앞 문장의 연속). 시작 글자의 대소문자는 유니코드
+# 범주로 본다 — 수식 기호가 이탤릭 글꼴 문자(𝑀 U+1D440·𝑝 U+1D45D)나 그리스 문자(Δ)로
+# 나오는 통계 문장은 "(… vs. Baseline" / "𝑀 = 3.22, 𝑝 = .017)"처럼 쪽 경계에서 끊기는데,
+# ASCII [A-Z]만 보면 이 이어짐을 못 알아본다.
 _CONT_END_RE = re.compile(r"[A-Za-z0-9,]$")
-_CONT_START_RE = re.compile(r"^[a-z(]")
 # 대문자로 이어지는 경우는 앞 블록에 **닫히지 않은 여는 괄호**가 남아 있을 때만 허용한다.
 # 약어를 풀어 쓰는 삽입구("… we present NIRVANA (Naturalistic Interactions and" /
 # "Replay of Voluntary …)")는 고유명사라 대문자로 시작한다. 괄호가 열린 채로 끝났다는 사실
 # 자체가 문장이 안 끝났다는 증거라, '소문자로 시작' 만큼 강한 근거가 된다.
 # (대문자 시작을 무조건 허용하면, 마침표를 잃은 평범한 문단 뒤의 **다른** 문단까지 삼킨다 —
 #  같은 단에서 바로 아래 이어지는 두 문단은 기하 게이트를 그대로 통과하기 때문이다.)
-_CONT_START_UPPER_RE = re.compile(r"^[A-Z]")
 _ORDERED_LI_RE = re.compile(r"^\d+[.)]\s")
 
 
@@ -84,9 +85,10 @@ def _open_paren(text: str) -> bool:
 
 def _continues(prev: str, nxt: str) -> bool:
     """뒤 블록이 앞 블록 문장의 연속으로 보이는지 (텍스트 근거만 — 기하 확인은 호출부에서)."""
-    if _CONT_START_RE.match(nxt):
+    head = nxt[:1]
+    if head == "(" or head.islower():
         return True
-    return bool(_CONT_START_UPPER_RE.match(nxt)) and _open_paren(prev)
+    return head.isupper() and _open_paren(prev)
 _NON_PROSE_START = ("#", "-", "*", "+", ">", "|", "!", "```", "~~~", "<", "$$")
 # 앞 블록이 이 길이 이상일 때만 결합 → 저자명·소속 같은 짧은 라인 오결합 방지
 # (진짜 컬럼 경계에서 끊긴 문단 조각은 컬럼이 거의 꽉 차 훨씬 길다).

@@ -14,6 +14,7 @@ from docling_core.types.doc import (  # noqa: E402
     DocItemLabel,
     DoclingDocument,
     ProvenanceItem,
+    TableData,
 )
 from docling_core.types.doc.document import PageItem, Size  # noqa: E402
 
@@ -93,13 +94,60 @@ def test_correct_page_is_untouched():
     assert [r.cref for r in d.body.children] == before
 
 
-def test_single_column_page_is_untouched():
+def test_single_column_page_in_order_is_untouched():
     d = _doc()
     _add(d, "TITLE OF THE PAPER", [(1, (60.0, 84.0, 550.0, 110.0), (0, 18))],
          DocItemLabel.SECTION_HEADER)
-    _add(d, "B " + "one wide column of body text. " * 6, [(1, (60.0, 300.0, 550.0, 360.0), (0, 182))])
     _add(d, "A " + "another wide paragraph here. " * 6, [(1, (60.0, 130.0, 550.0, 190.0), (0, 176))])
-    assert repair_reading_order(d)["reordered_pages"] == []
+    _add(d, "B " + "one wide column of body text. " * 6, [(1, (60.0, 300.0, 550.0, 360.0), (0, 182))])
+    before = [r.cref for r in d.body.children]
+    meta = repair_reading_order(d)
+    assert meta["reordered_pages"] == [] and meta["reading_order_suspect"] == []
+    assert [r.cref for r in d.body.children] == before
+
+
+def _single_column_page_with_bottom_paragraph_first() -> DoclingDocument:
+    """1단 ACM 투고 원고 14쪽 실측: 새 절의 첫 문단(쪽 맨 아래, 다음 쪽으로 이어짐)을
+    docling이 그 쪽 맨 앞 — 표와 앞 절 본문보다 먼저 — 내보냈다."""
+    d = _doc()
+    _add(d, "P6 As shown in Table 1, participants demonstrated a significantly more accurate "
+            "understanding of the paper (Comprehension: Peerception M = 3.66 vs. Baseline",
+         [(1, (84.0, 633.0, 539.0, 666.0), (0, 157))])
+    table = d.add_table(data=TableData(num_rows=1, num_cols=1, table_cells=[]),
+                        prov=_prov(1, (130.0, 126.0, 518.0, 330.0), (0, 0)))
+    d.add_text(label=DocItemLabel.CAPTION, text="Table 1. Results of the evaluation.",
+               prov=_prov(1, (110.0, 97.0, 539.0, 114.0), (0, 35)), parent=table)
+    _add(d, "P1 " + "quantitative analysis body text. " * 8, [(1, (110.0, 347.0, 540.0, 423.0), (0, 267))])
+    _add(d, "P2 " + "qualitative analysis body text. " * 8, [(1, (110.0, 437.0, 540.0, 513.0), (0, 259))])
+    _add(d, "P3 " + "screen recording body text. " * 8, [(1, (110.0, 519.0, 540.0, 582.0), (0, 227))])
+    _add(d, "H1 6 Results", [(1, (110.0, 599.0, 153.0, 607.0), (0, 12))], DocItemLabel.SECTION_HEADER)
+    _add(d, "H2 6.1 Quantitative Results", [(1, (110.0, 616.0, 214.0, 624.0), (0, 27))],
+         DocItemLabel.SECTION_HEADER)
+    return d
+
+
+def test_single_column_bottom_paragraph_emitted_first_is_moved_back():
+    """1단 쪽에서 쪽 아래 문단이 맨 앞에 나오면 위→아래 순서로 되돌린다 — 표·앞 절·절 제목 뒤로."""
+    d = _single_column_page_with_bottom_paragraph_first()
+    meta = repair_reading_order(d)
+    assert meta["reordered_pages"] == [1]
+    assert meta["reading_order"][1]["violations"] == ["vertical"]
+    heads = [getattr(ref.resolve(d), "text", "")[:2] for ref in d.body.children]
+    assert heads == ["", "P1", "P2", "P3", "H1", "H2", "P6"]  # ""는 표
+
+
+def test_single_column_float_emitted_early_is_not_a_violation():
+    """그림이 앞 쪽에서 이어지는 문단보다 먼저 나오는 것은 docling의 정당한 선택 — 1단에서도 손대지 않는다."""
+    d = _doc()
+    d.add_picture(prov=_prov(1, (52.0, 189.0, 540.0, 390.0), (0, 0)))
+    _add(d, "C1 " + "continuation of the previous page paragraph. " * 5,
+         [(1, (73.0, 99.0, 540.0, 150.0), (0, 227))])
+    _add(d, "Fig. 8. Mean ratings.", [(1, (73.0, 398.0, 540.0, 420.0), (0, 21))], DocItemLabel.CAPTION)
+    _add(d, "B1 " + "body paragraph below the figure. " * 6, [(1, (73.0, 442.0, 540.0, 540.0), (0, 201))])
+    before = [r.cref for r in d.body.children]
+    meta = repair_reading_order(d)
+    assert meta["reordered_pages"] == [] and meta["reading_order_suspect"] == []
+    assert [r.cref for r in d.body.children] == before
 
 
 # --- 단을 가로지르는 아이템 분할 --------------------------------------------
