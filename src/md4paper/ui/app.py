@@ -3413,24 +3413,46 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     _PANELS = (("toc", "목차", "toc"), ("structure", "구조", "account_tree"),
                ("translate", "번역", "translate"), ("settings", "설정", "tune"))
     root_key = str(ctrl.wd.root.resolve())
-    panel_state: dict = {"mode": None, "splitter": None, "width": 30, "boxes": {}}
+    panel_state: dict = {"mode": None, "splitter": None, "boxes": {}}
+    # 패널 폭(%)은 모드마다 따로 — 목차는 한 줄짜리 제목 목록이라 좁게, 섹션 트리·설정은 넓게 시작한다.
+    # 드래그한 폭은 모드별로 전역 설정([ui].panel_width_<모드>)에 기억해 다른 논문·다음 실행에도 그대로.
+    _DEFAULT_PANEL_W = {"toc": 20, "structure": 30, "translate": 30, "settings": 30}
+
+    def panel_width(mode: str) -> float:
+        v = config.load_config().get("ui", {}).get(f"panel_width_{mode}")
+        return float(v) if isinstance(v, (int, float)) and 8 <= v <= 60 else _DEFAULT_PANEL_W.get(mode, 30)
+
+    _width_save: dict = {"timer": None, "pending": {}}
+
+    def remember_width(mode: str, value: float) -> None:
+        """드래그 중엔 값이 쏟아지므로 모아 두었다가 잠잠해지면 한 번만 파일에 쓴다."""
+        _width_save["pending"][mode] = int(round(value))
+        t = _width_save["timer"]
+        if t is not None:
+            t.cancel()
+
+        def flush() -> None:
+            _width_save["timer"] = None
+            for k, v in _width_save["pending"].items():
+                config.set_section_value("ui", f"panel_width_{k}", v)
+            _width_save["pending"].clear()
+
+        _width_save["timer"] = ui.timer(0.6, flush, once=True)
 
     def set_panel(mode: str | None, toggle: bool = True) -> None:
         """패널 모드 바꾸기. toggle이면 이미 그 모드일 때 접는다(None = 접힘). 논문별로 기억한다."""
         if toggle and mode == panel_state["mode"]:
             mode = None
+        prev = panel_state["mode"]
         panel_state["mode"] = mode
         state.setdefault("panel_by_root", {})[root_key] = mode
         for key, box in panel_state["boxes"].items():
             box.set_visibility(key == mode)
         sp = panel_state["splitter"]
         if sp is not None:
-            if mode is None:
-                if sp.value > 1:
-                    panel_state["width"] = sp.value
-                sp.value = 0
-            elif sp.value <= 1:
-                sp.value = panel_state["width"] or 30
+            if prev is not None and sp.value > 1:
+                remember_width(prev, sp.value)
+            sp.value = 0 if mode is None else panel_width(mode)
         rail.refresh()
 
     def open_side() -> None:
@@ -4004,9 +4026,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     def _on_split(e) -> None:  # noqa: ANN001 — 패널 폭 드래그. 끝까지 밀어 닫으면 레일도 '접힘'으로
         if e.value > 1:
-            panel_state["width"] = e.value
             if panel_state["mode"] is None:  # 닫힌 패널을 끌어 열었다 → 마지막 모드로 (없으면 목차)
                 set_panel(state.get("panel_by_root", {}).get(root_key) or "toc", toggle=False)
+            else:
+                remember_width(panel_state["mode"], e.value)
         elif panel_state["mode"] is not None:
             panel_state["mode"] = None
             for box in panel_state["boxes"].values():
@@ -4020,7 +4043,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     with ui.row().classes("w-full no-wrap gap-0 md4-steps md4-body"):
         with ui.column().classes("md4-rail gap-0"):
             rail()
-        with ui.splitter(value=panel_state["width"] if panel_state["mode"] else 0, limits=(0, 60)) \
+        with ui.splitter(value=panel_width(panel_state["mode"]) if panel_state["mode"] else 0, limits=(0, 60)) \
                 .classes("md4-split").style("flex:1 1 auto; min-width:0; height:100%") as sp:
             panel_state["splitter"] = sp
             sp.on_value_change(_on_split)
