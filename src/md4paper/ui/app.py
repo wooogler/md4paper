@@ -218,6 +218,12 @@ sup.md-fn a:hover { text-decoration: underline; }
 .vcol-handle:hover::after { background: #2383e2; width: 2px; }
 .vpdf { height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px; background: #f4f3f1; }
 .vpane { height: 100%; overflow-y: auto; overscroll-behavior: contain; }  /* 정렬 불가 시 단일 마크다운 패널 */
+/* 한 패널만 보일 때(원문만·번역만·PDF만) 본문이 창 폭을 다 먹으면 한 줄이 너무 길어 읽기 어렵다 →
+   최대 폭(--md4-maxw, 캔버스 열에 인라인)으로 묶고 가운데 둔다. 두 컬럼(원문|번역)이나 PDF 나란히면
+   각 컬럼이 이미 좁으므로 그대로. 폭은 툴바의 '본문 폭' 메뉴로 조절·기억한다. */
+.sbs-grid:not(.sbs-two) > .sbs-cell { width: 100%; max-width: var(--md4-maxw, 820px); justify-self: center; }
+.vpane-in { max-width: var(--md4-maxw, 820px); margin: 0 auto; }
+.vpdf img { max-width: var(--md4-maxw, 900px) !important; }
 /* 캔버스 편집 모드의 프리뷰 스크롤 패널 (프리뷰↔PDF 싱크 컨테이너).
    width:100%가 필요하다 — splitter 패널이 flex-column이라 이 상자가 내용의 max-content(844px)로
    잡혀 611px 칸을 넘고 오른쪽이 잘렸다('마크다운 + PDF'에서도 매 줄 끝이 잘리던 기존 버그). */
@@ -2825,7 +2831,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             imgs = "".join(
                 f'<img id="pdfpage-{i}" src="/pdfpage/{tok}/{i}" loading="lazy" title="p.{i + 1}" '
                 f'width="{round(w)}" height="{round(h)}" '
-                'style="width:100%;height:auto;display:block;margin:0 auto 10px;max-width:900px;'
+                'style="width:100%;height:auto;display:block;margin:0 auto 10px;max-width:var(--md4-maxw,900px);'
                 'border:1px solid #e0e0e0;border-radius:6px"/>'
                 for i, (w, h) in enumerate(sizes)
             )
@@ -2884,9 +2890,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     ui.run_javascript(_ENKO_DRAG_JS)
             else:
                 # 정렬 실패 + 번역만 → 단일 패널 (여기서도 하이라이트·메모는 그대로 된다)
-                with ui.element("div").classes("vpane md-preview anno-scope").style(
+                with ui.element("div").classes("vpane anno-scope").style(
                         "padding:1px 22px 8px").props("data-row=0 data-side=ko"):
-                    ui.markdown(info["ko"], extras=_md)
+                    with ui.element("div").classes("vpane-in md-preview"):
+                        ui.markdown(info["ko"], extras=_md)
 
         with ui.element("div").classes("vshell"), ui.element("div").classes("vmain"):
             if (show_en or show_ko) and show_pdf:
@@ -2960,9 +2967,54 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if key in ("en", "ko"):
             toc_panel.refresh()  # 어느 언어가 윗줄인지 바뀐다
 
+    def body_width() -> int:
+        """한 패널만 볼 때의 본문 최대 폭(px). 0 = 제한 없음. 전역 설정([ui].body_width)에 기억."""
+        v = config.load_config().get("ui", {}).get("body_width", 820)
+        return int(v) if isinstance(v, (int, float)) and (v == 0 or 480 <= v <= 1600) else 820
+
+    def body_width_css() -> str:
+        w = body_width()
+        return f"--md4-maxw:{w}px" if w else "--md4-maxw:none"
+
+    def set_body_width(w: int) -> None:
+        config.set_section_value("ui", "body_width", int(w))
+        # 다시 그리지 않고 변수만 바꾼다 — 읽던 자리·하이라이트가 흔들리지 않게
+        ui.run_javascript("document.querySelector('.md4-canvascol')?.style.setProperty('--md4-maxw',"
+                          + json.dumps(f"{int(w)}px" if w else "none") + ")")
+
+    def body_width_menu() -> None:
+        """툴바의 '본문 폭' 단추 — 슬라이더로 한 패널 본문의 최대 폭을, 또는 제한 없음."""
+        cur = body_width()
+        btn = ui.button(icon="settings_ethernet").props("flat dense round color=grey-7") \
+            .tooltip("본문 폭 — 원문·번역·PDF 중 하나만 볼 때 한 줄이 너무 길지 않게 최대 폭을 정합니다")
+        with btn, ui.menu().props("anchor='bottom left' self='top left'").classes("md4-widthmenu"):
+            with ui.column().classes("q-pa-md gap-1").style("width:260px"):
+                ui.label("본문 최대 폭 (한 패널만 볼 때)").classes("text-xs text-gray-500")
+                lbl = ui.label(f"{cur}px" if cur else "제한 없음").classes("text-sm font-medium")
+                sl = ui.slider(min=560, max=1400, step=20, value=cur or 820)
+                full = ui.switch("제한 없음 (창 폭 전체)", value=cur == 0).props("dense")
+
+                def on_slide(e) -> None:  # noqa: ANN001
+                    if full.value:
+                        full.value = False  # 슬라이더를 만지면 제한이 다시 켜진다
+                    lbl.text = f"{int(e.value)}px"
+                    set_body_width(int(e.value))
+
+                def on_full(e) -> None:  # noqa: ANN001
+                    if e.value:
+                        lbl.text = "제한 없음"
+                        set_body_width(0)
+                    else:
+                        lbl.text = f"{int(sl.value)}px"
+                        set_body_width(int(sl.value))
+
+                sl.on_value_change(on_slide)
+                full.on_value_change(on_full)
+                cap("두 컬럼을 나란히 보거나 PDF를 옆에 둘 때는 적용되지 않습니다.")
+
     @ui.refreshable
     def viewer_toolbar() -> None:
-        """캔버스 위 한 줄 — 무엇을 볼지(원문·번역·PDF), 편집, 메모·챗, 내보내기."""
+        """캔버스 위 한 줄 — 무엇을 볼지(원문·번역·PDF), 편집, 본문 폭, 메모·챗, 내보내기."""
         has_ko = bool(ctrl.ko_markdown())
         has_pdf = ctrl.pdf_page_count() > 0
 
@@ -2995,6 +3047,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     "flat dense round " + ("color=primary" if viewer_state["stip"] else "color=grey-6")) \
                     .tooltip("문장에 마우스를 올리면 " + ("번역" if viewer_state["en"] else "원문")
                              + " 문장 보기 " + ("(켜짐)" if viewer_state["stip"] else "(꺼짐)"))
+            body_width_menu()
             ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
@@ -4113,7 +4166,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     for key, box in panel_state["boxes"].items():
                         box.set_visibility(key == panel_state["mode"])
             with sp.after:
-                with ui.column().classes("p-3 w-full gap-2 md4-canvascol").style("height:100%"):
+                with ui.column().classes("p-3 w-full gap-2 md4-canvascol").style("height:100%; " + body_width_css()):
                     viewer_toolbar()
                     canvas()
 
