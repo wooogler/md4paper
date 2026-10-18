@@ -149,6 +149,29 @@ def test_join_broken_paragraphs_joins_unclosed_parenthesis_across_pages():
         md, geom)
 
 
+STAT_TAIL = (
+    "As shown in Table 1, participants demonstrated a significantly more accurate and complete "
+    "understanding of the paper with Peerception than with the baseline (Comprehension: "
+    "Peerception 𝑀 = 3.66 vs. Baseline")
+STAT_CONT = "𝑀 = 3.22, 𝑝 = .017). They identified more problems and described them more specifically."
+
+
+def test_join_broken_paragraphs_joins_math_italic_letter_across_pages():
+    """통계 문장이 쪽 경계에서 끊기면 뒤 블록이 수식 이탤릭 글자(𝑀 U+1D440)로 시작한다 —
+    ASCII 대문자는 아니지만 유니코드 대문자이고 앞 블록의 괄호가 열려 있으니 이어짐이다."""
+    md = f"{STAT_TAIL}\n\n{STAT_CONT}\n"
+    geom = _geom([_g(STAT_TAIL, 0, 70.0, BAND[1], page=1),
+                  _g(STAT_CONT, 0, BAND[0], 200.0, page=2)], n_cols=1, pages=(1, 2))
+    assert "vs. Baseline 𝑀 = 3.22, 𝑝 = .017). They" in _join_broken_paragraphs(md, geom)
+    # 소문자 쪽(𝑝)은 괄호가 닫혀 있어도 이어짐 — ASCII 소문자와 같은 대접
+    tail = STAT_TAIL.replace("(Comprehension: ", "Comprehension: ")
+    md = f"{tail}\n\n𝑝 = .017). They identified more problems.\n"
+    geom = _geom([_g(tail, 0, 70.0, BAND[1], page=1),
+                  _g("𝑝 = .017). They identified more problems.", 0, BAND[0], 200.0, page=2)],
+                 n_cols=1, pages=(1, 2))
+    assert "Baseline 𝑝 = .017). They" in _join_broken_paragraphs(md, geom)
+
+
 def test_join_broken_paragraphs_refuses_uppercase_without_open_parenthesis():
     """괄호가 닫혀 있으면 대문자 시작은 이어짐의 근거가 못 된다 — 다음 문단을 삼키지 않는다."""
     tail = PAREN_TAIL.replace("(Naturalistic Interactions and", "a new dataset and")

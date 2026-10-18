@@ -2,8 +2,10 @@
 
 Docling의 규칙 기반 reading-order 예측기는 첫 페이지처럼 조판이 복잡한 쪽에서 **오른쪽 단을
 왼쪽 단보다 먼저** 내보내거나, 여러 열로 짜인 저자 그리드를 열 우선(column-major)으로 훑는다.
-그 결과 초록이 "1 Introduction" 뒤로 밀리고 저자 순서가 뒤바뀐다. 이 모듈은 prov bbox만 보고
-그 쪽의 **단(column) 구조**를 스스로 세운 뒤, 위반이 증명된 쪽에 한해 순서를 되돌린다.
+그 결과 초록이 "1 Introduction" 뒤로 밀리고 저자 순서가 뒤바뀐다. 1단 조판에서도 쪽 **맨 아래**
+문단(다음 쪽으로 이어지는 것)을 그 쪽 맨 앞에 내보내는 일이 있다 — 실측(ACM 투고 원고): 새 절의
+첫 문단이 앞 절의 표·본문보다 앞서 나와 절 제목과 떨어졌다. 이 모듈은 prov bbox만 보고 그 쪽의
+**단(column) 구조**를 스스로 세운 뒤(1단이면 지면 폭 하나), 위반이 증명된 쪽에 한해 순서를 되돌린다.
 
 설계 원칙(PLAN.md §1 "확신 없으면 추측하지 않는다"):
 - 위반이 **증명되지 않은 쪽은 손대지 않는다** — 출력이 바이트 단위로 종전과 같다.
@@ -330,7 +332,9 @@ def _assign_keys(frags: list[_Frag], page: int) -> dict | None:
         # 아니라 단 사이 여백을 가로지른 조각이 좌우 단을 붙인 것이다 — 판정 실패로 올린다.
         if cols and cols[0][1] - cols[0][0] >= _COLLAPSE_MIN * text_w:
             raise _Unjudged("column-collapse")
-        return None  # 1단 조판 — 되돌릴 순서가 없다
+        # 1단 조판 — 단 순서는 없지만 위→아래 순서는 있다. 지면 폭 하나를 단으로 삼으면
+        # 전폭 블록이 저마다 띠가 되어 키가 곧 세로 순서가 된다(위반 판정은 _violation의 vertical).
+        cols = [(text_l, text_r)]
 
     # 단 폭을 채우는 조각(본문 흐름)과 그러지 못하는 조각(저자 셀·짧은 제목)을 갈라 둔다.
     # 한 아이템의 prov가 이 둘에 걸치면 같은 흐름이 아니므로 되붙이지 않는다.
@@ -455,13 +459,18 @@ def _limit_splits(frags: list[_Frag], page: int) -> None:
             f.key = (*f.key, 0)
 
 
-def _violation(frags: list[_Frag], page: int, text_w: float) -> list[str]:
+def _violation(frags: list[_Frag], page: int, text_w: float, single: bool = False) -> list[str]:
     """docling이 실제로 낸 순서가 정경 순서를 어겼는지. 어긴 종류 목록을 돌려준다.
 
     - column: **본문 폭** 조각들이 오른쪽 단을 먼저 훑고 왼쪽 단으로 되돌아왔다.
       짧은 조각((a)/(b) 부그림 라벨 등)은 판정에서 뺀다 — 본문이 이미 L→R인 쪽은 손대지 않는다.
       전폭 블록(전폭 그림 등)도 뺀다 — 앞 쪽에서 이어지는 문단을 그림보다 먼저 내보내는 것은
       docling의 정당한 선택이라 위반으로 볼 수 없다.
+    - vertical (1단 쪽): 본문 폭 블록·섹션 제목이 위→아래 띠 순서를 거슬러 나왔다. 1단에서는
+      본문 문단이 전부 전폭이라 column 판정에서 빠지므로 전폭 블록을 **포함해** 본다. 그림·표
+      (플로트)와 짧은 낱개 조각(쪽번호 잔재·부그림 라벨)은 여기서도 뺀다 — 플로트가 앞 쪽에서
+      이어지는 문단보다 먼저 나오는 것은 위반이 아니고, 짧은 조각은 자리가 흐름의 증거가 못 된다.
+      섹션 제목은 짧아도 본문 흐름의 이정표라 넣는다(실측: '3.7 …'이 '3.6 …'보다 앞서 나온 쪽).
     - grid: 저자 그리드를 행 우선이 아니라 열 우선으로 훑었다. 행 묶음이 갈릴 수 있는
       배치(셀 하나가 여러 줄짜리 한 아이템)에서는 간격으로 묶은 행과 겹침으로만 묶은 행이
       **둘 다** 위반이라고 할 때만 인정한다 — 한쪽만 위반이면 이미 옳은 쪽을 뒤집게 된다.
@@ -478,12 +487,21 @@ def _violation(frags: list[_Frag], page: int, text_w: float) -> list[str]:
 
     # 한 아이템이 여러 조각으로 앞질러 나가는 것(단 이어짐)은 위반이 아니므로 **단위별 최소 키**로 본다.
     kinds: list[str] = []
-    wide = sequence(lambda f: f.key[2:5],
-                    lambda f: (f.label not in _SKIP_JUDGE and f.label not in _FLOAT_LABELS
-                               and not f.sep and f.key[3] != 1
-                               and f.width >= _WIDE_MIN * text_w))
-    if any(a > b for a, b in zip(wide, wide[1:])):
-        kinds.append("column")
+    if single:
+        flow = sequence(lambda f: f.key[2:5],
+                        lambda f: (f.label not in _SKIP_JUDGE and f.label not in _FLOAT_LABELS
+                                   and f.label not in _EDGE_LABELS and f.key[3] != 1
+                                   and (f.label == "section_header"
+                                        or f.width >= _WIDE_MIN * text_w)))
+        if any(a > b for a, b in zip(flow, flow[1:])):
+            kinds.append("vertical")
+    else:
+        wide = sequence(lambda f: f.key[2:5],
+                        lambda f: (f.label not in _SKIP_JUDGE and f.label not in _FLOAT_LABELS
+                                   and not f.sep and f.key[3] != 1
+                                   and f.width >= _WIDE_MIN * text_w))
+        if any(a > b for a, b in zip(wide, wide[1:])):
+            kinds.append("column")
 
     def broken(pick) -> bool:  # noqa: ANN001
         seq = sequence(pick, lambda f: f.key[3] == 1)
@@ -593,7 +611,7 @@ def _repair_page(document, parent, page: int) -> dict | None:  # noqa: ANN001,C9
         return None
     own = [f for f in frags if f.page == page and f.label not in _EDGE_LABELS]
     text_w = max(f.right for f in own) - min(f.left for f in own)
-    kinds = _violation(frags, page, text_w)
+    kinds = _violation(frags, page, text_w, single=info["columns"] == 1)
     if not kinds:
         return None
 
