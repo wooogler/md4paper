@@ -529,6 +529,12 @@ class UIController:
         self.clear_manual_edit_ko()  # ko.md를 번역 결과로 다시 썼다 — 직접 고친 흔적은 이제 없다
         return summary
 
+    def stale_sections(self) -> set[str]:
+        """원문이 바뀌어 다음 번역 실행 때 다시 번역될 섹션 id (번역 패널의 '원문 바뀜' 표시)."""
+        from md4paper.translate.apply import stale_section_ids
+
+        return stale_section_ids(self.wd, self.manifest)
+
     def translate_model(self) -> str:
         """번역 모델 드롭다운의 기본값 'provider/model' — 이 논문을 마지막에 번역한 모델, 없으면 전역 기본."""
         from md4paper import config, pipeline

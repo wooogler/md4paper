@@ -2510,6 +2510,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             if is_en:
                 ctrl.save_en_markdown(editor.value)
                 ui.notify("편집 저장됨 — 번역은 이 내용을 사용합니다.", type="positive")
+                refresh_staleness()
             else:
                 ctrl.save_ko_markdown(editor.value)
                 ui.notify("번역 편집 저장됨 — 번역을 다시 실행하면 덮어써집니다. 헤더 수를 바꾸면 "
@@ -3084,30 +3085,41 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         "passthrough": ("warning", "orange-7"),  # 구조 검증 실패 → 영어 원문 통과 (경고가 맞다)
     }
     _SKIP_ICON = ("remove", "grey-5")  # 체크 해제된 섹션 = 번역 대상 아님
+    _STALE_ICON = ("update", "orange-7")  # 원문이 바뀌어 다음 실행 때 다시 번역될 섹션
     tree_ref: dict = {}  # {"tree": ui.tree, "nodes": [...]} — 번역 중 아이콘만 갱신
 
-    def _apply_tree_status(nodes: list[dict], status: dict, unticked: set) -> None:
+    def _apply_tree_status(nodes: list[dict], status: dict, unticked: set, stale: set) -> None:
         for n in nodes:
             icon = _TREE_ICON.get(status.get(n["id"], ""))
             if icon is None and n["id"] in unticked:
                 icon = _SKIP_ICON  # 번역에서 빠진 섹션임을 한눈에
+            elif icon is None and n["id"] in stale:
+                icon = _STALE_ICON  # 재변환·편집으로 원문이 바뀜 — 번역이 낡았다
             if icon:
                 n["icon"], n["iconColor"] = icon
             else:
                 n.pop("icon", None)
                 n.pop("iconColor", None)
-            _apply_tree_status(n.get("children") or [], status, unticked)
+            _apply_tree_status(n.get("children") or [], status, unticked, stale)
 
     def _unticked_ids() -> set:
         return {s.id for s in ctrl.translatable_sections() if not s.translate}
 
     def update_tree_status() -> None:
-        """섹션 트리 아이콘 갱신 — 번역 진행(진행중/완료/실패) + 미선택(–)."""
+        """섹션 트리 아이콘 갱신 — 번역 진행(진행중/완료/실패) + 원문 바뀜 + 미선택(–)."""
         tree, nodes = tree_ref.get("tree"), tree_ref.get("nodes")
         if tree is None or nodes is None:
             return
-        _apply_tree_status(nodes, translate_state["status"], _unticked_ids())
+        stale = set() if translate_state["active"] else ctrl.stale_sections()
+        _apply_tree_status(nodes, translate_state["status"], _unticked_ids(), stale)
         tree.update()
+
+    def refresh_staleness() -> None:
+        """원문(en.md)이 바뀐 뒤 — 트리의 '원문 바뀜' 아이콘, 번역 패널 배너, 헤더 칩을 함께 갱신."""
+        update_tree_status()
+        if _translate_refs.get("stale") is not None:
+            _translate_refs["stale"].refresh()
+        status_chip.refresh()
 
     # --- 용어집 편집 상태 (build 스코프 — 용어집 시트 편집 + '번역할 섹션'의 용어 추가가 공유) · 자동 저장 ---
     gloss_entries = [{"term": e.term, "korean": e.korean, "policy": e.policy}
@@ -3289,6 +3301,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 return
             translate_state.update(status={}, done=0, total=0, failures={})
             failure_panel.refresh()
+            translate_state["active"] = True
+            stale_panel.refresh()  # 도는 동안엔 '낡음' 표시를 치운다
             attach_translate(job)
             paper_tabs.refresh()  # 탭 아이콘이 '작업 중'으로 돈다
 
@@ -3337,8 +3351,34 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     ui.notify(job.error, type="negative")
             update_tree_status()
             failure_panel.refresh()
+            stale_panel.refresh()
             status_chip.refresh()
             translate_btn.enable()
+
+        @ui.refreshable
+        def stale_panel() -> None:
+            """원문이 바뀐 섹션 — 재변환·레이아웃 수정·직접 편집 뒤 번역이 낡은 곳. 실행하면 그 섹션만 새로
+            번역되고 나머지는 캐시를 쓴다(체크는 그대로 두어야 한다 — 풀면 그 섹션은 영어로 남는다)."""
+            if translate_state["active"]:
+                return
+            stale = ctrl.stale_sections()
+            if not stale:
+                return
+            with ui.column().classes("w-full gap-1 q-pa-sm").style(
+                    "background:#fff7ed; border:1px solid #fdba74; border-radius:8px"):
+                with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                    ui.icon("update", color="orange-7")
+                    ui.label(f"원문이 바뀐 섹션 {len(stale)}개 — 번역이 낡았습니다") \
+                        .classes("text-sm font-medium text-orange-9")
+                    ui.space()
+                    ui.button("바뀐 섹션 재번역", icon="refresh", on_click=do_translate) \
+                        .props("dense no-caps color=orange").tooltip(
+                            "바뀐 섹션만 새로 번역합니다 — 나머지는 지난 번역(캐시)을 그대로 씁니다")
+                names = [s.text for s in ctrl.manifest.sections if s.id in stale]  # 문서 순서대로
+                ui.label(" · ".join(n[:40] for n in names[:8]) + (" …" if len(names) > 8 else "")) \
+                    .classes("text-xs text-orange-800")
+                ui.label("PDF에서 다시 변환했거나 레이아웃을 고쳤거나 원문을 직접 편집한 섹션입니다. 트리에서도 "
+                         "주황 ↻ 아이콘으로 표시됩니다.").classes("text-xs text-gray-500")
 
         @ui.refreshable
         def failure_panel() -> None:
@@ -3402,6 +3442,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 .props("size=14px rounded color=secondary").classes("w-full")
             bar.visible = False
             prog_lbl = ui.label("").classes("text-sm text-gray-500")
+            _translate_refs["stale"] = stale_panel  # 원문이 바뀌는 곳(편집 저장·레이아웃 수정)에서 갱신
+            stale_panel()    # 원문이 바뀐 섹션 + 재번역 버튼 (없으면 안 보임)
             failure_panel()  # 번역 실패 섹션 이유 + 재번역 버튼 (실패 없으면 안 보임)
         running = jobs.get(ctrl.wd.root, "translate")
         if running is not None and running.running:  # 번역 중에 떠났다 돌아왔다 → 진행 바를 다시 붙인다
@@ -3537,10 +3579,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if running:
             icon, text, cls, tip = "autorenew", "번역 중…", "md4-chip busy", "번역이 돌고 있습니다 — 진행은 번역 패널에서"
         elif has_ko:
-            text = "번역됨" + (f" · 실패 {fails}" if fails else "")
-            icon, cls = ("warning", "md4-chip warn") if fails else ("check_circle", "md4-chip done")
-            tip = ("구조 검증에 실패해 영어로 남은 섹션이 있습니다 — 번역 패널에서 재번역"
-                   if fails else "번역이 있습니다 — 다시 번역하거나 섹션을 바꾸려면 번역 패널로")
+            stale = len(ctrl.stale_sections())
+            text = "번역됨" + (f" · 실패 {fails}" if fails else "") + (f" · 원문 바뀜 {stale}" if stale else "")
+            icon, cls = ("warning", "md4-chip warn") if (fails or stale) else ("check_circle", "md4-chip done")
+            tip = ("구조 검증에 실패해 영어로 남은 섹션이 있습니다 — 번역 패널에서 재번역" if fails
+                   else "원문이 바뀐 섹션이 있어 번역이 낡았습니다 — 번역 패널에서 바뀐 섹션만 재번역" if stale
+                   else "번역이 있습니다 — 다시 번역하거나 섹션을 바꾸려면 번역 패널로")
         else:
             icon, text, cls, tip = "translate", "번역 안 됨 · 번역하기", "md4-chip todo", \
                 "변환은 끝났습니다. 다음은 번역 — 누르면 번역 패널이 열립니다"
@@ -3731,7 +3775,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         # --- 번역할 섹션 고르기 (Tree Select) — 주 영역 ---
         ui.label("번역할 섹션").classes("font-semibold text-sm text-primary")
-        cap("체크한 섹션만 번역합니다 (LLM 비용·시간 절약). 나머지는 영어 원문 그대로 남습니다. 섹션 단위로 병렬 번역됩니다.")
+        cap("체크한 섹션만 번역합니다 (LLM 비용·시간 절약). 나머지는 영어 원문 그대로 남습니다. 섹션 단위로 병렬 번역됩니다. "
+            "제목을 누르면 캔버스의 그 섹션으로 갑니다.")
 
         @ui.refreshable
         def section_picker() -> None:
@@ -3747,12 +3792,21 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 count_label.refresh()
 
             # 초기 체크 상태는 _props['ticked']로만 설정 (별도 :ticked 바인딩을 주면 충돌해 tick이 깨진다)
-            tree = ui.tree(nodes, label_key="label", node_key="id", tick_strategy="strict", on_tick=on_tick)
+            async def on_select(e) -> None:  # noqa: ANN001 — 제목 클릭 → 캔버스의 그 섹션으로 (체크박스와 별개)
+                if e.value:
+                    await goto_md(e.value)
+                    tree.props(remove="selected")  # 선택 강조는 남기지 않는다 — 이동 단추로만 쓴다
+                    tree._props["selected"] = None
+                    tree.update()
+
+            tree = ui.tree(nodes, label_key="label", node_key="id", tick_strategy="strict",
+                           on_tick=on_tick, on_select=on_select)
             tree._props["ticked"] = ctrl.ticked_ids()
             # ui.tree는 nodes를 복사해 _props['nodes']에 넣는다 → 원본을 바꿔도 클라이언트에 안 나간다.
             # 실제 렌더되는 복사본을 가리켜 변형해야 tree.update()로 아이콘이 반영된다.
             tree_ref["tree"], tree_ref["nodes"] = tree, tree._props["nodes"]
-            _apply_tree_status(tree._props["nodes"], translate_state["status"], _unticked_ids())
+            _apply_tree_status(tree._props["nodes"], translate_state["status"], _unticked_ids(),
+                               set() if translate_state["active"] else ctrl.stale_sections())
 
             @ui.refreshable
             def count_label() -> None:
@@ -3847,6 +3901,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         _refresh_translate_tree()
         refresh_canvas()
         viewer_toolbar.refresh()  # '수동 편집됨' 배지 등
+        refresh_staleness()  # 원문이 바뀌었으니 어느 섹션의 번역이 낡았는지 다시 센다
         push_cite_tips()  # 재조립하며 인용 링크가 다시 붙었다 → 호버 툴팁 맵 갱신
 
     with ui.dialog() as fix_dialog, ui.card().classes("gap-3").style("width:560px;max-width:92vw"):

@@ -115,6 +115,28 @@ def _build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict
     return final
 
 
+def stale_section_ids(wd: WorkDir, manifest: Manifest) -> set[str]:
+    """번역이 낡은 섹션 — 지금 en.md로 만든 번역 유닛의 원문이 캐시에 없는 섹션들의 id.
+
+    재변환·레이아웃 수정·직접 편집으로 원문이 바뀌면 그 유닛의 해시가 달라져 캐시에 없다 → 다음
+    번역 실행 때 그 유닛만 다시 번역되고 나머지는 캐시를 쓴다. UI가 "어느 섹션이 다시 번역될지"를
+    미리 보여 주는 데 쓴다. 번역 자체가 없거나 캐시가 없으면 빈 집합(전부 새 번역이라 '낡음'이 아니다).
+    캐시 키(모델·프롬프트)가 바뀌었는지는 보지 않는다 — 그 경우 어차피 전부 다시 번역된다.
+    실패(passthrough)한 유닛도 캐시에 없으므로 여기 포함된다(재번역 대상인 것은 같다).
+    """
+    if not (wd.ko_md.exists() and wd.cache_json.exists() and wd.en_md.exists()):
+        return set()
+    try:
+        chunks = json.loads(wd.cache_json.read_text(encoding="utf-8")).get("chunks", {})
+    except (OSError, json.JSONDecodeError):
+        return set()
+    out: set[str] = set()
+    for u in _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines()):
+        if u["translatable"] and u["sids"] and hash_text(u["source"]) not in chunks:
+            out.update(u["sids"])
+    return out
+
+
 def run_glossary(wd: WorkDir, provider: Provider, *, regenerate: bool = True) -> int:
     """용어집만 생성/갱신 (웹 UI의 '번역 전 용어집 검토' 지점). 항목 수 반환."""
     if not wd.en_md.exists():

@@ -274,3 +274,42 @@ def test_translate_model_options_lists_keyed_providers(converted, monkeypatch):
     assert all(k.startswith("anthropic/") for k in opts if k != ctrl.translate_model())
     assert f"anthropic/{config.MODEL_TIERS['anthropic'][-1]}" in opts
     assert ctrl.translate_model() in opts  # 기본값(키 없는 전역 기본이어도)은 항상 고를 수 있다
+
+
+def test_stale_sections_track_source_changes(converted):
+    """원문이 바뀐 섹션만 '낡음'으로 — 번역 직후엔 비고, 한 섹션 본문을 고치면 그 섹션(만)이 잡힌다."""
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate.apply import stale_section_ids
+
+    m = manifest_io.load(converted)
+    assert stale_section_ids(converted, m) == set()  # 번역 전 — 낡을 번역이 없다
+    run_translate(converted, _fake(), "해라체")
+    assert stale_section_ids(converted, m) == set()  # 방금 번역했으니 전부 캐시에 있다
+
+    smap = sorted(json.loads(converted.sections_map.read_text(encoding="utf-8"))["sections"],
+                  key=lambda e: e["out_line"])
+    lines = converted.en_md.read_text(encoding="utf-8").splitlines()
+    # 번역 대상인 본문 섹션 하나(참고문헌은 기본으로 번역하지 않아 '낡음'도 없다). 줄 수를 바꾸지 않고
+    # 본문 한 줄만 고친다 — 다른 섹션의 라인 범위가 그대로여야 그 섹션들이 낡았다고 잡히지 않는다.
+    flags = {sec.id: sec.translate for sec in m.sections}
+    target = body = None
+    for idx, e in enumerate(smap):  # 번역 대상이고 본문 줄이 하나라도 있는 첫 섹션
+        if not flags.get(e["id"]) or "reference" in e["text"].lower():
+            continue
+        end = smap[idx + 1]["out_line"] if idx + 1 < len(smap) else len(lines)
+        body = next((i for i in range(e["out_line"] + 1, end) if lines[i].strip()), None)
+        if body is not None:
+            target = e
+            break
+    assert target is not None
+    lines[body] += " (edited after translation)"
+    converted.en_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    stale = stale_section_ids(converted, m)
+    assert target["id"] in stale
+    assert len(stale) < len(smap)  # 다른 섹션까지 전부 낡았다고 하지는 않는다
+
+    run_translate(converted, _fake(), "해라체")  # 다시 번역하면 그 유닛만 새로 돌고 낡음은 사라진다
+    assert stale_section_ids(converted, m) == set()
