@@ -325,3 +325,48 @@ def test_apply_naming_skips_papers_without_meta(tmp_path):
     wd.sections_yaml.write_text("title: T\nsections: []\n", encoding="utf-8")
     assert paper_meta.apply_naming(ws) == {"renamed": 0, "unchanged": 0, "no_meta": 1}
     assert wd.root.is_dir()  # 이름 유지
+
+
+# --- 자유 메모(notes.md) 사본 ---
+def test_export_notes_alongside_english_markdown(tmp_path):
+    config.set_library_dir("en", str(tmp_path / "EN"))
+    config.set_library_dir("ko", str(tmp_path / "KO"))
+    wd = _wd(tmp_path)
+    wd.notes_md.write_text("# 메모\n\n읽을 만함\n", encoding="utf-8")
+
+    written = library.export_paper(wd)
+
+    out = tmp_path / "EN" / "2017_Attention_Vaswani.notes.md"
+    assert out in written and out.read_text(encoding="utf-8") == "# 메모\n\n읽을 만함\n"
+    assert not (tmp_path / "KO" / "2017_Attention_Vaswani.notes.md").exists()
+    # 같은 길이로 고쳐도 사본에 반영된다 (크기·시각 비교로 건너뛰지 않는다)
+    wd.notes_md.write_text("# 메모\n\n읽을 만함!\n"[:-2] + "\n", encoding="utf-8")
+    library.export_paper(wd)
+    assert out.read_text(encoding="utf-8") == wd.notes_md.read_text(encoding="utf-8")
+
+
+def test_export_notes_skipped_when_absent_or_empty(tmp_path):
+    config.set_library_dir("en", str(tmp_path / "EN"))
+    wd = _wd(tmp_path)
+    assert library.export_notes(wd) is None
+    wd.notes_md.write_text("  \n", encoding="utf-8")
+    assert library.export_notes(wd) is None
+    assert not (tmp_path / "EN" / "2017_Attention_Vaswani.notes.md").exists()
+
+
+def test_export_notes_falls_back_to_ko_folder(tmp_path):
+    config.set_library_dir("ko", str(tmp_path / "KO"))
+    wd = _wd(tmp_path)
+    wd.notes_md.write_text("메모", encoding="utf-8")
+    assert library.export_notes(wd) == tmp_path / "KO" / "2017_Attention_Vaswani.notes.md"
+
+
+def test_remove_stem_cleans_notes_copy(tmp_path):
+    config.set_library_dir("en", str(tmp_path / "EN"))
+    wd = _wd(tmp_path, "old-name", ko=None)
+    wd.notes_md.write_text("메모", encoding="utf-8")
+    library.export_paper(wd)
+    assert (tmp_path / "EN" / "old-name.notes.md").exists()
+    library.remove_stem("old-name")
+    assert not (tmp_path / "EN" / "old-name.notes.md").exists()
+

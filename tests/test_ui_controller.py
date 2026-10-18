@@ -642,3 +642,21 @@ def test_section_pages_fills_missing_pages_from_pdf_text(ctrl, tmp_path, monkeyp
     assert pages[secs[0].id] == 1 and pages[secs[-1].id] == 3
     assert pages[mid.id] == 3  # 앞뒤 섹션 쪽(1~3) 사이에서 제목을 찾았다
     assert secs[1].id not in pages or pages[secs[1].id] in (1, 2, 3)
+
+
+# --- 메모 패널의 자동 저장 (notes.md) ---
+def test_save_notes_writes_atomically_and_reads_back(ctrl):
+    assert ctrl.notes() == ""
+    ctrl.save_notes("# 메모\n\n한 줄\n")
+    assert ctrl.wd.notes_md.read_text(encoding="utf-8") == "# 메모\n\n한 줄\n"
+    assert ctrl.notes() == "# 메모\n\n한 줄\n"
+    assert not list(ctrl.wd.root.glob("notes.md.tmp*"))  # 임시 파일을 남기지 않는다
+
+
+def test_save_notes_empty_removes_file(ctrl):
+    ctrl.save_notes("메모")
+    assert ctrl.wd.notes_md.exists()
+    ctrl.save_notes("   \n")
+    assert not ctrl.wd.notes_md.exists()  # 빈 껍데기를 남기지 않는다
+    assert ctrl.notes() == ""
+

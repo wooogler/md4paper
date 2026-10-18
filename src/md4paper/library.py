@@ -8,6 +8,7 @@
 <프로젝트 폴더>/images/2017_Attention_Vaswani/     ← 그림은 논문별 폴더로
 <프로젝트 폴더>/ko/2017_Attention_Vaswani.md       ← 번역본
 <프로젝트 폴더>/pdf/2017_Attention_Vaswani.pdf     ← md와 같은 기준명 → md에서 바로 찾아진다
+<프로젝트 폴더>/2017_Attention_Vaswani.notes.md    ← 메모 패널의 자유 메모 (있을 때만, 영어 md 옆에)
 <프로젝트 폴더>/references.bib                     ← 항목이 계속 덧붙는다
 ```
 
@@ -206,6 +207,38 @@ def export_bib(wd: WorkDir, project: str | None = None) -> Path | None:
     return bibtex.sync(path, key, entry)
 
 
+def notes_dir(project: str | None = None) -> Path | None:
+    """자유 메모 사본이 놓일 폴더 — 영어 마크다운 옆, 영어 폴더가 없으면 번역 폴더(bib와 같은 우선순위)."""
+    for which in WHICH:
+        d = dir_for(which, project)
+        if d is not None:
+            return d
+    return None
+
+
+def notes_file_name(stem: str) -> str:
+    return f"{stem}.notes.md"
+
+
+def export_notes(wd: WorkDir, project: str | None = None) -> Path | None:
+    """메모 패널의 자유 메모(notes.md)를 `<논문>.notes.md`로 함께 복사. 메모가 없거나 폴더 미설정이면 None.
+
+    크기·시각 비교 없이 늘 덮어쓴다 — 같은 길이의 수정("teh"→"the")도 사본에 반영돼야 한다.
+    """
+    project = project_of(wd) if project is None else project
+    dest = notes_dir(project)
+    src = wd.notes_md
+    if dest is None or not src.is_file():
+        return None
+    text = src.read_text(encoding="utf-8")
+    if not text.strip():
+        return None
+    dest.mkdir(parents=True, exist_ok=True)
+    out = dest / notes_file_name(wd.root.stem)
+    out.write_text(text, encoding="utf-8")
+    return out
+
+
 def export(wd: WorkDir, which: str, target: str | None = None) -> Path | None:
     """한 언어의 결과 마크다운 + 이미지를 라이브러리 폴더로 복사. 반환: 쓴 파일 경로.
 
@@ -234,13 +267,14 @@ def export(wd: WorkDir, which: str, target: str | None = None) -> Path | None:
 
 
 def export_paper(wd: WorkDir, target: str | None = None) -> list[Path]:
-    """이 논문의 영어·한국어 마크다운·원본 PDF·BibTeX 항목을 각 자리로 (있는 것만).
+    """이 논문의 영어·한국어 마크다운·원본 PDF·자유 메모·BibTeX 항목을 각 자리로 (있는 것만).
 
     반환: 실제로 쓴 파일들. 논문이 속한 프로젝트의 폴더로 가고, 프로젝트가 없으면 공통 폴더로.
     """
     project = project_of(wd)
     written = [export(wd, w, target) for w in WHICH]
     written.append(export_pdf(wd, project))
+    written.append(export_notes(wd, project))
     written.append(export_bib(wd, project))
     return [p for p in written if p is not None]
 
@@ -249,7 +283,7 @@ def remove_stem(stem: str, project: str | None = None) -> None:
     """이 기준명으로 내보냈던 사본을 정리 — 이름 규칙으로 리네임된 뒤 옛 이름 사본이 남지 않게.
 
     저장 위치 폴더 안에서 우리가 썼을 경로만 지운다: `<stem>*.md` · `images/<stem>/` ·
-    `<stem>.pdf` · references.bib의 그 항목.
+    `<stem>.pdf` · `<stem>.notes.md` · references.bib의 그 항목.
     """
     from md4paper import bibtex
 
@@ -259,6 +293,7 @@ def remove_stem(stem: str, project: str | None = None) -> None:
             continue
         (d / file_name(stem, which, project)).unlink(missing_ok=True)
         (d / f"{stem}.{which}.md").unlink(missing_ok=True)  # 한 폴더 설정이던 시절의 사본까지
+        (d / notes_file_name(stem)).unlink(missing_ok=True)
         imgs = d / "images" / stem
         if imgs.is_dir():
             shutil.rmtree(imgs, ignore_errors=True)

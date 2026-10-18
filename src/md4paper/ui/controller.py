@@ -443,6 +443,21 @@ class UIController:
         status["manual_edit_ko"] = True
         self.wd.save_status(status)
 
+    # --- 자유 메모 (notes.md) ---
+    def notes(self) -> str:
+        """논문 전체 메모(마크다운). 파일이 없으면 빈 문자열."""
+        try:
+            return self.wd.notes_md.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+
+    def save_notes(self, text: str) -> None:
+        """메모 패널의 자동 저장 — 원자적으로 쓰고, 비우면 파일을 지운다(빈 껍데기를 남기지 않게)."""
+        if not text.strip():
+            self.wd.notes_md.unlink(missing_ok=True)
+            return
+        self._write_atomic(self.wd.notes_md, text)
+
     def _write_atomic(self, path: Path, text: str) -> None:
         import os
 

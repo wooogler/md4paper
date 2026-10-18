@@ -172,6 +172,11 @@ class WorkDir:
         return self.root / "annotations.json"
 
     @property
+    def notes_md(self) -> Path:
+        """논문 전체에 대한 자유 메모(마크다운) — 왼쪽 레일 '메모' 패널. 읽는 사람의 것이라 파이프라인이 덮어쓰지 않는다."""
+        return self.root / "notes.md"
+
+    @property
     def chat_json(self) -> Path:
         """뷰어 챗봇 대화 기록 (읽는 사람의 것이라 파이프라인이 덮어쓰지 않는다)."""
         return self.root / "chat.json"

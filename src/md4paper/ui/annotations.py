@@ -151,15 +151,31 @@ def _order(item: dict) -> tuple[int, int]:
     return (a["row"], a["start"])
 
 
-def to_markdown(items: list[dict], title: str = "") -> str:
+def load_notes(wd: WorkDir) -> str:
+    """논문 전체 자유 메모(notes.md). 없거나 못 읽으면 빈 문자열."""
+    try:
+        return wd.notes_md.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def to_markdown(items: list[dict], title: str = "", notes: str = "") -> str:
     """하이라이트·메모를 읽을 수 있는 마크다운으로 (내보내기용).
 
+    notes(논문 전체 자유 메모, notes.md)가 있으면 맨 위에 '## 메모' 절로 그대로 넣고, 문장 하이라이트는
+    그 아래 '## 하이라이트' 절에. 자유 메모가 없으면 예전과 같은 모양(절 제목 없이 바로 하이라이트).
     문서 순서로, 인용구 안에 원문과 번역을 나란히 두고 메모를 그 아래에 붙인다.
     """
     head = f"# {title} — 하이라이트 · 메모" if title else "# 하이라이트 · 메모"
-    if not items:
+    notes = notes.strip("\n")
+    if not items and not notes:
         return head + "\n\n_아직 표시한 내용이 없습니다._\n"
     lines = [head, ""]
+    if notes:
+        lines += ["## 메모", "", notes, ""]
+        if not items:
+            return "\n".join(lines).rstrip() + "\n"
+        lines += ["## 하이라이트", ""]
     for item in sorted(items, key=_order):
         parts = [q for q in (_side(item, "en"), "*" + _side(item, "ko") + "*") if q not in ("", "**")]
         lines.append("\n>\n".join("> " + q for q in parts))   # 원문 · 번역을 한 인용구 안에
@@ -171,8 +187,13 @@ def to_markdown(items: list[dict], title: str = "") -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def has_any(wd: WorkDir) -> bool:
+    """내려받을 거리가 있는지 — 하이라이트가 하나라도 있거나 자유 메모가 비어 있지 않거나."""
+    return bool(load(wd)) or bool(load_notes(wd).strip())
+
+
 def export_bytes(wd: WorkDir, title: str = "") -> tuple[str, bytes]:
-    """(파일명, 내용) — 다운로드용 마크다운."""
+    """(파일명, 내용) — 다운로드용 마크다운. 자유 메모(notes.md)가 맨 위에, 하이라이트가 그 아래."""
     stem = (title or wd.root.stem).strip() or "paper"
     name = "".join(c for c in stem if c not in '\\/:*?"<>|').strip()[:80] or "paper"
-    return f"{name} - 메모.md", to_markdown(load(wd), title).encode("utf-8")
+    return f"{name} - 메모.md", to_markdown(load(wd), title, load_notes(wd)).encode("utf-8")
