@@ -1788,6 +1788,11 @@ _CHROME_CSS = """
 .md4-railbtn.on { background: rgba(35,131,226,.13); color: #2383e2; }
 .md4-panel { height: 100%; width: 100%; overflow-y: auto; padding: 12px; gap: 12px; flex-wrap: nowrap; }
 .md4-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; }
+/* 목차 언어 선택 — 제목 줄 오른쪽의 작은 글자 셋. 고른 것만 파랗게, 나머지는 패널 제목과 같은 회색. */
+.md4-toclang .q-btn { min-height: 18px; padding: 0 5px; font-size: 10.5px; font-weight: 500; color: #9a968e; }
+.md4-toclang .q-btn.text-primary { color: #2383e2; font-weight: 600; }
+.md4-toclang .q-btn:hover { color: #37352f; }
+.md4-toclang .q-btn.text-primary:hover { color: #2383e2; }
 .md4-canvascol { min-width: 0; flex-wrap: nowrap; }
 /* 캔버스 툴바 — 좁아져도 글자를 세로로 꺾지 않는다: 항목은 제 폭을 지키고 줄 전체가 가로로 스크롤 */
 .md4-canvasbar { min-height: 36px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
@@ -2611,9 +2616,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ui.label("목차").classes("md4-panel-title")
             ui.space()
             if has_ko_titles:
+                # 작은 글자 셋만 — 목차의 주인공은 항목이지 이 스위치가 아니다(테두리·배경 없이, 고른 것만 파랗게)
                 ui.toggle(_TOC_LANG, value=mode, on_change=lambda e: set_toc_lang(e.value)) \
-                    .props("dense no-caps unelevated size=sm toggle-color=primary color=grey-3 text-color=grey-8") \
-                    .classes("conv-viewtoggle md4-toclang").tooltip("목차 제목을 어느 언어로 보일지")
+                    .props("flat dense no-caps toggle-color=primary") \
+                    .classes("md4-toclang").tooltip("목차 제목을 어느 언어로 보일지")
         with ui.element("div").classes("vtoc"):
             if not entries:
                 ui.label("섹션 없음").classes("text-xs text-gray-400 px-2")
