@@ -3251,6 +3251,31 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def translate_run_panel() -> None:
         """번역 패널 머리 — 실행 단추·모델·진행·실패 목록. 용어집 표는 여기서 여는 시트(대화상자)에."""
         def do_translate() -> None:
+            # 체크를 푼 섹션에 보관된 번역이 없으면 이번 실행 뒤 영어로 바뀐다 — 그 전에 묻는다.
+            # (보관된 번역이 있는 섹션은 run_translate가 그대로 두므로 여기 안 잡힌다.)
+            losing = ctrl.unticked_losing_translation()
+            if losing:
+                names = [s.text for s in ctrl.manifest.sections if s.id in losing]
+                with ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:480px"):
+                    ui.label(f"체크를 푼 {len(losing)}개 섹션이 영어 원문으로 바뀝니다").classes("text-base font-medium")
+                    ui.label("이 섹션들은 보관된 번역이 없어, 지금 실행하면 결과 문서에서 영어로 남습니다. "
+                             "일부만 다시 번역하려던 것이라면 전체를 선택한 채 실행하세요 — 바뀐 섹션만 새로 "
+                             "번역되고 나머지는 지난 번역을 그대로 씁니다.").classes("text-sm text-gray-600")
+                    ui.label(" · ".join(n[:40] for n in names[:8]) + (" …" if len(names) > 8 else "")) \
+                        .classes("text-xs text-gray-500")
+                    with ui.row().classes("justify-end gap-2 w-full"):
+                        ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
+                        ui.button("영어로 두고 진행", on_click=lambda: (dlg.close(), _confirm_ko_edit())) \
+                            .props("outline dense no-caps color=negative")
+                        ui.button("전체 선택하고 번역", on_click=lambda: (
+                            dlg.close(), ctrl.set_all_translate(True), ctrl.save(),
+                            _translate_refs["picker"].refresh(), _confirm_ko_edit())) \
+                            .props("unelevated dense no-caps color=primary")
+                dlg.open()
+                return
+            _confirm_ko_edit()
+
+        def _confirm_ko_edit() -> None:
             # 번역문을 직접 고쳐 둔 게 있으면 덮어쓰기 전에 묻는다 (원문 재조립의 guard_manual_edit와 같은 이유)
             if not ctrl.has_manual_edit_ko():
                 _start_translate()
@@ -3289,6 +3314,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     msg += f" · 저장 위치에 {len(saved)}개 파일 저장"
                 if summary.get("passthrough"):
                     msg += f" · {summary['passthrough']}개 섹션은 아래 표시(구조 검증 실패)"
+                if summary.get("kept"):
+                    msg += f" · 체크 해제 {summary['kept']}개 구간은 지난 번역 유지"
                 job.message = msg
                 return summary
 
@@ -3775,8 +3802,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         # --- 번역할 섹션 고르기 (Tree Select) — 주 영역 ---
         ui.label("번역할 섹션").classes("font-semibold text-sm text-primary")
-        cap("체크한 섹션만 번역합니다 (LLM 비용·시간 절약). 나머지는 영어 원문 그대로 남습니다. 섹션 단위로 병렬 번역됩니다. "
-            "제목을 누르면 캔버스의 그 섹션으로 갑니다.")
+        cap("체크한 섹션만 번역합니다 (LLM 비용·시간 절약). 체크를 풀어도 이미 번역해 둔 섹션은 그대로 남고, "
+            "번역한 적 없는 섹션만 영어로 남습니다. 섹션 단위로 병렬 번역됩니다. 제목을 누르면 캔버스의 그 섹션으로 갑니다.")
 
         @ui.refreshable
         def section_picker() -> None:
