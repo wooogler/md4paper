@@ -377,5 +377,5 @@ def test_scroll_memory_script_carries_the_paper_key():
     assert js.count("{") == js.count("}")
     assert "%s" not in js
     assert "sessionStorage" in js and "md4:pos:" in js
-    for sel in (".conv-md", ".sbs-grid", ".vtoc", ".md4-scroll"):
+    for sel in (".conv-md", ".sbs-grid", ".vpdf", ".md4-scroll"):
         assert sel in js

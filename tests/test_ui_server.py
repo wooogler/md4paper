@@ -73,7 +73,7 @@ def test_ui_server_renders(tmp_path):
         path=f"/review?wd={quote(str(wd.root.resolve()))}",
     )
     assert "섹션 트리" in body
-    assert "마크다운" in body  # 변환 탭 우측 토글 칩 (이전: '마크다운 프리뷰' 탭)
+    assert "마크다운 편집" in body  # 캔버스 툴바의 편집 스위치
     assert "용어집" in body
     # 마크다운 헤더 ⚙ 점프 버튼 + 섹션 트리 행 id (마크다운→트리 이동 기능의 연결부)
     assert "md-sec-jump" in body

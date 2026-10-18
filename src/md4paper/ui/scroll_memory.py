@@ -1,13 +1,14 @@
 """읽던 자리 기억 — 논문·단계별 스크롤 위치를 창(세션) 안에 저장하고 되돌린다.
 
-헤더 탭으로 다른 논문에 갔다 오면 페이지가 새로 그려진다(탭 = 페이지 이동). 단계 탭
-(변환/번역/뷰어)도 패널을 갈아 끼우므로 그때마다 스크롤이 맨 위로 튄다. 논문을 오가며 읽는
-도구에서 "읽던 자리"가 사라지는 건 곧 흐름이 끊긴다는 뜻이라, 스크롤 상자마다 위치를 적어 둔다.
+헤더 탭으로 다른 논문에 갔다 오면 페이지가 새로 그려진다(탭 = 페이지 이동). 그때마다 스크롤이
+맨 위로 튄다. 논문을 오가며 읽는 도구에서 "읽던 자리"가 사라지는 건 곧 흐름이 끊긴다는 뜻이라,
+스크롤 상자마다 위치를 적어 둔다.
 
 - 저장 위치는 `sessionStorage`다: 창마다 따로 기억하고(창을 나란히 띄워도 서로 안 섞인다),
   앱을 닫으면 사라진다. 서버(status.json)에 적지 않는 이유 — 읽던 자리는 그 창의 사정이다.
-- 열쇠는 `논문 토큰 → 단계 → 스크롤 상자`다. 상자는 클래스 셀렉터 + 같은 셀렉터 안 순번으로
-  가리킨다(뷰어의 목차·본문·PDF는 각자 다른 상자다).
+- 열쇠는 `논문 토큰 → 화면 → 스크롤 상자`다. 화면은 이제 하나(캔버스 + 왼쪽 작업 패널)라 단계 구분은
+  없고('-'), 상자는 클래스 셀렉터 + 같은 셀렉터 안 순번으로 가리킨다(캔버스 본문·PDF·왼쪽 패널은
+  각자 다른 상자다).
 - 우리가 되돌리는 동안의 scroll 이벤트는 저장하지 않는다 — 복원값이 0을 덮어써 버리지 않게.
 - 되돌리는 시점은 **상자가 DOM에 붙는 그 순간**이다(MutationObserver). 타이머로 뒤늦게 옮기면
   본문이 맨 위로 한 번 그려진 뒤 튀어서, 그 튐이 탭을 옮길 때마다 '반짝'으로 보인다.
@@ -19,13 +20,12 @@ import json
 
 # 위치를 기억할 스크롤 상자들 (클래스로 안정적으로 가리켜지는 것만)
 SELECTORS = (
-    ".conv-md",     # 변환 탭 마크다운(프리뷰)
-    ".cm-scroller", # 변환 탭 마크다운 편집기 — 실제로 스크롤되는 건 CodeMirror 안쪽 상자다
-    ".sbs-grid",    # 뷰어 정렬 그리드 (원문·번역)
-    ".vpane",       # 뷰어 단일 패널 (정렬 불가 시)
-    ".vtoc",        # 뷰어 목차
-    ".vpdf",        # 뷰어 PDF
-    ".md4-scroll",  # 그 외 우리가 표시해 둔 스크롤 열 (설정 열·논문 목록 등)
+    ".conv-md",     # 캔버스 편집 모드의 프리뷰
+    ".cm-scroller", # 캔버스 편집 모드의 편집기 — 실제로 스크롤되는 건 CodeMirror 안쪽 상자다
+    ".sbs-grid",    # 캔버스 정렬 그리드 (원문·번역)
+    ".vpane",       # 캔버스 단일 패널 (정렬 불가 시)
+    ".vpdf",        # 캔버스 PDF
+    ".md4-scroll",  # 그 외 우리가 표시해 둔 스크롤 열 (왼쪽 작업 패널·설정 열·논문 목록 등)
 )
 
 _JS = """
@@ -37,7 +37,7 @@ _JS = """
   var quiet = 0, timer = null, moved = false;
   var pending = null, done = {}, watcher = null, raf = 0, stopAt = 0, lastTry = 0;
 
-  function stepKey(){                        // 지금 단계 탭 (없으면 홈처럼 단계가 없는 화면)
+  function stepKey(){                        // 활성 q-tab이 있으면 그 이름, 없으면 '-' (리뷰·홈 화면)
     var t = document.querySelector('.q-tab--active');
     return t ? (t.innerText || '').trim().split('\\n').pop() : '-';
   }
@@ -110,7 +110,7 @@ _JS = """
   }, true);                                  // 캡처 — 내부 스크롤 상자의 스크롤까지 잡는다
   window.addEventListener('pagehide', save);
   document.addEventListener('visibilitychange', function(){ if (document.hidden) save(); });
-  // 단계 탭을 누르면 패널이 갈아 끼워진다 → 누르기 전 자리 저장, 새 패널이 붙은 뒤 그 단계 자리 복원
+  // q-tab(홈 설정 탭 등)을 누르면 패널이 갈아 끼워진다 → 누르기 전 자리 저장, 새 패널이 붙은 뒤 그 자리 복원
   document.addEventListener('click', function(ev){
     if (!ev.target.closest) return;
     if (ev.target.closest('.q-tab')) { save(); setTimeout(restoreSoon, 60); }

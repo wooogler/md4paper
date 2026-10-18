@@ -379,8 +379,8 @@ HTML = """
     for (var i = 0; i < all.length; i++){
       var r = all[i].getBoundingClientRect();
       if (r.width < 40 || r.height < 40) continue;
-      // [data-row]가 뷰어 그리드를 가려낸다 — 번역 탭 결과 그리드(같은 클래스, data-row 없음)를
-      // 잡지 않게. 실측으로 숨은 탭은 DOM에서 아예 빠지지만 app.py가 바뀌어도 버티게 남긴다.
+      // [data-row]가 캔버스의 정렬 그리드를 가려낸다 — 같은 클래스를 쓰는 다른 상자(data-row 없음)를
+      // 잡지 않게. app.py가 바뀌어도 버티게 남긴다.
       if (all[i].matches('[data-row]') || all[i].querySelector('[data-row]')){
         jbG = all[i]; break;
       }

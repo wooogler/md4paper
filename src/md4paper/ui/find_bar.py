@@ -178,7 +178,7 @@ HTML = """
     bar.classList.add('on');
     watch(true);
     stale = true;                          // 열린 사이 본문이 바뀌었을 수 있다
-    // 헤더가 있는 화면(리뷰)에서는 단계 탭을 가리지 않도록 헤더 아래로 내려 앉는다.
+    // 헤더가 있는 화면(리뷰)에서는 상태 칩·탭을 가리지 않도록 헤더 아래로 내려 앉는다.
     var head = document.querySelector('header');
     bar.style.top = (head && head.getClientRects().length ? head.getBoundingClientRect().bottom + 8 : 8) + 'px';
     input.focus(); input.select();
