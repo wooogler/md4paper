@@ -427,28 +427,50 @@ class UIController:
 
         재조립은 raw.md에서 en.md를 다시 만들므로 이 편집을 덮어쓴다 → 플래그로 경고한다.
         """
-        import os
-
-        self.wd.out.mkdir(parents=True, exist_ok=True)
-        # 임시 파일에 쓰고 갈아끼운다 — status.json과 같은 이유다(workdir.save_status 참고).
-        # 같은 논문을 창 여럿에서 열 수 있고, 분할 편집은 저장을 자주 부르므로 반쯤 쓴 en.md가
-        # 남을 창이 그만큼 넓어진다. os.replace는 원자적이라 최악이 '한쪽이 덮이는' 정도로 끝난다.
-        tmp = self.wd.en_md.with_suffix(f".md.tmp{os.getpid()}")
-        try:
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, self.wd.en_md)
-        finally:
-            tmp.unlink(missing_ok=True)
+        self._write_atomic(self.wd.en_md, text)
         status = self.wd.load_status()
         status["manual_edit"] = True
         self.wd.save_status(status)
 
+    def save_ko_markdown(self, text: str) -> None:
+        """뷰어에서 직접 고친 번역 마크다운을 저장하고 '번역 수동 편집됨'으로 표시.
+
+        번역을 다시 실행하면 ko.md를 번역 결과(캐시 포함)로 다시 쓰므로 이 편집을 덮어쓴다 → 별도
+        플래그로 경고한다(원문 재조립은 ko.md를 건드리지 않으므로 en 플래그와 섞지 않는다).
+        """
+        self._write_atomic(self.wd.ko_md, text)
+        status = self.wd.load_status()
+        status["manual_edit_ko"] = True
+        self.wd.save_status(status)
+
+    def _write_atomic(self, path: Path, text: str) -> None:
+        import os
+
+        self.wd.out.mkdir(parents=True, exist_ok=True)
+        # 임시 파일에 쓰고 갈아끼운다 — status.json과 같은 이유다(workdir.save_status 참고).
+        # 같은 논문을 창 여럿에서 열 수 있고, 분할 편집은 저장을 자주 부르므로 반쯤 쓴 파일이
+        # 남을 창이 그만큼 넓어진다. os.replace는 원자적이라 최악이 '한쪽이 덮이는' 정도로 끝난다.
+        tmp = path.with_suffix(f".md.tmp{os.getpid()}")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+
     def has_manual_edit(self) -> bool:
         return bool(self.wd.load_status().get("manual_edit"))
+
+    def has_manual_edit_ko(self) -> bool:
+        return bool(self.wd.load_status().get("manual_edit_ko"))
 
     def clear_manual_edit(self) -> None:
         status = self.wd.load_status()
         if status.pop("manual_edit", None) is not None:
+            self.wd.save_status(status)
+
+    def clear_manual_edit_ko(self) -> None:
+        status = self.wd.load_status()
+        if status.pop("manual_edit_ko", None) is not None:
             self.wd.save_status(status)
 
     def ko_markdown(self) -> str:
@@ -503,7 +525,9 @@ class UIController:
         """현재 용어집·설정으로 번역 실행 → paper.ko.md."""
         from md4paper import pipeline
 
-        return pipeline.run_translate(self.wd, provider, korean_style=korean_style, on_progress=on_progress)
+        summary = pipeline.run_translate(self.wd, provider, korean_style=korean_style, on_progress=on_progress)
+        self.clear_manual_edit_ko()  # ko.md를 번역 결과로 다시 썼다 — 직접 고친 흔적은 이제 없다
+        return summary
 
     def translate_model(self) -> str:
         """번역 모델 드롭다운의 기본값 'provider/model' — 이 논문을 마지막에 번역한 모델, 없으면 전역 기본."""

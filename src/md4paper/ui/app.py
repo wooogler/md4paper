@@ -158,7 +158,7 @@ _PREVIEW_CSS = """
 .md4-lvl .q-field__append { height: 30px; }
 /* 일괄 레벨 조정: 그룹을 펼쳤을 때 개별 섹션 들여쓰기를 줄인다 (그룹 셀렉트 폭만큼 왼쪽으로 당김) */
 .md4-batch-exp .q-expansion-item__content { padding-left: 0; margin-left: -100px; }
-/* 변환 탭 보기 전환 세그먼트 — 둥근 테두리 + 넉넉한 패딩 (촘촘하지 않게) */
+/* 보기 전환 세그먼트(편집 대상 원문/번역 등) — 둥근 테두리 + 넉넉한 패딩 (촘촘하지 않게) */
 .conv-viewtoggle { border: 1px solid rgba(0,0,0,.14); border-radius: 9px; overflow: hidden; }
 .conv-viewtoggle .q-btn { padding: 4px 16px; min-height: 32px; font-weight: 500; }
 .conv-viewtoggle .q-btn + .q-btn { border-left: 1px solid rgba(0,0,0,.10); }
@@ -201,16 +201,14 @@ sup.md-fn a:hover { text-decoration: underline; }
 /* 뷰어 셸 — 접이식 목차 + 토글 가능한 원문/번역/PDF 패널 + 리사이즈.
    .vshell은 부모 flex-column의 남은 높이를 채운다(툴바 아래 전체). */
 .vshell { display: flex; flex: 1 1 auto; min-height: 0; width: 100%; }
-.vtoc { flex: 0 0 var(--vtoc-w, 230px); width: var(--vtoc-w, 230px); height: 100%; min-height: 0;
-  overflow-y: auto; overscroll-behavior: contain; background: #fafafa; padding: 6px 4px 40px; }
-.vtoc-title { font-size: 11px; font-weight: 600; color: #9a968e; padding: 2px 8px 4px; letter-spacing: .04em; }
-.vtoc-item { display: block; padding: 3px 8px; border-radius: 6px; font-size: 13px; color: #5b5851;
-  cursor: pointer; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vtoc-item:hover { background: #ececec; color: #37352f; }
-/* 목차 너비 드래그 핸들 (목차와 본문 사이) */
-.vtoc-handle { flex: 0 0 7px; cursor: col-resize; position: relative; }
-.vtoc-handle::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px; background: #e6e4e0; }
-.vtoc-handle:hover::after { background: #2383e2; width: 2px; }
+/* 목차 — 왼쪽 작업 패널의 한 모드(패널이 스크롤 상자다). 항목은 두 줄까지: 보는 언어 제목(진하게) +
+   반대쪽 언어 제목(옅게). 헤더를 번역하지 않아 같으면 한 줄. */
+.vtoc { width: 100%; padding: 0 0 24px; }
+.vtoc-item { display: block; padding: 3px 8px; border-radius: 6px; cursor: pointer; line-height: 1.4; min-width: 0; }
+.vtoc-item:hover { background: #ececec; }
+.vtoc-l1 { font-size: 13px; color: #5b5851; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtoc-l2 { font-size: 11.5px; color: #9a968e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vtoc-item:hover .vtoc-l1 { color: #37352f; }
 .vmain { flex: 1 1 auto; min-width: 0; height: 100%; }
 .vwrap { position: relative; height: 100%; min-width: 0; }        /* 정렬 그리드 + 컬럼 드래그 핸들 */
 .vcol-handle { position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: col-resize; z-index: 3; }
@@ -218,12 +216,12 @@ sup.md-fn a:hover { text-decoration: underline; }
 .vcol-handle:hover::after { background: #2383e2; width: 2px; }
 .vpdf { height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px; background: #f4f3f1; }
 .vpane { height: 100%; overflow-y: auto; overscroll-behavior: contain; }  /* 정렬 불가 시 단일 마크다운 패널 */
-/* 변환 탭 프리뷰 스크롤 패널 (프리뷰↔PDF 싱크 컨테이너).
+/* 캔버스 편집 모드의 프리뷰 스크롤 패널 (프리뷰↔PDF 싱크 컨테이너).
    width:100%가 필요하다 — splitter 패널이 flex-column이라 이 상자가 내용의 max-content(844px)로
    잡혀 611px 칸을 넘고 오른쪽이 잘렸다('마크다운 + PDF'에서도 매 줄 끝이 잘리던 기존 버그). */
 .conv-md { height: 100%; width: 100%; min-width: 0; }
 /* 분할 편집 — 왼쪽 원문 편집기 | 오른쪽 프리뷰. 두 열은 '언어'가 아니라 '표현'이 다른 것이라
-   에디터 쪽을 살짝 눌러 두 열이 한눈에 구분되게 한다(뷰어 탭의 원문|번역과 헷갈리지 않도록). */
+   에디터 쪽을 살짝 눌러 두 열이 한눈에 구분되게 한다(읽기 모드의 원문|번역과 헷갈리지 않도록). */
 .conv-ed { display: flex; flex-direction: column; width: 100%; min-width: 0; }
 .conv-ed .cm-en-editor { flex: 1 1 auto; min-height: 0; }
 .conv-ed .cm-editor { height: 100%; background: #fbfaf9; }
@@ -280,10 +278,9 @@ sup.md-fn a:hover { text-decoration: underline; }
   .md-preview blockquote { border-left-color: #d4d4d4; color: #a8a8a8; }
   #md-cite-tip { background: #e8e8ea; color: #1c1c1e; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
   .sbs-cell-div { border-color: #3a3a3a; }
-  .vtoc { background: #1f1f1f; }
-  .vtoc-handle::after { background: #3a3a3a; }
-  .vtoc-item { color: #b8b8b8; }
-  .vtoc-item:hover { background: #2c2c2c; color: #e0e0e0; }
+  .vtoc-l1 { color: #b8b8b8; }
+  .vtoc-item:hover { background: #2c2c2c; }
+  .vtoc-item:hover .vtoc-l1 { color: #e0e0e0; }
   .vcol-handle::after { background: #3a3a3a; }
   .vpdf { background: #151515; }
   .sbs-row-sep { border-top-color: #2c2c2c; }
@@ -609,8 +606,8 @@ _ANNO_HTML = """
     window.__mdAnnoApply();
   };
   window.__mdAnnoApply = function(){
-    // 탭 패널이 keep-alive라, 뷰어 탭이 활성화되기 전에는 .anno-scope가 DOM에 아예 없다.
-    // 한 번만 시도하면 탭을 열었을 때 하이라이트가 안 그려진 채로 남는다 → 잠깐 더 두드린다.
+    // 캔버스가 다시 지어지는 중이면(편집 끄기·번역 완료) .anno-scope가 아직 DOM에 없다.
+    // 한 번만 시도하면 하이라이트가 안 그려진 채로 남는다 → 잠깐 더 두드린다.
     var tries = 0;
     (function attempt(){
       applyAll();
@@ -1580,14 +1577,14 @@ def _head_key(text: str) -> str:
     return re.sub(r"[^0-9a-z]+", "", re.sub(r"<[^>]+>", "", text).lower())
 
 
-def row_pages(rows: list, smap: list[dict], page_by_id: dict) -> dict[int, int]:
-    """뷰어 행 → PDF 페이지(0-based). 헤더가 있는 행을 렌더된 헤더(section map)와 **제목으로** 순서대로 맞춘다.
+def row_sections(rows: list, smap: list[dict]) -> dict[int, str]:
+    """뷰어 행 → 섹션 id. 헤더가 있는 행을 렌더된 헤더(section map)와 **제목으로** 순서대로 맞춘다.
 
-    개수가 1:1일 때만 대응시키면 헤더 하나만 어긋나도(제목 행 등) 문서 전체가 PDF 싱크를 잃는다 —
-    'PDF를 열었는데 보던 쪽이 안 나오는' 원인이었다. 앞에서부터 가까운 몇 개 안에서 같은 제목을 찾고,
-    못 찾은 헤더는 건너뛴다(그 행은 위쪽 최근 페이지를 따른다).
+    개수가 1:1일 때만 대응시키면 헤더 하나만 어긋나도(제목 행 등) 문서 전체가 PDF 싱크·섹션 점프를
+    잃는다 — 'PDF를 열었는데 보던 쪽이 안 나오는' 원인이었다. 앞에서부터 가까운 몇 개 안에서 같은
+    제목을 찾고, 못 찾은 헤더는 건너뛴다(그 행은 위쪽 최근 섹션을 따른다).
     """
-    out: dict[int, int] = {}
+    out: dict[int, str] = {}
     keys = [_head_key(e.get("text", "")) for e in smap]
     j = 0
     for k, row in enumerate(rows):
@@ -1599,10 +1596,13 @@ def row_pages(rows: list, smap: list[dict], page_by_id: dict) -> dict[int, int]:
         if hit is None:
             continue
         j = hit + 1
-        pg = page_by_id.get(smap[hit]["id"])
-        if pg:
-            out[k] = pg - 1
+        out[k] = smap[hit]["id"]
     return out
+
+
+def row_pages(rows: list, smap: list[dict], page_by_id: dict) -> dict[int, int]:
+    """뷰어 행 → PDF 페이지(0-based) — row_sections의 섹션에 쪽이 있는 행만."""
+    return {k: page_by_id[sid] - 1 for k, sid in row_sections(rows, smap).items() if page_by_id.get(sid)}
 
 
 def _pdf_page_count(data: bytes) -> int:
@@ -1726,9 +1726,6 @@ def _review_url(root: Path) -> str:
 
 # 창 크롬 — 헤더의 논문 탭 + '새 창으로' 링크. 고정한 논문이 여러 편이면 탭 줄이 가로로
 # 스크롤한다(헤더 높이는 그대로 — 읽는 자리를 빼앗지 않는다).
-# 단계 탭 이름 — 이름으로 '마지막에 보던 단계'를 되찾으므로 한 곳에서만 정한다.
-_STEP_NAMES = ("1 · 변환", "2 · 번역", "3 · 뷰어")
-
 # 논문 탭을 누르면 페이지가 새로 열린다(탭 = 페이지 이동). 그 사이 새 문서의 첫 페인트는
 # 아무것도 없는 흰 화면이라 '반짝'하고 지나간다. 그래서 **Vue가 뜨기 전에** 헤더 자리를
 # 같은 색으로 칠해 둔다 — 첫 페인트부터 헤더가 있던 자리에 헤더 색이 있으니 깜빡임이 사라진다.
@@ -1767,17 +1764,42 @@ _CHROME_CSS = """
 .md4-tabstrip { flex: 0 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .md4-tabstrip::-webkit-scrollbar { height: 0; }
 .md4-tabtools { padding-bottom: 5px; opacity: .9; flex: 0 0 auto; }
-/* 단계 전환도 아래 물린 탭 — 다만 논문 탭보다 한 급 작고(26px), 활성 글자는 파랑이다.
-   "왼쪽 탭 = 어느 논문, 오른쪽 탭 = 그 논문의 어느 화면"으로 층이 갈리게. */
-.md4-steptabs { min-height: 0; flex: 0 0 auto; align-self: flex-end; }
-.md4-steptabs .q-tabs__content { min-height: 0; gap: 2px; }
-.md4-steptabs .q-tab { min-height: 26px; height: 26px; padding: 0 11px; border-radius: 7px 7px 0 0;
-  font-size: 11.5px; font-weight: 500; color: rgba(255,255,255,.86);
-  background: rgba(255,255,255,.13); transition: background .12s ease, color .12s ease; }
-.md4-steptabs .q-tab__content { min-height: 0; padding: 0; }
-.md4-steptabs .q-tab:hover { background: rgba(255,255,255,.24); color: #fff; }
-.md4-steptabs .q-tab--active { background: #fff; color: #2383e2; font-weight: 600; }
-.md4-steptabs .q-tab__indicator, .md4-steptabs .q-tabs__arrow { display: none; }
+/* 헤더 오른쪽 상태 칩 — 이 논문이 어디까지 왔는지 + 다음 할 일(누르면 번역 패널).
+   흰 칩(todo)이 '다음 할 일'이고, 번역된 논문은 헤더에 잠긴 옅은 칩으로 조용히. */
+.md4-chipslot { align-self: center; padding: 0 6px 5px 0; }
+.md4-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px 0 8px;
+  border-radius: 13px; font-size: 11.5px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  color: rgba(255,255,255,.92); background: rgba(255,255,255,.16); transition: background .12s ease; }
+.md4-chip:hover { background: rgba(255,255,255,.28); }
+.md4-chip.todo { background: #fff; color: #2383e2; font-weight: 600; }
+.md4-chip.todo:hover { background: #f3f8ff; }
+.md4-chip.warn { background: #f59e0b; color: #fff; }
+/* 본문 = 레일 + (작업 패널 | 캔버스). 높이는 헤더(44px)와 페이지 여백(16px×2)을 뺀 나머지. */
+.md4-body { height: calc(100vh - 76px); align-items: stretch; }
+.md4-rail { flex: 0 0 54px; width: 54px; height: 100%; background: #f4f3f1; border-right: 1px solid #e6e4e0;
+  padding: 6px 0; align-items: center; flex-wrap: nowrap; }
+.md4-railbtn { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 46px;
+  padding: 7px 0 6px; border-radius: 9px; cursor: pointer; color: #6b6862; font-size: 10.5px; line-height: 1;
+  user-select: none; transition: background .12s ease, color .12s ease; }
+.md4-railbtn + .md4-railbtn { margin-top: 2px; }
+.md4-railbtn:hover { background: rgba(0,0,0,.06); color: #37352f; }
+.md4-railbtn.on { background: rgba(35,131,226,.13); color: #2383e2; }
+.md4-panel { height: 100%; width: 100%; overflow-y: auto; padding: 12px; gap: 12px; flex-wrap: nowrap; }
+.md4-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; }
+.md4-canvascol { min-width: 0; flex-wrap: nowrap; }
+/* 캔버스 툴바 — 좁아져도 글자를 세로로 꺾지 않는다: 항목은 제 폭을 지키고 줄 전체가 가로로 스크롤 */
+.md4-canvasbar { min-height: 36px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.md4-canvasbar::-webkit-scrollbar { height: 0; }
+.md4-canvasbar > * { flex: 0 0 auto; }
+.md4-canvasbar > .q-space { flex: 1 1 0; }
+.md4-canvasbar .q-toggle__label, .md4-canvasbar .q-btn__content, .md4-canvasbar .q-badge { white-space: nowrap; }
+.md4-exportmenu .q-item { min-height: 36px; }
+@media (prefers-color-scheme: dark) {
+  .md4-rail { background: #1b1b1b; border-right-color: #333; }
+  .md4-railbtn { color: #a8a8a8; }
+  .md4-railbtn:hover { background: rgba(255,255,255,.08); color: #e0e0e0; }
+  .md4-railbtn.on { background: rgba(90,150,230,.22); color: #7bb7ff; }
+}
 /* 탭 하나 — 위만 둥근 사각형. 비활성은 헤더에 잠긴 색, 활성은 본문과 같은 흰 바닥. */
 .md4-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
   flex: 0 1 240px; max-width: 240px; min-width: 64px; border-radius: 8px 8px 0 0; cursor: pointer;
@@ -2111,43 +2133,27 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
 
     # 헤더는 한 줄이다 — 논문 탭은 아래 끝에 물려(활성 탭이 본문 흰 바닥과 맞닿아 '탭'으로 읽힌다),
-    # 단계(변환/번역/뷰어)는 오른쪽의 작은 세그먼트 컨트롤로. 단계는 '한 논문 안의 화면 전환'이라
-    # 논문 탭과 같은 모양이면 안 되고, 아이콘·2단 라벨로 헤더 높이를 먹지 않아야 한다.
+    # 오른쪽 끝은 이 논문의 상태 칩(변환됨 · 번역 안 됨 → 번역하기). 옛 '1·변환 / 2·번역 / 3·뷰어'
+    # 단계 탭이 있던 자리다 — 화면은 이제 하나(캔버스 + 왼쪽 작업 패널)라 단계를 오갈 일이 없고,
+    # 번호가 가르쳐 주던 '다음 할 일'은 이 칩이 대신한다.
     with spa.header():
         paper_tabs = tab_bar(state, ctrl.wd.root, _title, tools=review_tools)
         ui.space()
-        with ui.tabs().props("dense no-caps indicator-color=transparent").classes("md4-steptabs") as steps:
-            step_convert = ui.tab(_STEP_NAMES[0])
-            step_translate = ui.tab(_STEP_NAMES[1])
-            step_sbs = ui.tab(_STEP_NAMES[2])
+        chip_slot = ui.row().classes("items-center no-wrap md4-chipslot")  # 상태 칩은 아래에서 채운다
 
-    # 변환 탭 프리뷰와 뷰어는 같은 en.md를 읽는다 → 한쪽만 갱신하면 인용 표기·레벨 변경이 어긋난다.
-    # 뷰어는 그리드를 통째로 다시 만들어 무거우므로, 바뀌면 표시만 해 두고 탭을 옮길 때 한 번 갱신한다.
-    viewer_stale = {"on": False}
+    # 화면은 하나의 캔버스다 — 원문|번역|PDF 그리드(또는 편집기|프리뷰)와 목차가 같은 en.md/ko.md를
+    # 읽으므로, 문서가 바뀌면 이 둘을 함께 다시 그린다. (옛 변환 프리뷰·번역 결과·뷰어가 각자 그리던
+    # 것을 하나로 합쳤다 — '어느 쪽만 갱신돼 어긋나는' 일이 구조적으로 없다.)
+    def refresh_canvas() -> None:
+        _rows_memo.clear()  # 구조(섹션맵·쪽)는 본문 글자가 그대로여도 바뀔 수 있다 → 정렬 행을 다시 센다
+        canvas.refresh()
+        toc_panel.refresh()
 
-    def refresh_preview() -> None:
-        preview_pane.refresh()
-        viewer_stale["on"] = True
-
-    def on_step_change(_=None) -> None:  # noqa: ANN001 — NiceGUI 값 변경 이벤트
-        # 어느 단계를 보고 있었는지 논문별로 적어 둔다 — 헤더 탭으로 돌아오면 그 단계로 (스크롤은
-        # 창 쪽 sessionStorage가 기억한다, §ui/scroll_memory.py).
-        if steps.value in _STEP_NAMES:
-            state.setdefault("step_by_root", {})[str(ctrl.wd.root.resolve())] = steps.value
-        if viewer_stale["on"]:
-            viewer_stale["on"] = False
-            side_by_side.refresh()
-        # 탭 패널이 keep-alive라, 뷰어가 안 보이는 동안 다시 그려졌으면 그때는 셀이 DOM에 없어
-        # 하이라이트가 안 얹힌다. 탭을 옮길 때마다 한 번 더 얹으라고 시킨다(없으면 무시된다).
-        ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")
-
-    steps.on_value_change(on_step_change)
-
-    _translate_refs: dict = {}  # 번역 탭 위젯 참조 (변환 탭 레벨 변경 시 번역 트리 갱신용)
+    _translate_refs: dict = {}  # 번역 패널 위젯 참조 (구조 패널 레벨 변경 시 번역 트리 갱신용)
 
     def _refresh_translate_tree() -> None:
         picker = _translate_refs.get("picker")
-        if picker is not None:  # 레벨/구조가 바뀌면 번역 탭 섹션 트리도 다시 그린다(keep-alive 대비)
+        if picker is not None:  # 레벨/구조가 바뀌면 번역 패널의 섹션 트리도 다시 그린다
             picker.refresh()
 
     def commit() -> None:
@@ -2190,10 +2196,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def apply() -> None:
             ctrl.set_level(sid, value)
             commit()
-            refresh_preview()
             section_list.refresh()
             _refresh_translate_tree()
-            conv_body.refresh()  # 에디터도 새로 만들어진 en.md를 다시 읽어야 한다
+            refresh_canvas()  # 그리드·목차(편집 중이면 에디터도) 새로 만들어진 en.md로
 
         # 취소하면 드롭다운이 새 값을 보인 채로 남으므로 트리를 다시 그려 원래 값으로 되돌린다.
         guard_manual_edit(apply, cancelled=section_list.refresh)
@@ -2261,11 +2266,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             def apply() -> None:
                 n = ctrl.apply_group_level(key, value)
                 commit()
-                refresh_preview()
                 section_list.refresh()
                 batch_level_panel.refresh()
                 _refresh_translate_tree()
-                conv_body.refresh()
+                refresh_canvas()
                 ui.notify(f"{name} {n}개 → {_LEVEL_LABEL.get(value, value)}", type="positive")
 
             guard_manual_edit(apply, cancelled=batch_level_panel.refresh)
@@ -2275,10 +2279,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             def apply() -> None:
                 ctrl.set_level(sid, value)
                 commit()
-                refresh_preview()
                 section_list.refresh()
                 _refresh_translate_tree()
-                conv_body.refresh()
+                refresh_canvas()
 
             guard_manual_edit(apply, cancelled=batch_level_panel.refresh)
 
@@ -2361,47 +2364,63 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""
         ui.run_javascript(cite_tips_js(ctrl.citation_tooltips()))
 
-    # 편집은 4번째 보기 모드가 아니라 마크다운 패널의 모디파이어다 — 켜면 그 패널이 에디터|프리뷰로 쪼개진다.
-    # 토글에 '에디터|프리뷰'를 넣으면 모드×편집이 직교해 상태가 8~10가지로 불어난다.
-    edit_state: dict = {"on": False, "editor": None, "live": True}
+    # 편집은 보기 모드가 아니라 캔버스의 모디파이어다 — 켜면 원문|번역|PDF 그리드가 접히고 그 자리에
+    # 편집기|프리뷰가 선다(정렬 그리드는 행 단위 셀이라 그 안에서 편집할 수 없고, 프리뷰는 타이핑마다
+    # 바뀐 블록만 갈아 끼워야 해서 통째로 다시 짓는 그리드와 성격이 다르다). 끄면 그리드로 돌아간다.
+    # lang: 어느 쪽을 고치는지 — 'en'(원문 en.md) | 'ko'(번역 ko.md). 번역문도 같은 편집기로 손본다.
+    edit_state: dict = {"on": False, "editor": None, "live": True, "lang": "en"}
 
     def preview_markdown(md: str | None = None) -> str:
-        """프리뷰에 넣을 마크다운 — 이미지 경로 치환 + 헤더 줄 끝 앵커(sec-ID·data-page).
+        """프리뷰에 넣을 마크다운 — 이미지 경로 치환 + (원문이면) 헤더 줄 끝 앵커(sec-ID·data-page).
 
-        md를 주면 파일 대신 그 텍스트를 쓴다(타이핑 중 라이브 갱신용).
+        md를 주면 파일 대신 그 텍스트를 쓴다(타이핑 중 라이브 갱신용). 번역문은 섹션맵(en 기준 라인)과
+        줄이 맞지 않으므로 앵커 없이 그대로 보여 준다.
         """
-        md = ctrl.en_markdown() if md is None else md
+        if md is None:
+            md = ctrl.en_markdown() if edit_state["lang"] == "en" else ctrl.ko_markdown()
         if not md:
             return ""
+        if edit_state["lang"] != "en":
+            return served_markdown(md, tok, ctrl.wd.out_images)
         page_by_id = ctrl.section_pages()
         return anchored_markdown(served_markdown(md, tok, ctrl.wd.out_images), ctrl.section_map(), page_by_id, jump=True)
 
-    def toggle_edit(on: bool) -> None:
-        """직접 편집 토글. 분할 뷰라 프리뷰가 계속 보이므로 스크롤 위치를 인수인계할 필요가 없다."""
+    def toggle_edit(on: bool, lang: str | None = None) -> None:
+        """직접 편집 켜기/끄기(+대상 언어). 켜는 동안 PDF는 접는다 — 동시 표시 패널 ≤ 2
+        (3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다). 끄면 접었던 PDF를 되살린다."""
+        if lang is not None:
+            edit_state["lang"] = lang
         edit_state["on"] = on
-        if on and conv_view["pdf"]:
-            # 동시 표시 패널 ≤ 2 — 3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다.
-            # 어차피 지금도 편집 중 PDF는 싱크가 안 걸려 얼어 있었으므로 접는 것이 손해가 아니다.
-            conv_view["pdf"] = False
-            conv_view["pdf_folded"] = True
-        elif not on and conv_view.pop("pdf_folded", False):
-            conv_view["pdf"] = True
-        conv_toolbar.refresh()
-        conv_body.refresh()
+        if on and viewer_state["pdf"]:
+            viewer_state["pdf"] = False
+            viewer_state["pdf_folded"] = True
+        elif not on and viewer_state.pop("pdf_folded", False):
+            viewer_state["pdf"] = True
+        viewer_toolbar.refresh()
+        canvas.refresh()
 
     @ui.refreshable
     def edit_toggle() -> None:
-        """툴바에 놓이는 마크다운 편집 스위치(+수동 편집 표시). 마크다운이 보일 때만 렌더된다."""
+        """툴바의 마크다운 편집 스위치 — 켜면 대상(원문/번역) 선택·실시간 반영 스위치가 따라 나온다."""
+        has_ko = bool(ctrl.ko_markdown())
         ui.switch("마크다운 편집", value=edit_state["on"],
                   on_change=lambda e: toggle_edit(e.value)).props("dense") \
-            .tooltip("켜면 원문 편집기와 프리뷰가 나란히 서고, 스크롤이 서로 따라옵니다")
+            .tooltip("켜면 편집기와 프리뷰가 나란히 서고, 스크롤이 서로 따라옵니다")
         if edit_state["on"]:
+            if has_ko:
+                ui.toggle({"en": "원문", "ko": "번역"}, value=edit_state["lang"],
+                          on_change=lambda e: toggle_edit(True, e.value)) \
+                    .props("dense no-caps unelevated toggle-color=primary color=grey-3 text-color=grey-8") \
+                    .classes("conv-viewtoggle").tooltip("어느 쪽 마크다운을 고칠지")
             ui.switch("실시간 반영", value=edit_state["live"],
                       on_change=lambda e: edit_state.update(live=e.value)).props("dense") \
                 .tooltip("끄면 '편집 저장'을 눌러야 프리뷰가 갱신됩니다")
         if ctrl.has_manual_edit():
-            ui.badge("수동 편집됨", color="orange").props("outline").tooltip(
+            ui.badge("원문 수동 편집됨", color="orange").props("outline").tooltip(
                 "재조립하면 이 편집은 사라집니다 (섹션 트리에서 다시 만들어지므로)")
+        if ctrl.has_manual_edit_ko():
+            ui.badge("번역 수동 편집됨", color="orange").props("outline").tooltip(
+                "번역을 다시 실행하면 이 편집은 사라집니다 (번역 결과로 덮어쓰므로)")
 
     @ui.refreshable
     def preview_pane() -> None:
@@ -2413,7 +2432,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             html = "".join(h for _, h in blocks)
         else:
             edit_state["blocks"] = []
-            html = "<p><em>paper.en.md 없음 — convert를 먼저 실행하세요.</em></p>"
+            html = ("<p><em>paper.en.md 없음 — convert를 먼저 실행하세요.</em></p>"
+                    if edit_state["lang"] == "en" else "<p><em>아직 번역 안 됨 — 번역 패널에서 실행하세요.</em></p>")
         ui.html(html, sanitize=True).classes("md-preview")
 
     def live_update(text: str) -> None:
@@ -2460,96 +2480,85 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         )
 
     def editor_pane() -> None:
-        """마크다운 원문 편집기. 원문이 진실의 원천이라 파싱→직렬화 왕복이 없다(손실 0)."""
+        """마크다운 편집기(원문 또는 번역). 마크다운이 진실의 원천이라 파싱→직렬화 왕복이 없다(손실 0)."""
+        is_en = edit_state["lang"] == "en"
+
         def on_type(e) -> None:  # noqa: ANN001 — NiceGUI 값 변경 이벤트
             if edit_state["live"]:
                 live_update(e.value)
 
         editor = ui.codemirror(
-            ctrl.en_markdown(), language="Markdown", line_wrapping=True, on_change=on_type,
+            ctrl.en_markdown() if is_en else ctrl.ko_markdown(),
+            language="Markdown", line_wrapping=True, on_change=on_type,
         ).classes("w-full cm-en-editor").style("height:100%")
         edit_state["editor"] = editor
 
         def save_edit() -> None:
-            ctrl.save_en_markdown(editor.value)
-            ui.notify("편집 저장됨 — 번역은 이 내용을 사용합니다.", type="positive")
+            if is_en:
+                ctrl.save_en_markdown(editor.value)
+                ui.notify("편집 저장됨 — 번역은 이 내용을 사용합니다.", type="positive")
+            else:
+                ctrl.save_ko_markdown(editor.value)
+                ui.notify("번역 편집 저장됨 — 번역을 다시 실행하면 덮어써집니다. 헤더 수를 바꾸면 "
+                          "원문과 나란히 정렬되지 않을 수 있어요.", type="positive", timeout=5000)
             preview_pane.refresh()
             edit_toggle.refresh()
+            toc_panel.refresh()
+            status_chip.refresh()
 
         def revert() -> None:
             ctrl.save_and_reassemble()
-            conv_body.refresh()   # 에디터 내용까지 파일에서 다시 읽어야 한다
+            canvas.refresh()   # 에디터 내용까지 파일에서 다시 읽어야 한다
             edit_toggle.refresh()
             ui.notify("섹션 트리 기준으로 다시 만들었습니다.", type="info")
 
         with ui.row().classes("gap-2 items-center shrink-0 q-pt-xs"):
             ui.button("편집 저장", icon="save", on_click=save_edit).props("color=primary dense")
-            ui.button("되돌리기(원본 다시 렌더)", icon="restore", on_click=revert).props("outline dense")
+            if is_en:  # 번역문에는 '원본'이 없다 — 되돌리려면 번역을 다시 실행한다
+                ui.button("되돌리기(원본 다시 렌더)", icon="restore", on_click=revert).props("outline dense")
 
-    @ui.refreshable
-    def ko_preview() -> None:
-        ui.markdown(served_markdown(ctrl.ko_markdown(), tok, ctrl.wd.out_images) or "_아직 번역 안 됨 — 용어집 탭에서 번역을 실행하세요._",
-                    extras=["fenced-code-blocks", "tables", "latex"]).classes("md-preview")
+    # 캔버스 표시 상태 — 원문/번역/PDF 패널 토글 + 텍스트↔PDF 분할 비율 + PDF 스크롤 싱크 + 편집 분할 비율
+    viewer_state = {"en": True, "ko": True, "pdf": False, "split": 58, "sync": True,
+                    "stip": True, "edsplit": 50}  # stip: 한 언어만 볼 때 문장 짝 툴팁
 
-    # --- 번역 탭 결과: 원문/번역 토글 + 섹션·문단 정렬 나란히 (뷰어와 동일 정렬) ---
-    trans_view = {"en": True, "ko": True}
+    # 정렬 행 — 그리드·목차·섹션 점프가 모두 같은 행 목록을 봐야 한다(따로 계산하면 레벨을 바꾼 뒤
+    # 목차가 가리키는 행과 그리드의 행이 어긋난다). 문서 내용이 같으면 한 번만 계산한다.
+    _rows_memo: dict = {}
 
-    def _tr_toggle(key: str) -> None:
-        has_ko = bool(ctrl.ko_markdown())
-        nxt = {**trans_view, key: not trans_view[key]}
-        if not (nxt["en"] or (nxt["ko"] and has_ko)):
-            return  # 마지막 패널을 끄려는 클릭 → 무시
-        trans_view[key] = not trans_view[key]
-        trans_result.refresh()
-
-    @ui.refreshable
-    def trans_result() -> None:
-        _md = ["fenced-code-blocks", "tables", "latex"]
-        en_raw = ctrl.en_markdown()
-        ko_raw = ctrl.ko_markdown()
-        has_ko = bool(ko_raw)
-        show_en = trans_view["en"]
-        show_ko = trans_view["ko"] and has_ko
-        if not (show_en or show_ko):
-            show_en = True
-
-        def chip(label: str, key: str, enabled: bool = True) -> None:
-            active = trans_view[key] and enabled
-            b = ui.button(label, on_click=lambda k=key: _tr_toggle(k)).props(
-                "dense no-caps " + ("unelevated color=primary" if active else "outline color=grey-7"))
-            if not enabled:
-                b.disable()
-                b.tooltip("아직 번역 안 됨")
-
-        with ui.row().classes("items-center gap-2 w-full no-wrap"):
-            chip("원문", "en")
-            chip("번역", "ko", has_ko)
-
+    def layout_rows() -> dict:
+        en_raw, ko_raw = ctrl.en_markdown(), ctrl.ko_markdown()
+        key = (hash(en_raw), hash(ko_raw))
+        if _rows_memo.get("key") == key:
+            return _rows_memo["v"]
         en = served_markdown(en_raw, tok, ctrl.wd.out_images) if en_raw else ""
-        rows = align_rows(en, served_markdown(ko_raw, tok, ctrl.wd.out_images)) if has_ko else None
-        two = show_en and show_ko and rows is not None
-        # 탭(스크롤 컬럼) 안이라 그리드가 높이를 갖도록 고정 높이 컨테이너로 감싼다
-        with ui.element("div").style("height: calc(100vh - 210px); min-height: 0"):
-            if rows is not None:  # 정렬 그리드 (원문/번역 컬럼 토글)
-                with ui.element("div").classes("sbs-grid" + (" sbs-two" if two else "")).style(
-                        f"--sbs-cols:{'1fr 1fr' if two else '1fr'}"):
-                    for k, (enb, kob, head) in enumerate(rows):
-                        sep = " sbs-row-sep" if (head and k > 0) else ""
-                        if show_en:
-                            div = " sbs-cell-div" if two else ""
-                            with ui.element("div").classes(f"sbs-cell{div}{sep}"):
-                                ui.markdown(enb, extras=_md).classes("md-preview sbs-md")
-                        if show_ko:
-                            with ui.element("div").classes(f"sbs-cell{sep}"):
-                                ui.markdown(kob or "", extras=_md).classes("md-preview sbs-md")
-            else:  # 번역 전(ko 없음) 또는 정렬 실패 → 단일 패널
-                single = served_markdown(ko_raw, tok, ctrl.wd.out_images) if show_ko else en
-                with ui.element("div").classes("vpane md-preview").style("padding:0 12px"):
-                    ui.markdown(single or "_아직 번역 안 됨 — 용어집 탭에서 번역을 실행하세요._", extras=_md)
+        ko = served_markdown(ko_raw, tok, ctrl.wd.out_images) if ko_raw else ""
+        rows = align_rows(en, ko) if (en and ko) else None
+        aligned = rows is not None
+        if not aligned:  # 번역이 없거나 섹션 수가 달라 못 맞춤 → 원문 섹션만 행으로 (번역은 단일 패널)
+            rows = [(s, None, _heading_of(s)) for s in _split_sections(en)] if en else []
+        smap = sorted(ctrl.section_map(), key=lambda x: x["out_line"])
+        page_by_id = ctrl.section_pages()
+        row_sid = row_sections(rows, smap)  # 헤더 행 → 섹션 id (제목으로 순서대로 맞춤)
+        row_page0 = {k: page_by_id[sid] - 1 for k, sid in row_sid.items() if page_by_id.get(sid)}
+        v = {"en": en, "ko": ko, "rows": rows, "aligned": aligned, "smap": smap,
+             "page_by_id": page_by_id, "row_sid": row_sid, "row_page0": row_page0,
+             "sid_row": {sid: k for k, sid in row_sid.items()}}
+        _rows_memo.update(key=key, v=v)
+        return v
 
-    # 뷰어 표시 상태 — 원문/번역/PDF 패널 토글 + 목차 + 텍스트↔PDF 분할 비율 + PDF 스크롤 싱크
-    viewer_state = {"en": True, "ko": True, "pdf": False, "toc": True, "split": 58, "sync": True,
-                    "stip": True}  # stip: 한 언어만 볼 때 문장 짝 툴팁
+    def row_for_section(sid: str) -> int | None:
+        """섹션 id → 그리드 행. 제목이 안 맞아 못 찾은 섹션은 문서 순서상 직전에 찾은 섹션의 행으로."""
+        info = layout_rows()
+        hit = info["sid_row"].get(sid)
+        if hit is not None:
+            return hit
+        last = None
+        for e in info["smap"]:
+            if e["id"] in info["sid_row"]:
+                last = info["sid_row"][e["id"]]
+            if e["id"] == sid:
+                return last
+        return None
 
     def _row_scroll_js(k: int) -> str:  # 정렬 그리드의 k번째 행으로 스크롤
         return (f"document.querySelector('.sbs-grid [data-row=\"{k}\"]')"
@@ -2558,16 +2567,45 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def _sec_scroll_js(sid: str) -> str:  # 폴백 패널 — sec 앵커로 스크롤
         return f"document.getElementById('sec-{sid}')?.scrollIntoView({{behavior:'smooth', block:'start'}})"
 
-    def _render_toc(entries: list[tuple[int, str, str]]) -> None:
-        """접이식 목차 — entries: [(레벨, 제목, 클릭 시 실행할 스크롤 JS)]."""
+    def _toc_js(k: int) -> str:
+        """목차 항목 클릭 — 그리드의 그 행으로, PDF가 켜져 있으면 그 쪽으로도."""
+        page0 = layout_rows()["row_page0"].get(k)
+        js = _row_scroll_js(k)
+        if viewer_state["pdf"] and ctrl.pdf_page_count() > 0 and page0 is not None:
+            js += (f"; document.getElementById('pdfpage-{page0}')"
+                   "?.scrollIntoView({behavior:'smooth', block:'start'})")
+        return js
+
+    @ui.refreshable
+    def toc_panel() -> None:
+        """왼쪽 패널의 목차 — 원문 제목과 (정렬된 번역이 있으면) 한국어 제목을 함께.
+
+        한 줄에 둘을 다 쓰면 좁은 패널에서 잘리므로 두 줄로 쌓는다: 지금 보는 언어가 윗줄(진하게),
+        반대쪽이 아랫줄(옅게). 헤더를 번역하지 않아 둘이 같으면 한 줄만.
+        """
+        info = layout_rows()
+        rows = info["rows"]
+        ko_first = viewer_state["ko"] and not viewer_state["en"] and info["aligned"]
+        entries = []
+        for k, (_enb, kob, head) in enumerate(rows):
+            if not head:
+                continue
+            ko_head = _heading_of(kob) if (info["aligned"] and kob) else None
+            ko_text = ko_head[1] if ko_head and _head_key(ko_head[1]) != _head_key(head[1]) else None
+            entries.append((head[0], head[1], ko_text, k))
         with ui.element("div").classes("vtoc"):
-            ui.label("목차").classes("vtoc-title")
             if not entries:
                 ui.label("섹션 없음").classes("text-xs text-gray-400 px-2")
-            for level, text, js in entries:
-                ui.label(text).classes("vtoc-item").tooltip(text) \
-                    .style(f"padding-left:{8 + (max(level, 1) - 1) * 12}px") \
-                    .on("click", lambda j=js: ui.run_javascript(j))
+            for level, text, ko_text, k in entries:
+                first, second = (ko_text, text) if (ko_first and ko_text) else (text, ko_text)
+                item = ui.element("div").classes("vtoc-item").style(
+                    f"padding-left:{8 + (max(level, 1) - 1) * 12}px")
+                with item:
+                    ui.label(first).classes("vtoc-l1")
+                    if second:
+                        ui.label(second).classes("vtoc-l2")
+                item.tooltip(text + (f"\n{ko_text}" if ko_text else ""))
+                item.on("click", lambda _, kk=k: ui.run_javascript(_toc_js(kk)))
 
     # 정렬 그리드의 원문|번역 컬럼 경계를 드래그로 조절 (그리드 행 정렬은 그대로 유지).
     # 재렌더(토글)마다 실행되므로 window 리스너는 1회만, 핸들 바인딩은 dataset 플래그로 멱등하게.
@@ -2744,23 +2782,6 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         })(%d, '%s');
         """ % (cm_id, pv_sel)
 
-    # 목차 너비 드래그 — .vtoc의 --vtoc-w를 갱신. window 전역에 저장해 재렌더에도 유지, 리스너 1회.
-    _VTOC_DRAG_JS = """
-    (function(){
-      var toc=document.querySelector('.vtoc'), h=document.querySelector('.vtoc-handle'),
-          shell=toc?toc.closest('.vshell'):null;
-      if(window.__vtocW && toc){ toc.style.setProperty('--vtoc-w', window.__vtocW+'px'); }
-      if(h && !h.dataset.bound){ h.dataset.bound='1';
-        h.addEventListener('mousedown', function(e){ window.__vtocDrag=true; e.preventDefault(); document.body.style.userSelect='none'; }); }
-      if(!window.__vtocInit){ window.__vtocInit=true;
-        window.addEventListener('mousemove', function(e){ if(!window.__vtocDrag) return;
-          var t=document.querySelector('.vtoc'), s=t?t.closest('.vshell'):null; if(!s) return;
-          var w=Math.min(460, Math.max(140, e.clientX - s.getBoundingClientRect().left));
-          window.__vtocW=w; t.style.setProperty('--vtoc-w', w+'px'); });
-        window.addEventListener('mouseup', function(){ if(window.__vtocDrag){ window.__vtocDrag=false; document.body.style.userSelect=''; } }); }
-    })();
-    """
-
     def _pdf_pane() -> None:
         sizes = ctrl.pdf_page_sizes()
         with ui.element("div").classes("vpdf"):
@@ -2778,17 +2799,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             )
             ui.html(f'<div id="pdf-pages" style="width:100%">{imgs}</div>')
 
-    @ui.refreshable
-    def side_by_side() -> None:
-        """뷰어 — 원문·번역·PDF를 토글/리사이즈해 보고, 원문|번역은 섹션·문단 단위로 정렬. 좌측 목차."""
-        en_raw = ctrl.en_markdown()
-        if not en_raw:
+    def grid_view() -> None:
+        """읽기 모드 캔버스 — 원문·번역·PDF를 토글/리사이즈해 보고, 원문|번역은 섹션·문단 단위로 정렬."""
+        info = layout_rows()
+        if not info["en"]:
             ui.label("영어 마크다운이 없습니다 — 먼저 변환하세요.").classes("text-sm text-gray-500")
             return
         _md = ["fenced-code-blocks", "tables", "latex"]
-        en = served_markdown(en_raw, tok, ctrl.wd.out_images)
-        ko_raw = ctrl.ko_markdown()
-        has_ko = bool(ko_raw)
+        rows, aligned, row_page0 = info["rows"], info["aligned"], info["row_page0"]
+        has_ko = bool(info["ko"])
         has_pdf = ctrl.pdf_page_count() > 0
 
         show_en = viewer_state["en"]
@@ -2796,33 +2815,6 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         show_pdf = viewer_state["pdf"] and has_pdf
         if not (show_en or show_ko or show_pdf):
             show_en = True  # 최소 하나는 보이도록
-
-        rows = align_rows(en, served_markdown(ko_raw, tok, ctrl.wd.out_images)) if has_ko else None
-        aligned = rows is not None
-        if not aligned:
-            rows = [(s, None, _heading_of(s)) for s in _split_sections(en)]  # EN 전용 유사 행
-
-        # 섹션 → PDF 페이지(0-based). 목차 클릭 점프 + 텍스트 스크롤 시 PDF 따라오기(싱크)에 쓴다.
-        smap = sorted(ctrl.section_map(), key=lambda x: x["out_line"])
-        page_by_id = ctrl.section_pages()
-        # 정렬 행 인덱스 → PDF 페이지(0-based). 번역이 없어 원문만 보는 그리드도 같은 행 구조라 똑같이 단다.
-        row_page0 = row_pages(rows, smap, page_by_id)
-
-        def _entry_js(text_js: str, page0: int | None) -> str:
-            if show_pdf and page0 is not None:
-                return (text_js + "; document.getElementById('pdfpage-" + str(page0)
-                        + "')?.scrollIntoView({behavior:'smooth', block:'start'})")
-            return text_js
-
-        # 목차 — 정렬되면 행 인덱스로, 아니면 sec 앵커로 스크롤
-        if aligned:
-            entries = [(h[0], h[1], _entry_js(_row_scroll_js(k), row_page0.get(k)))
-                       for k, (_e, _k, h) in enumerate(rows) if h]
-        else:
-            entries = [(e["level"], e["text"],
-                        _entry_js(_sec_scroll_js(e["id"]),
-                                  (page_by_id.get(e["id"]) - 1) if page_by_id.get(e["id"]) else None))
-                       for e in smap]
 
         def text_area() -> None:
             two = show_en and show_ko and aligned
@@ -2862,27 +2854,22 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 # 정렬 실패 + 번역만 → 단일 패널 (여기서도 하이라이트·메모는 그대로 된다)
                 with ui.element("div").classes("vpane md-preview anno-scope").style(
                         "padding:1px 22px 8px").props("data-row=0 data-side=ko"):
-                    ui.markdown(served_markdown(ko_raw, tok, ctrl.wd.out_images), extras=_md)
+                    ui.markdown(info["ko"], extras=_md)
 
-        with ui.element("div").classes("vshell"):
-            if viewer_state["toc"]:
-                _render_toc(entries)
-                ui.element("div").classes("vtoc-handle")  # 목차 너비 드래그
-                ui.run_javascript(_VTOC_DRAG_JS)
-            with ui.element("div").classes("vmain"):
-                if (show_en or show_ko) and show_pdf:
-                    with ui.splitter(value=viewer_state["split"]).classes("w-full").style("height:100%") as sp:
-                        sp.on_value_change(lambda e: viewer_state.update(split=e.value))
-                        with sp.before:
-                            text_area()
-                        with sp.after:
-                            _pdf_pane()
-                    if row_page0 and viewer_state["sync"]:  # 텍스트 스크롤 → PDF 페이지 따라오기 (토글)
-                        ui.run_javascript(_PDF_SYNC_JS)
-                elif show_pdf:
-                    _pdf_pane()
-                else:
-                    text_area()
+        with ui.element("div").classes("vshell"), ui.element("div").classes("vmain"):
+            if (show_en or show_ko) and show_pdf:
+                with ui.splitter(value=viewer_state["split"]).classes("w-full").style("height:100%") as sp:
+                    sp.on_value_change(lambda e: viewer_state.update(split=e.value))
+                    with sp.before:
+                        text_area()
+                    with sp.after:
+                        _pdf_pane()
+                if row_page0 and viewer_state["sync"]:  # 텍스트 스크롤 → PDF 페이지 따라오기 (토글)
+                    ui.run_javascript(_PDF_SYNC_JS)
+            elif show_pdf:
+                _pdf_pane()
+            else:
+                text_area()
         ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")  # 하이라이트 다시 얹기
         # 토글 전 캡처해 둔 텍스트 스크롤 위치 복원 + (PDF 있으면) 그 위치로 PDF 정렬
         r = viewer_state.pop("_restore", None)
@@ -2892,13 +2879,44 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 f"if(!e)return;var m=e.scrollHeight-e.clientHeight; e.scrollTop=(m>0?{r}:0)*m;"
                 "e.dispatchEvent(new Event('scroll'));})()"), once=True)
 
+    def edit_view() -> None:
+        """편집 모드 캔버스 — 편집기 | 프리뷰 (PDF는 접혀 있다). 프리뷰는 `.conv-md`를 유지해
+        PDF 싱크·읽던 자리·인용 툴팁·그림 확대 계약을 그대로 쓴다."""
+        with ui.element("div").classes("vshell"), ui.element("div").classes("vmain"):
+            with ui.splitter(value=viewer_state["edsplit"]).classes("w-full").style("height:100%") as ed_sp:
+                ed_sp.on_value_change(lambda e: viewer_state.update(edsplit=e.value))
+                with ed_sp.before:
+                    with ui.column().classes("conv-ed").style(
+                            "height:100%; min-width:0; gap:4px; padding:0 8px 0 0; flex-wrap:nowrap"):
+                        editor_pane()
+                with ed_sp.after:
+                    with ui.element("div").classes("conv-md md-scroll-en").style(
+                            "height:100%; min-width:0; overflow-y:auto; overscroll-behavior:contain; padding:0 12px"):
+                        preview_pane()
+        # 에디터 ↔ 프리뷰 양방향 스크롤 싱크
+        editor = edit_state.get("editor")
+        if editor is not None:
+            ui.timer(0.35, lambda e=editor: ui.run_javascript(_md_sync_js(e.id, ".conv-md")), once=True)
+
+    @ui.refreshable
+    def canvas() -> None:
+        """하나뿐인 문서 캔버스 — 편집이 켜져 있으면 편집기|프리뷰, 아니면 원문|번역|PDF 그리드."""
+        if edit_state["on"]:
+            edit_view()
+        else:
+            grid_view()
+
     async def _vtoggle(key: str) -> None:
-        if key in ("en", "ko", "pdf"):  # 패널 토글만 가드 (toc·sync는 제외)
+        if key in ("en", "ko", "pdf"):  # 패널 토글만 가드 (sync·stip은 제외)
             has_ko = bool(ctrl.ko_markdown())
             has_pdf = ctrl.pdf_page_count() > 0
             nxt = {**viewer_state, key: not viewer_state[key]}
             if not (nxt["en"] or (nxt["ko"] and has_ko) or (nxt["pdf"] and has_pdf)):
                 return  # 마지막 패널을 끄려는 클릭 → 무시
+        if key == "pdf" and edit_state["on"]:
+            # 편집 중엔 동시 표시 ≤ 2 — PDF를 켜려면 편집을 끈다(접어 둔 표시도 지운다)
+            edit_state["on"] = False
+            viewer_state.pop("pdf_folded", None)
         # 재렌더 전 텍스트 스크롤 위치(비율)를 캡처 → 재렌더 후 복원(+PDF 정렬). PDF 열기가 위치를 잃지 않게.
         ratio = await ui.run_javascript(
             "(function(){var e=document.querySelector('.sbs-grid')||document.querySelector('.vpane');"
@@ -2906,10 +2924,13 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         viewer_state[key] = not viewer_state[key]
         viewer_state["_restore"] = ratio
         viewer_toolbar.refresh()
-        side_by_side.refresh()
+        canvas.refresh()
+        if key in ("en", "ko"):
+            toc_panel.refresh()  # 어느 언어가 윗줄인지 바뀐다
 
     @ui.refreshable
     def viewer_toolbar() -> None:
+        """캔버스 위 한 줄 — 무엇을 볼지(원문·번역·PDF), 편집, 메모·챗, 내보내기."""
         has_ko = bool(ctrl.ko_markdown())
         has_pdf = ctrl.pdf_page_count() > 0
 
@@ -2919,16 +2940,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 "dense no-caps " + ("unelevated color=primary" if active else "outline color=grey-7"))
             if not enabled:
                 b.disable()
-                b.tooltip("번역" if key == "ko" else "PDF 원본" + " 없음")
+                b.tooltip(("번역" if key == "ko" else "PDF 원본") + " 없음")
 
         show_pdf = viewer_state["pdf"] and has_pdf
-        with ui.row().classes("items-center gap-2 w-full no-wrap"):
-            ui.button(icon="menu", on_click=lambda: _vtoggle("toc")).props(
-                "flat dense round " + ("color=primary" if viewer_state["toc"] else "")).tooltip("목차 열기/닫기")
-            ui.separator().props("vertical").classes("h-6")
+        with ui.row().classes("items-center gap-2 w-full no-wrap md4-canvasbar"):
             chip("원문", "en")
             chip("번역", "ko", has_ko)
             chip("PDF", "pdf", has_pdf)
+            if viewer_state.get("pdf_folded"):  # 편집을 켜느라 접은 PDF — 어디 갔는지 알려 주고 되돌릴 길을 둔다
+                ui.badge("PDF 접힘", color="grey-6").props("outline").classes("cursor-pointer") \
+                    .tooltip("편집 중에는 두 패널만 보여 줍니다 — 눌러서 편집을 끄고 PDF로 돌아가기") \
+                    .on("click", lambda: toggle_edit(False))
+            ui.separator().props("vertical").classes("h-6")
+            edit_toggle()
             if show_pdf:  # PDF 켜졌을 때만 — 텍스트 스크롤에 PDF 페이지 따라오기
                 ui.button(icon="sync" if viewer_state["sync"] else "sync_disabled",
                           on_click=lambda: _vtoggle("sync")).props(
@@ -2947,12 +2971,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 "window.__mdChatTogglePanel && window.__mdChatTogglePanel()")).props(
                 "flat dense round color=grey-7").tooltip("논문에 질문하기 — 답의 근거 문단을 원문·번역으로 확인")
             ui.space()
-            export_fmt_review()
             library_button()
-            ui.button("영어 zip", icon="download", on_click=download_en).props("flat dense no-caps color=primary")
-            ui.button("한국어 zip", icon="download", on_click=download_ko).props("flat dense no-caps color=primary")
-            ui.button("메모 md", icon="download", on_click=download_notes) \
-                .props("flat dense no-caps color=primary").tooltip("하이라이트·메모를 마크다운으로 저장")
+            # 내보내기는 메뉴 하나로 — 세 단추가 툴바 폭을 먹던 것을 접는다. 형식 선택도 같은 메뉴 안에.
+            with ui.button("내보내기", icon="download").props("flat dense no-caps color=primary"):
+                with ui.menu().props("anchor='bottom right' self='top right'").classes("md4-exportmenu"):
+                    ui.menu_item("영어 마크다운 (zip)", on_click=download_en)
+                    item_ko = ui.menu_item("한국어 마크다운 (zip)", on_click=download_ko)
+                    if not has_ko:
+                        item_ko.disable()
+                    ui.menu_item("하이라이트·메모 (md)", on_click=download_notes)
+                    ui.separator()
+                    with ui.row().classes("items-center gap-2 q-px-md q-py-xs no-wrap"):
+                        ui.label("형식").classes("text-xs text-gray-500")
+                        export_fmt_review()
 
     # 번역 진행(섹션별) — 워커 스레드가 콜백으로 쓰고, UI 타이머가 폴링해 트리 아이콘을 갱신
     # failures는 지난 실행 것을 status.json에서 되살린다 — 메모리에만 두면 리뷰 화면을 다시 열었을 때
@@ -2993,7 +3024,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         _apply_tree_status(nodes, translate_state["status"], _unticked_ids())
         tree.update()
 
-    # --- 용어집 편집 상태 (build 스코프 — 번역 탭 편집 + '번역할 섹션'의 용어 추가가 공유) · 자동 저장 ---
+    # --- 용어집 편집 상태 (build 스코프 — 용어집 시트 편집 + '번역할 섹션'의 용어 추가가 공유) · 자동 저장 ---
     gloss_entries = [{"term": e.term, "korean": e.korean, "policy": e.policy}
                      for e in ctrl.glossary_entries()]
 
@@ -3120,8 +3151,24 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         timer = ui.timer(0.5, tick)
 
-    def glossary_tab() -> None:
+    def translate_run_panel() -> None:
+        """번역 패널 머리 — 실행 단추·모델·진행·실패 목록. 용어집 표는 여기서 여는 시트(대화상자)에."""
         def do_translate() -> None:
+            # 번역문을 직접 고쳐 둔 게 있으면 덮어쓰기 전에 묻는다 (원문 재조립의 guard_manual_edit와 같은 이유)
+            if not ctrl.has_manual_edit_ko():
+                _start_translate()
+                return
+            with ui.dialog() as dlg, ui.card().classes("gap-2"):
+                ui.label("직접 편집한 번역이 사라집니다").classes("text-base font-medium")
+                ui.label("번역을 실행하면 번역 마크다운을 새 결과로 다시 쓰기 때문에, 편집기에서 고친 "
+                         "번역문이 덮어써집니다.").classes("text-sm text-gray-600").style("max-width:420px")
+                with ui.row().classes("justify-end gap-2 w-full"):
+                    ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
+                    ui.button("번역 실행", on_click=lambda: (dlg.close(), _start_translate())) \
+                        .props("unelevated dense no-caps color=negative")
+            dlg.open()
+
+        def _start_translate() -> None:
             gloss_autosave()
             try:
                 # 고른 번역 모델 — 지난번과 다르면 캐시 키가 바뀌어 전체를 새 모델로 다시 번역한다
@@ -3165,6 +3212,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             translate_btn.disable()
             translate_state["active"] = True
             bar.visible = True
+            status_chip.refresh()  # 헤더 칩 → '번역 중…'
 
             def tick() -> None:
                 t = job.total
@@ -3189,9 +3237,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             job.seen = True
             translate_state["active"] = False
             if job.status == "done":
-                ko_preview.refresh()
-                trans_result.refresh()  # 번역 탭 결과(원문·번역 나란히) 갱신
-                side_by_side.refresh()
+                # 결과는 그 자리(캔버스)에 바로 — 번역 컬럼을 켜고 그리드·목차·툴바를 새 ko.md로 다시 그린다
+                viewer_state["ko"] = True
+                refresh_canvas()
+                viewer_toolbar.refresh()
                 translate_state["failures"] = (job.result or {}).get("failures", {})
                 bar.value = 1
                 prog_lbl.text = "✓ " + job.message
@@ -3203,6 +3252,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     ui.notify(job.error, type="negative")
             update_tree_status()
             failure_panel.refresh()
+            status_chip.refresh()
             translate_btn.enable()
 
         @ui.refreshable
@@ -3228,30 +3278,46 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     "어긋나서 그 섹션은 영어를 그대로 뒀습니다. 재번역해도 계속 실패하면 표·수식이 복잡한 섹션이니 "
                     "번역 후 뷰어에서 직접 손봐도 됩니다.").classes("text-xs text-gray-500")
 
-        # 설명·버튼·진행바는 스크롤해도 항상 보이도록 상단 고정 (용어 행이 길어지므로)
-        with ui.column().classes("gloss-sticky w-full gap-2"):
+        # 용어집 표는 넓다(원어·번역어·처리 방식) — 좁은 패널 대신 캔버스 위에 시트로 띄운다.
+        # 번역 전에 한 번 집중해서 보는 단계라 상시 탭보다 이 편이 맞다.
+        with ui.dialog() as gloss_dialog, ui.card().classes("gap-2").style(
+                "width:760px; max-width:94vw; max-height:84vh"):
+            with ui.row().classes("items-center w-full no-wrap gap-2"):
+                ui.label("용어집").classes("text-lg font-bold")
+                ui.space()
+                ui.button("행 추가", icon="add", on_click=add_gloss_row).props("outline dense no-caps")
+                ui.button("선택 섹션에서 용어 추가", icon="playlist_add", on_click=add_terms_from_selected) \
+                    .props("outline dense no-caps").tooltip("번역할 섹션으로 체크한 섹션에서 새 용어를 뽑아 추가")
+                ui.button(icon="close", on_click=gloss_dialog.close).props("flat dense round")
             ui.markdown(
-                "**용어집** — 변환할 때 **Abstract·Introduction 본문과 모든 섹션 제목**에서 핵심 용어를 "
-                "자동으로 뽑아 만듭니다. 번역 전에 한국어 표기와 처리 방식"
-                "(번역 / 음역 / 원문 유지 / 첫 등장 시 병기)을 검토·수정하세요.\n\n"
-                "본문에만 나오는 용어는 왼쪽 **번역할 섹션**에서 섹션을 고른 뒤 **용어 추가**를 누르면 "
-                "그 섹션에서 새 용어를 뽑아 채웁니다."
-            ).classes("text-sm")
-            with ui.row().classes("items-center gap-2"):
-                ui.button("행 추가", icon="add", on_click=add_gloss_row).props("outline")
-                translate_btn = ui.button("이 용어집으로 번역 실행", icon="translate",
-                                          on_click=do_translate).props("color=secondary")
-                model_pick = ui.select(ctrl.translate_model_options(), value=ctrl.translate_model(),
-                                       label="번역 모델").props("dense outlined options-dense") \
-                    .classes("min-w-[16rem]") \
-                    .tooltip("기본은 이 논문을 지난번에 번역한 모델입니다. 다른 모델을 고르면 캐시를 쓰지 않고 "
-                             "전체를 그 모델로 다시 번역합니다(실패 섹션 재번역도 이 모델로).")
+                "변환할 때 **Abstract·Introduction 본문과 모든 섹션 제목**에서 핵심 용어를 자동으로 뽑아 만듭니다. "
+                "번역 전에 한국어 표기와 처리 방식(번역 / 음역 / 원문 유지 / 첫 등장 시 병기)을 검토·수정하세요. "
+                "고친 내용은 바로 저장됩니다."
+            ).classes("text-xs text-gray-600")
+            with ui.column().classes("w-full gap-1 md4-scroll").style("overflow-y:auto; min-height:0"):
+                gloss_rows()
+        gloss_dialog.on("hide", lambda: gloss_open_btn.refresh())
+
+        @ui.refreshable
+        def gloss_open_btn() -> None:
+            n = sum(1 for d in gloss_entries if d["term"].strip())
+            ui.button(f"용어집 검토 ({n})", icon="menu_book", on_click=gloss_dialog.open) \
+                .props("outline no-caps color=primary").tooltip("번역에 쓸 용어집을 표로 검토·수정")
+
+        with ui.column().classes("w-full gap-2"):
+            with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                translate_btn = ui.button("번역 실행", icon="translate", on_click=do_translate) \
+                    .props("color=secondary no-caps").tooltip("체크한 섹션을 아래 용어집·번역 방식으로 번역합니다")
+                gloss_open_btn()
+            model_pick = ui.select(ctrl.translate_model_options(), value=ctrl.translate_model(),
+                                   label="번역 모델").props("dense outlined options-dense").classes("w-full") \
+                .tooltip("기본은 이 논문을 지난번에 번역한 모델입니다. 다른 모델을 고르면 캐시를 쓰지 않고 "
+                         "전체를 그 모델로 다시 번역합니다(실패 섹션 재번역도 이 모델로).")
             bar = ui.linear_progress(value=0, show_value=False) \
                 .props("size=14px rounded color=secondary").classes("w-full")
             bar.visible = False
             prog_lbl = ui.label("").classes("text-sm text-gray-500")
             failure_panel()  # 번역 실패 섹션 이유 + 재번역 버튼 (실패 없으면 안 보임)
-        gloss_rows()
         running = jobs.get(ctrl.wd.root, "translate")
         if running is not None and running.running:  # 번역 중에 떠났다 돌아왔다 → 진행 바를 다시 붙인다
             attach_translate(running)
@@ -3272,187 +3338,112 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         return None
 
     async def goto_md(sid: str) -> None:
-        """섹션 클릭 → 현재 보이는 패널의 해당 위치로 이동.
+        """섹션 클릭(구조 패널) → 캔버스의 그 섹션으로.
 
-        마크다운이 켜져 있으면 마크다운의 그 섹션으로, 마크다운이 꺼지고 PDF만 켜져 있으면
-        PDF의 해당 페이지로 스크롤한다 (임의로 다른 패널을 열지 않는다). 나란히면 마크다운을
-        스크롤하면 PDF도 싱크로 따라온다.
+        읽기 모드면 정렬 그리드의 그 행으로(PDF가 켜져 있으면 그 쪽으로도), 편집 모드면 프리뷰의
+        헤더 앵커로 + 에디터도 같은 소스 줄로. 텍스트가 꺼지고 PDF만 켜져 있으면 PDF의 해당 쪽으로.
+        임의로 다른 패널을 열지 않는다.
         """
-        import asyncio
-
         has_pdf = ctrl.pdf_page_count() > 0
-        if not conv_view["md"] and conv_view["pdf"] and has_pdf:  # PDF만 켜짐 → PDF로 이동
-            pg = _sec_page0(sid)
-            if pg is None:
-                ui.notify("이 섹션의 PDF 페이지 정보가 없습니다.", type="info")
+        show_text = viewer_state["en"] or (viewer_state["ko"] and bool(ctrl.ko_markdown()))
+        show_pdf = viewer_state["pdf"] and has_pdf
+        pg = _sec_page0(sid)
+        if edit_state["on"]:
+            if edit_state["lang"] != "en":
+                ui.notify("번역 편집 중에는 섹션 이동이 원문 기준으로만 됩니다 — 대상을 '원문'으로 바꿔 주세요.",
+                          type="info")
                 return
-            await ui.run_javascript(
-                f"document.getElementById('pdfpage-{pg}')?.scrollIntoView"
-                "({behavior:'smooth', block:'start'});"
-            )
-            return
-        # 편집 중이어도 프리뷰가 나란히 살아 있으므로 편집을 끄지 않는다 — 입력 맥락을 끊지 않는 것이
-        # 분할 뷰의 순이익이다. 대신 에디터도 같은 소스 줄로 옮긴다(아래 revealEditor).
-        if not conv_view["md"]:  # 마크다운·PDF 둘 다 꺼진 예외 상황 → 마크다운을 켠다
-            conv_view["md"] = True
-            conv_toolbar.refresh()
-            conv_body.refresh()
-        await asyncio.sleep(0.12)  # 렌더 후 DOM 준비되도록
-        # 마크다운을 해당 섹션으로. 나란히(PDF도 표시)면 클릭 스크롤은 sync 이벤트를 확실히 못 태우므로
-        # PDF도 해당 페이지로 직접 이동시킨다(각 패널은 독립 스크롤 컨테이너).
-        js = f"document.getElementById('sec-{sid}')?.scrollIntoView({{behavior:'instant', block:'start'}});"
-        if edit_state["on"]:  # 에디터도 그 헤더의 소스 줄로 (섹션맵의 out_line을 그대로 쓴다)
+            # 편집 중이어도 프리뷰가 나란히 살아 있으므로 편집을 끄지 않는다 — 입력 맥락을 끊지 않는 것이
+            # 분할 뷰의 순이익이다. 대신 에디터도 같은 소스 줄로 옮긴다(revealEditor).
+            js = f"document.getElementById('sec-{sid}')?.scrollIntoView({{behavior:'instant', block:'start'}});"
             ln = next((e["out_line"] for e in ctrl.section_map() if e.get("id") == sid), None)
             if isinstance(ln, int):
                 js += f" window.__mdsync && window.__mdsync.revealEditor({max(ln - 1, 0)});"
-        if conv_view["pdf"] and has_pdf:
-            pg = _sec_page0(sid)
-            if pg is not None:
-                js += (f" document.getElementById('pdfpage-{pg}')"
+            await ui.run_javascript(js)
+            return
+        js = ""
+        if show_text:
+            k = row_for_section(sid)
+            if k is not None:
+                js += (f"document.querySelector('.sbs-grid [data-row=\"{k}\"]')"
                        "?.scrollIntoView({behavior:'instant', block:'start'});")
+        # 나란히(PDF도 표시)면 클릭 스크롤은 sync 이벤트를 확실히 못 태우므로 PDF도 직접 옮긴다
+        if show_pdf and pg is not None:
+            js += f" document.getElementById('pdfpage-{pg}')?.scrollIntoView({{behavior:'instant', block:'start'}});"
+        if not js:
+            ui.notify("이 섹션의 위치 정보가 없습니다.", type="info")
+            return
         await ui.run_javascript(js)
 
-    # --- 변환 탭 우측: 마크다운 / PDF 토글 + 나란히(마크다운 스크롤 → PDF 페이지 싱크) ---
-    conv_view = {"md": True, "pdf": False, "split": 55, "edsplit": 50}
+    # ---------- 왼쪽 작업 패널 — 목차 / 구조 / 번역 / 설정 ----------
+    # 옛 '변환 탭 왼쪽 열'과 '번역 탭 왼쪽 열'이 여기로 들어왔다. 네 모드를 모두 지어 두고(작업 재부착·
+    # refreshable 참조가 살아 있어야 한다) 보이는 것만 바꾼다. 레일의 같은 단추를 다시 누르면 접힌다.
+    _PANELS = (("toc", "목차", "toc"), ("structure", "구조", "account_tree"),
+               ("translate", "번역", "translate"), ("settings", "설정", "tune"))
+    root_key = str(ctrl.wd.root.resolve())
+    panel_state: dict = {"mode": None, "splitter": None, "width": 30, "boxes": {}}
 
-    def _preview_box() -> None:
-        # conv-md: PDF 싱크 컨테이너이자 읽던 자리 셀렉터. 프리뷰가 계속 이 클래스를 갖는 것이 중요하다 —
-        # 에디터에 재사용하면 scroll_memory 키(.conv-md#N)와 _pdf_sync_js 컨테이너가 어긋난다.
-        with ui.element("div").classes("conv-md md-scroll-en").style(
-                "height:100%; min-width:0; overflow-y:auto; overscroll-behavior:contain; padding:0 12px"):
-            preview_pane()
-
-    def _conv_md_pane() -> None:
-        """마크다운 자리 — 편집이 꺼져 있으면 프리뷰 하나, 켜져 있으면 에디터|프리뷰 분할."""
-        if not edit_state["on"]:
-            _preview_box()
-            return
-        with ui.splitter(value=conv_view["edsplit"]).classes("w-full").style("height:100%") as ed_sp:
-            ed_sp.on_value_change(lambda e: conv_view.update(edsplit=e.value))
-            with ed_sp.before:
-                with ui.column().classes("conv-ed").style(
-                        "height:100%; min-width:0; gap:4px; padding:0 8px 0 0; flex-wrap:nowrap"):
-                    editor_pane()
-            with ed_sp.after:
-                _preview_box()
-        # 에디터 ↔ 프리뷰 양방향 스크롤 싱크 (PDF는 프리뷰 뒤에 체인으로 붙는다)
-        editor = edit_state.get("editor")
-        if editor is not None:
-            ui.timer(0.35, lambda e=editor: ui.run_javascript(_md_sync_js(e.id, ".conv-md")), once=True)
-
-    async def _cv_set_mode(mode: str) -> None:
-        """보기 모드 단일 선택 — 'md' | 'pdf' | 'both'. 재렌더 전 마크다운 스크롤 위치를 캡처해
-        재렌더 후 복원하고, PDF도 그 위치에 맞춘다(스크롤 유지 + 정렬)."""
-        ratio = None
-        if conv_view["md"]:  # 현재 프리뷰가 보이면 스크롤 비율 캡처 (편집 중에도 프리뷰는 살아 있다)
-            ratio = await ui.run_javascript(
-                "(function(){var e=document.querySelector('.conv-md');if(!e)return null;"
-                "var m=e.scrollHeight-e.clientHeight;return m>0?e.scrollTop/m:0;})()")
-        conv_view["md"] = mode in ("md", "both")
-        conv_view["pdf"] = mode in ("pdf", "both")
-        conv_view.pop("pdf_folded", None)  # 사용자가 직접 고른 모드가 자동 접기보다 우선한다
-        if not conv_view["md"] and edit_state["on"]:  # PDF만 보기 → 마크다운 편집 종료
-            edit_state["on"] = False
-        if conv_view["md"] and conv_view["pdf"] and edit_state["on"]:
-            conv_view["pdf"] = False  # 동시 표시 패널 ≤ 2
-            conv_view["pdf_folded"] = True
-        conv_view["_restore"] = ratio if conv_view["md"] else None
-        conv_toolbar.refresh()
-        conv_body.refresh()
-
-    # 변환 탭 좌측 열(설정·섹션 트리) 접기 — 기본 창 1280에서 이 열이 46%(574px)를 먹어
-    # 마크다운 자리가 649px밖에 안 남는다. 편집|프리뷰로 쪼개면 324px씩이라 논문 본문이 안 읽힌다
-    # (실측 가독 하한은 패널 400px). 접으면 611px씩이 되어 편안해진다. 폭은 드래그한 값을 기억한다.
-    side_state = {"splitter": None, "width": 46}
-
-    def toggle_side() -> None:
-        sp = side_state["splitter"]
-        if sp is None:
-            return
-        if sp.value > 1:
-            side_state["width"] = sp.value
-            sp.value = 0
-        else:
-            sp.value = side_state["width"] or 46
-        conv_toolbar.refresh()
+    def set_panel(mode: str | None, toggle: bool = True) -> None:
+        """패널 모드 바꾸기. toggle이면 이미 그 모드일 때 접는다(None = 접힘). 논문별로 기억한다."""
+        if toggle and mode == panel_state["mode"]:
+            mode = None
+        panel_state["mode"] = mode
+        state.setdefault("panel_by_root", {})[root_key] = mode
+        for key, box in panel_state["boxes"].items():
+            box.set_visibility(key == mode)
+        sp = panel_state["splitter"]
+        if sp is not None:
+            if mode is None:
+                if sp.value > 1:
+                    panel_state["width"] = sp.value
+                sp.value = 0
+            elif sp.value <= 1:
+                sp.value = panel_state["width"] or 30
+        rail.refresh()
 
     def open_side() -> None:
-        """✎ 섹션 구조 점프의 목적지가 접혀 있으면 펼친다 (안 보이는 곳으로 점프하지 않도록)."""
-        sp = side_state["splitter"]
-        if sp is not None and sp.value <= 1:
-            sp.value = side_state["width"] or 46
-            conv_toolbar.refresh()
+        """✎ 섹션 구조 점프의 목적지(구조 패널)가 안 보이면 연다 (안 보이는 곳으로 점프하지 않도록)."""
+        set_panel("structure", toggle=False)
 
     ui.on("md4-open-side", lambda _: open_side())
 
     @ui.refreshable
-    def conv_toolbar() -> None:
-        has_pdf = ctrl.pdf_page_count() > 0
-        # 현재 모드 (PDF 없으면 항상 마크다운)
-        mode = "both" if (conv_view["md"] and conv_view["pdf"] and has_pdf) \
-            else ("pdf" if (conv_view["pdf"] and has_pdf) else "md")
-
-        with ui.row().classes("items-center gap-3 w-full no-wrap q-px-xs q-py-sm"):
-            sp = side_state["splitter"]
-            folded = sp is not None and sp.value <= 1
-            ui.button(icon="menu_open" if folded else "menu", on_click=toggle_side) \
-                .props("flat dense round color=grey-7").tooltip(
-                    "설정·섹션 트리 열 펼치기" if folded else "설정·섹션 트리 열 접기 (본문 폭 넓히기)")
-            opts = {"md": "마크다운"}
-            if has_pdf:
-                opts["both"] = "마크다운 + PDF"
-                opts["pdf"] = "PDF"
-            tog = ui.toggle(opts, value=mode, on_change=lambda e: _cv_set_mode(e.value)) \
-                .props("no-caps unelevated toggle-color=primary color=grey-3 text-color=grey-8") \
-                .classes("conv-viewtoggle")
-            if not has_pdf:
-                tog.tooltip("PDF 원본 없음 — 마크다운만")
-            if mode in ("md", "both"):  # 마크다운이 보일 때만 편집 토글 노출
-                ui.separator().props("vertical").classes("h-6")
-                edit_toggle()
-            if conv_view.get("pdf_folded"):  # 편집을 켜느라 접은 PDF — 어디 갔는지 알려 주고 되돌릴 길을 둔다
-                ui.badge("PDF 접힘", color="grey-6").props("outline").classes("cursor-pointer") \
-                    .tooltip("편집 중에는 두 패널만 보여 줍니다 — 눌러서 편집을 끄고 PDF로 돌아가기") \
-                    .on("click", lambda: toggle_edit(False))
-            ui.space()
-            export_fmt_review()
-            library_button()
-            ui.button("영어 다운로드 (zip)", icon="download", on_click=download_en) \
-                .props("flat dense no-caps color=primary")
+    def rail() -> None:
+        for key, label, icon in _PANELS:
+            on = panel_state["mode"] == key
+            b = ui.element("div").classes("md4-railbtn" + (" on" if on else ""))
+            with b:
+                ui.icon(icon, size="20px")
+                ui.label(label)
+            b.on("click", lambda _, k=key: set_panel(k))
+            b.tooltip({"toc": "목차 — 섹션으로 이동 (원문·한국어 제목)",
+                       "structure": "구조 — 헤더 레벨·섹션 트리·레이아웃 수정·다시 변환",
+                       "translate": "번역 — 번역할 섹션·용어집·실행",
+                       "settings": "설정 — 인용 표기·캡션·저자"}[key] + (" (누르면 접힘)" if on else ""))
 
     @ui.refreshable
-    def conv_body() -> None:
-        has_pdf = ctrl.pdf_page_count() > 0
-        show_md = conv_view["md"]
-        show_pdf = conv_view["pdf"] and has_pdf
-        if not (show_md or show_pdf):
-            show_md = True
-        with ui.element("div").classes("vshell"), ui.element("div").classes("vmain"):
-            if show_md and show_pdf:
-                with ui.splitter(value=conv_view["split"]).classes("w-full").style("height:100%") as sp:
-                    sp.on_value_change(lambda e: conv_view.update(split=e.value))
-                    with sp.before:
-                        _conv_md_pane()
-                    with sp.after:
-                        _pdf_pane()
-                # 프리뷰 스크롤 → PDF 페이지 싱크. 편집 중에도 건다 — 프리뷰는 항상 살아 있고,
-                # 에디터가 프리뷰를 밀면 프리뷰의 scroll 이벤트가 나므로 PDF가 체인 끝으로 따라온다.
-                ui.run_javascript(_pdf_sync_js(".conv-md"))
-            elif show_pdf:
-                _pdf_pane()
-            else:
-                _conv_md_pane()
-        # 모드 전환 전 캡처해 둔 마크다운 스크롤 위치를 복원하고, 나란히면 PDF도 그 위치로 맞춘다.
-        r = conv_view.pop("_restore", None)
-        if show_md and r:
-            ui.timer(0.13, lambda: ui.run_javascript(
-                "(function(){var e=document.querySelector('.conv-md');if(!e)return;"
-                f"var m=e.scrollHeight-e.clientHeight; e.scrollTop=(m>0?{r}:0)*m;"
-                "e.dispatchEvent(new Event('scroll'));})()"), once=True)  # scroll 이벤트 → PDF 싱크 정렬
+    def status_chip() -> None:
+        """헤더 오른쪽 — 이 논문이 어디까지 왔는지와 다음 할 일. 누르면 번역 패널로."""
+        running = jobs.is_running(ctrl.wd.root, "translate")
+        has_ko = bool(ctrl.ko_markdown())
+        fails = len(translate_state.get("failures") or {})
+        if running:
+            icon, text, cls, tip = "autorenew", "번역 중…", "md4-chip busy", "번역이 돌고 있습니다 — 진행은 번역 패널에서"
+        elif has_ko:
+            text = "번역됨" + (f" · 실패 {fails}" if fails else "")
+            icon, cls = ("warning", "md4-chip warn") if fails else ("check_circle", "md4-chip done")
+            tip = ("구조 검증에 실패해 영어로 남은 섹션이 있습니다 — 번역 패널에서 재번역"
+                   if fails else "번역이 있습니다 — 다시 번역하거나 섹션을 바꾸려면 번역 패널로")
+        else:
+            icon, text, cls, tip = "translate", "번역 안 됨 · 번역하기", "md4-chip todo", \
+                "변환은 끝났습니다. 다음은 번역 — 누르면 번역 패널이 열립니다"
+        chip = ui.element("div").classes(cls)
+        with chip:
+            ui.icon(icon, size="15px").classes("md4-spin" if running else "")
+            ui.label(text)
+        chip.on("click", lambda: set_panel("translate", toggle=False)).tooltip(tip)
 
-    # ---------- 본문 레이아웃: 2단계 (변환 → 번역) ----------
-    _panel = "p-3 gap-3 w-full"
-    _scroll = "height: calc(100vh - 108px); overflow-y: auto"
+    # ---------- 패널 공통 ----------
 
     def cap(text: str) -> None:
         ui.label(text).classes("text-xs text-gray-500").style("margin:-6px 0 4px 2px")
@@ -3466,8 +3457,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def reapply() -> None:
             def apply() -> None:
                 commit()  # 자동 저장 + rerender (raw→평문→새 표기 링크)
-                refresh_preview()
-                conv_body.refresh()
+                refresh_canvas()
 
             guard_manual_edit(apply)
 
@@ -3504,7 +3494,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 fresh = not job.seen
                 job.seen = True
                 if job.status == "done":
-                    refresh_preview()
+                    refresh_canvas()
                     push_cite_tips()  # 새로 파싱한 서지정보를 호버 툴팁 맵에 반영
                     if fresh:
                         ui.notify(job.message, type="positive")
@@ -3562,10 +3552,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def set_capstyle(v: str) -> None:
             def apply() -> None:
                 ctrl.set_setting("caption_style", v)
-                commit()  # 재조립 → 새 캡션 표기로 프리뷰 갱신
-                refresh_preview()
+                commit()  # 재조립 → 새 캡션 표기로 캔버스 갱신
                 capstyle_picker.refresh()
-                conv_body.refresh()
+                refresh_canvas()
 
             guard_manual_edit(apply, cancelled=capstyle_picker.refresh)
 
@@ -3597,7 +3586,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             chosen = [p for p in ("email", "affiliation") if apar[p]]
             changed = ctrl.set_author_parts(chosen)  # 저장된 구조화 저자로 raw.md 저자 블록만 재렌더
             commit()  # 저장 + 재조립
-            refresh_preview()
+            refresh_canvas()
             if not changed and not ctrl.wd.authors_json.exists():
                 ui.notify("이 논문엔 구조화된 저자 정보가 없어(옛 변환·키 없음) 표시만 저장됩니다. "
                           "재변환하면 반영됩니다.", type="info")
@@ -3669,9 +3658,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                                  section_picker.refresh())).props("outline dense")
             ui.button("전체 해제", on_click=lambda: (ctrl.set_all_translate(False), ctrl.save(),
                                                  section_picker.refresh())).props("outline dense")
-            ui.button("용어 추가", icon="playlist_add", on_click=add_terms_from_selected).props("outline dense") \
-                .tooltip("선택한 섹션에서 새 용어를 뽑아 용어집에 추가")
-        _translate_refs["picker"] = section_picker  # 변환 탭 레벨 변경 시 갱신되도록 등록
+        _translate_refs["picker"] = section_picker  # 구조 패널에서 레벨을 바꾸면 갱신되도록 등록
         section_picker()  # 번역 중 진행 상태는 트리 아이템의 아이콘으로 직접 표시된다
 
         ui.separator().classes("my-2")
@@ -3734,8 +3721,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ui.button("폴더로 저장", icon="drive_file_move", on_click=save_to_library) \
             .props("flat dense no-caps color=grey-8").tooltip(tip)
 
-    # 내보내기 형식 드롭다운 — 변환·번역·뷰어 탭 다운로드 옆에 두되 전역 설정(config)을 그대로 쓴다.
-    # 공유 refreshable이라 한 탭에서 바꾸면 다른 탭·홈의 선택도 같은 값으로 동기화된다.
+    # 내보내기 형식 드롭다운 — 캔버스 툴바의 내보내기 메뉴 안에 두되 전역 설정(config)을 그대로 쓴다.
+    # 공유 refreshable이라 여기서 바꾸면 홈의 선택도 같은 값으로 동기화된다.
     @ui.refreshable
     def export_fmt_review() -> None:
         def _pick(e) -> None:  # noqa: ANN001
@@ -3745,14 +3732,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ui.select(_EXPORT_TARGET, value=config.resolve_export_target(), on_change=_pick) \
             .props("dense outlined").classes("w-28").tooltip("다운로드 zip에 적용하는 형식 (전역 설정)")
 
-    # --- 레이아웃 자동 수정 (변환 탭) — 깨진 헤더·수식·문단을 처음부터 끝까지 훑어 AI로 고친다 ---
+    # --- 레이아웃 자동 수정 (구조 패널) — 깨진 헤더·수식·문단을 처음부터 끝까지 훑어 AI로 고친다 ---
     def _after_relayout() -> None:
         """raw.md·구조가 통째로 바뀌었으므로 이 화면의 파생 뷰를 전부 다시 그린다."""
-        refresh_preview()
         section_list.refresh()
         batch_level_panel.refresh()
         _refresh_translate_tree()
-        edit_toggle.refresh()
+        refresh_canvas()
+        viewer_toolbar.refresh()  # '수동 편집됨' 배지 등
         push_cite_tips()  # 재조립하며 인용 링크가 다시 붙었다 → 호버 툴팁 맵 갱신
 
     with ui.dialog() as fix_dialog, ui.card().classes("gap-3").style("width:560px;max-width:92vw"):
@@ -3891,7 +3878,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         fix_undo.set_visibility(ctrl.can_undo_layout_fix())
         fix_dialog.open()
 
-    # --- 재변환 (변환 탭) — 원본 PDF에서 추출부터 다시. 추출기 개선을 이미 변환한 논문에 반영한다 ---
+    # --- 재변환 (구조 패널) — 원본 PDF에서 추출부터 다시. 추출기 개선을 이미 변환한 논문에 반영한다 ---
     # 원문이 통째로 바뀌므로 번역·레이아웃 수정과 겹쳐 돌면 서로의 결과를 덮는다 → 하나라도 돌면 막는다.
     _REWRITES = (("translate", "번역"), ("layout", "레이아웃 수정"), ("reconvert", "다시 변환"))
 
@@ -3976,21 +3963,46 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         timer = ui.timer(0.5, tick)
         tick()
 
-    # ===== 단계 패널 (탭 컨트롤은 헤더에) =====
-    # 번역까지 끝난 논문은 뷰어를, 아니면 변환 탭을 기본으로 연다.
-    # 마지막으로 보던 단계로 돌아간다. 처음 여는 논문은 번역이 있으면 뷰어, 없으면 변환부터.
-    _seen = state.get("step_by_root", {}).get(str(ctrl.wd.root.resolve()))
-    _default_tab = step_sbs if ctrl.ko_markdown() else step_convert
-    _start_tab = _seen if _seen in _STEP_NAMES else _default_tab
-    with ui.tab_panels(steps, value=_start_tab).classes("w-full md4-steps").props("keep-alive"):  # md4-steps: 챗봇이 열리면 이 폭이 줄어 본문이 덮이지 않는다
-        # ---------- 1단계: 변환 ----------
-        with ui.tab_panel(step_convert).classes("p-0"):
-            with ui.splitter(value=46).classes("w-full").style("height: calc(100vh - 108px)") as sp1:
-                side_state["splitter"] = sp1
-                sp1.on_value_change(
-                    lambda e: side_state.update(width=e.value) if e.value > 1 else None)
-                with sp1.before:
-                    with ui.column().classes(_panel + " md4-scroll").style(_scroll):
+    # ===== 본문: 레일 + (작업 패널 | 캔버스) =====
+    # 처음 여는 논문은 번역이 있으면 목차, 없으면 구조부터(먼저 할 일이 섹션 구조 확인이라). 다시 열면
+    # 보던 패널로 — 스크롤은 창 쪽 sessionStorage가 기억한다(§ui/scroll_memory.py).
+    _seen_mode = state.get("panel_by_root", {}).get(root_key, "?")
+    _valid_modes = (None, *(k for k, _l, _i in _PANELS))
+    panel_state["mode"] = _seen_mode if _seen_mode in _valid_modes else ("toc" if ctrl.ko_markdown() else "structure")
+
+    def _on_split(e) -> None:  # noqa: ANN001 — 패널 폭 드래그. 끝까지 밀어 닫으면 레일도 '접힘'으로
+        if e.value > 1:
+            panel_state["width"] = e.value
+            if panel_state["mode"] is None:  # 닫힌 패널을 끌어 열었다 → 마지막 모드로 (없으면 목차)
+                set_panel(state.get("panel_by_root", {}).get(root_key) or "toc", toggle=False)
+        elif panel_state["mode"] is not None:
+            panel_state["mode"] = None
+            for box in panel_state["boxes"].values():
+                box.set_visibility(False)
+            rail.refresh()
+
+    with chip_slot:  # 헤더 상태 칩 — 패널보다 먼저 그린다(번역 중에 돌아온 화면은 패널을 짓다가 칩을 갱신한다)
+        status_chip()
+
+    # md4-steps: 챗봇·메모 서랍이 열리면 이 폭이 줄어 본문이 덮이지 않는다 (§chat_panel.CSS)
+    with ui.row().classes("w-full no-wrap gap-0 md4-steps md4-body"):
+        with ui.column().classes("md4-rail gap-0"):
+            rail()
+        with ui.splitter(value=panel_state["width"] if panel_state["mode"] else 0, limits=(0, 60)) \
+                .classes("md4-split").style("flex:1 1 auto; min-width:0; height:100%") as sp:
+            panel_state["splitter"] = sp
+            sp.on_value_change(_on_split)
+            with sp.before:
+                with ui.column().classes("md4-panel md4-scroll"):
+                    # ---------- 목차 ----------
+                    with ui.column().classes("w-full gap-1") as box:
+                        ui.label("목차").classes("md4-panel-title")
+                        toc_panel()
+                    panel_state["boxes"]["toc"] = box
+
+                    # ---------- 구조 (옛 변환 탭 왼쪽 열) ----------
+                    with ui.column().classes("w-full gap-3") as box:
+                        ui.label("구조").classes("md4-panel-title")
                         ui.button("레이아웃 자동 수정", icon="auto_fix_high", on_click=open_fix_dialog) \
                             .props("outline no-caps color=primary").classes("w-full").tooltip(
                                 "쪼개진 헤더·깨진 수식·끊긴 문단을 AI가 문서 전체에서 찾아 고칩니다")
@@ -4016,54 +4028,40 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         if jobs.is_running(ctrl.wd.root, "reconvert"):
                             attach_reconvert(jobs.get(ctrl.wd.root, "reconvert"))
 
-                        with ui.expansion("변환 설정", icon="settings").classes("w-full"):
-                            convert_settings()
-
                         with ui.expansion("일괄 레벨 조정", icon="format_list_numbered").classes("w-full"):
                             batch_level_panel()
 
-                        with ui.expansion("섹션 트리", icon="account_tree").classes("w-full"):
-                            ui.label("제목 1~6: 헤더 단계 · 본문으로: 헤더를 풀어 제목 텍스트를 일반 문단으로 남김") \
-                                .classes("text-xs text-gray-500")
-                            ui.label("위에 합침: 제목 줄을 없애고 그 내용을 위 섹션에 합침 · 통째 삭제: 제목·본문 모두 제거") \
-                                .classes("text-xs text-gray-500")
-                            ui.label("기울임: run-in 소제목을 기울임 문단으로 표기").classes("text-xs text-gray-500")
-                            ui.label("제목을 클릭하면 열려 있는 패널(마크다운이면 마크다운, PDF만이면 PDF)의 해당 위치로 이동합니다.") \
-                                .classes("text-xs text-gray-500")
-                            section_list()
+                        ui.label("섹션 트리").classes("font-semibold text-sm text-primary")
+                        ui.label("제목 1~6: 헤더 단계 · 본문으로: 헤더를 풀어 제목 텍스트를 일반 문단으로 남김") \
+                            .classes("text-xs text-gray-500")
+                        ui.label("위에 합침: 제목 줄을 없애고 그 내용을 위 섹션에 합침 · 통째 삭제: 제목·본문 모두 제거") \
+                            .classes("text-xs text-gray-500")
+                        ui.label("기울임: run-in 소제목을 기울임 문단으로 표기").classes("text-xs text-gray-500")
+                        ui.label("제목을 클릭하면 캔버스의 해당 위치로 이동합니다 (PDF가 켜져 있으면 그 쪽으로도).") \
+                            .classes("text-xs text-gray-500")
+                        section_list()
+                    panel_state["boxes"]["structure"] = box
 
-                with sp1.after:
-                    with ui.column().classes("p-3 w-full gap-2").style("height: calc(100vh - 108px)"):
-                        conv_toolbar()   # 마크다운/PDF 토글 + 직접편집 + 다운로드
-                        conv_body()      # 나란히면 마크다운 스크롤 → PDF 페이지 싱크
-
-        # ---------- 2단계: 번역 ----------
-        with ui.tab_panel(step_translate).classes("p-0"):
-            with ui.splitter(value=32).classes("w-full").style("height: calc(100vh - 108px)") as sp2:
-                with sp2.before:
-                    with ui.column().classes(_panel + " md4-scroll").style(_scroll):
+                    # ---------- 번역 (옛 번역 탭 왼쪽 열 + 용어집 머리) ----------
+                    with ui.column().classes("w-full gap-3") as box:
+                        ui.label("번역").classes("md4-panel-title")
+                        translate_run_panel()
+                        ui.separator()
                         translate_settings()
-                with sp2.after:
-                    with ui.column().classes("p-3 w-full md4-scroll").style(_scroll):
-                        with ui.row().classes("items-center w-full no-wrap"):
-                            with ui.tabs() as ttabs:
-                                tab_gloss = ui.tab("용어집 · 번역 실행")
-                                tab_ko = ui.tab("결과 (원문·번역)")
-                            ui.space()
-                            export_fmt_review()
-                            ui.button("한국어 다운로드 (zip)", icon="download", on_click=download_ko) \
-                                .props("flat dense no-caps color=primary")
-                        with ui.tab_panels(ttabs, value=tab_gloss).classes("w-full").props("keep-alive"):
-                            with ui.tab_panel(tab_gloss):
-                                glossary_tab()
-                            with ui.tab_panel(tab_ko):
-                                trans_result()  # 원문/번역 토글 + 나란히 정렬
+                    panel_state["boxes"]["translate"] = box
 
-        # ---------- 3단계: 뷰어 (EN | KO) ----------
-        with ui.tab_panel(step_sbs).classes("p-0"):
-            with ui.column().classes("p-3 w-full gap-2").style("height: calc(100vh - 108px)"):
-                viewer_toolbar()
-                side_by_side()
+                    # ---------- 설정 (옛 변환 설정) ----------
+                    with ui.column().classes("w-full gap-3") as box:
+                        ui.label("설정").classes("md4-panel-title")
+                        convert_settings()
+                    panel_state["boxes"]["settings"] = box
+
+                    for key, box in panel_state["boxes"].items():
+                        box.set_visibility(key == panel_state["mode"])
+            with sp.after:
+                with ui.column().classes("p-3 w-full gap-2 md4-canvascol").style("height:100%"):
+                    viewer_toolbar()
+                    canvas()
 
     # 자리를 비운 사이 끝난 작업 — 이 화면은 이미 결과 파일로 지어졌으니 알림만 한 번
     for job in jobs.unseen_finished(ctrl.wd.root):
@@ -5502,7 +5500,7 @@ def build_home(state: dict) -> None:
                     .props("dense").tooltip("스캔 PDF일 때만 — born-digital 논문엔 불필요, 느림")
                 # 내보내기 형식(범용/Notion/Obsidian) — 전역 설정. 다운로드 zip에 적용(이미지 임베드·인용 표기).
                 export_target_select(labeled=True)
-                # 캡션 표기 — 변환 탭과 동일한 '렌더 미리보기 클릭' 피커로 통일 (드롭다운 아님)
+                # 캡션 표기 — 리뷰 화면의 설정 패널과 동일한 '렌더 미리보기 클릭' 피커로 통일 (드롭다운 아님)
                 ui.label("그림·표 캡션 표기").classes("text-sm q-mt-sm")
 
                 @ui.refreshable
