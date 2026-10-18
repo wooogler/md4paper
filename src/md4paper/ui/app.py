@@ -1794,6 +1794,13 @@ _CHROME_CSS = """
 .md4-railbtn.on { background: rgba(35,131,226,.13); color: #2383e2; }
 .md4-panel { height: 100%; width: 100%; overflow-y: auto; padding: 12px; gap: 12px; flex-wrap: nowrap; }
 .md4-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; }
+/* 메모 패널 — 머리 한 줄 아래를 편집기(또는 미리보기)가 꽉 채운다 (.conv-ed와 같은 규칙, 범위만 따로) */
+.md4-notes { flex: 1 1 auto; min-height: 0; flex-wrap: nowrap; }
+.md4-notes .cm-en-editor { flex: 1 1 auto; min-height: 0; }
+.md4-notes .cm-editor { height: 100%; background: #fbfaf9; }
+.md4-notes .cm-scroller { overscroll-behavior: contain; }
+.md4-notes .md4-notes-preview { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.md4-notes .md4-notes-status { font-size: 11px; color: #9a968e; }
 /* 목차 언어 선택 — 제목 줄 오른쪽의 작은 글자 셋. 고른 것만 파랗게, 나머지는 패널 제목과 같은 회색. */
 .md4-toclang .q-btn { min-height: 18px; padding: 0 5px; font-size: 10.5px; font-weight: 500; color: #9a968e; }
 .md4-toclang .q-btn.text-primary { color: #2383e2; font-weight: 600; }
@@ -1809,6 +1816,7 @@ _CHROME_CSS = """
 .md4-exportmenu .q-item { min-height: 36px; }
 @media (prefers-color-scheme: dark) {
   .md4-rail { background: #1b1b1b; border-right-color: #333; }
+  .md4-notes .cm-editor { background: #1d1d1d; }
   .md4-railbtn { color: #a8a8a8; }
   .md4-railbtn:hover { background: rgba(255,255,255,.08); color: #e0e0e0; }
   .md4-railbtn.on { background: rgba(90,150,230,.22); color: #7bb7ff; }
@@ -3502,16 +3510,17 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             return
         await ui.run_javascript(js)
 
-    # ---------- 왼쪽 작업 패널 — 목차 / 구조 / 번역 / 설정 ----------
-    # 옛 '변환 탭 왼쪽 열'과 '번역 탭 왼쪽 열'이 여기로 들어왔다. 네 모드를 모두 지어 두고(작업 재부착·
+    # ---------- 왼쪽 작업 패널 — 목차 / 구조 / 번역 / 설정 / 메모 ----------
+    # 옛 '변환 탭 왼쪽 열'과 '번역 탭 왼쪽 열'이 여기로 들어왔다. 모드를 모두 지어 두고(작업 재부착·
     # refreshable 참조가 살아 있어야 한다) 보이는 것만 바꾼다. 레일의 같은 단추를 다시 누르면 접힌다.
     _PANELS = (("toc", "목차", "toc"), ("structure", "구조", "account_tree"),
-               ("translate", "번역", "translate"), ("settings", "설정", "tune"))
+               ("translate", "번역", "translate"), ("settings", "설정", "tune"),
+               ("notes", "메모", "edit_note"))
     root_key = str(ctrl.wd.root.resolve())
     panel_state: dict = {"mode": None, "splitter": None, "boxes": {}}
     # 패널 폭(%)은 모드마다 따로 — 목차는 한 줄짜리 제목 목록이라 좁게, 섹션 트리·설정은 넓게 시작한다.
     # 드래그한 폭은 모드별로 전역 설정([ui].panel_width_<모드>)에 기억해 다른 논문·다음 실행에도 그대로.
-    _DEFAULT_PANEL_W = {"toc": 20, "structure": 30, "translate": 30, "settings": 30}
+    _DEFAULT_PANEL_W = {"toc": 20, "structure": 30, "translate": 30, "settings": 30, "notes": 34}
 
     def panel_width(mode: str) -> float:
         v = config.load_config().get("ui", {}).get(f"panel_width_{mode}")
@@ -3534,11 +3543,47 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         _width_save["timer"] = ui.timer(0.6, flush, once=True)
 
+    # 메모 패널 — 논문 전체에 대한 자유 메모(paper.md4/notes.md). 상태는 파일뿐이고 UI는 모델을 갖지 않는다.
+    # 타자가 0.8초쯤 멈추면 원자적으로 저장한다(remember_width와 같은 모아 쓰기). 패널을 떠나거나
+    # 내보내기 직전에는 기다리지 않고 바로 쓴다 — 마지막 글자가 빠진 채 내려받히지 않게.
+    notes_state: dict = {"timer": None, "pending": None, "status": None}
+
+    def notes_flush() -> None:
+        t = notes_state["timer"]
+        if t is not None:
+            t.cancel()
+            notes_state["timer"] = None
+        text = notes_state["pending"]
+        if text is None:
+            return
+        notes_state["pending"] = None
+        try:
+            ctrl.save_notes(text)
+        except OSError as e:
+            notes_set_status(f"저장 실패: {e}")
+            return
+        notes_set_status("저장됨")
+
+    def notes_set_status(text: str) -> None:
+        lbl = notes_state["status"]
+        if lbl is not None:
+            lbl.set_text(text)
+
+    def notes_typed(text: str) -> None:
+        notes_state["pending"] = text
+        notes_set_status("저장 중…")
+        t = notes_state["timer"]
+        if t is not None:
+            t.cancel()
+        notes_state["timer"] = ui.timer(0.8, notes_flush, once=True)
+
     def set_panel(mode: str | None, toggle: bool = True) -> None:
         """패널 모드 바꾸기. toggle이면 이미 그 모드일 때 접는다(None = 접힘). 논문별로 기억한다."""
         if toggle and mode == panel_state["mode"]:
             mode = None
         prev = panel_state["mode"]
+        if prev == "notes" and mode != "notes":
+            notes_flush()
         panel_state["mode"] = mode
         state.setdefault("panel_by_root", {})[root_key] = mode
         for key, box in panel_state["boxes"].items():
@@ -3568,7 +3613,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             b.tooltip({"toc": "목차 — 섹션으로 이동 (원문·한국어 제목)",
                        "structure": "구조 — 헤더 레벨·섹션 트리·레이아웃 수정·다시 변환",
                        "translate": "번역 — 번역할 섹션·용어집·실행",
-                       "settings": "설정 — 인용 표기·캡션·저자"}[key] + (" (누르면 접힘)" if on else ""))
+                       "settings": "설정 — 인용 표기·캡션·저자",
+                       "notes": "메모 — 논문 전체에 대한 자유 메모 (마크다운, 자동 저장)"}[key]
+                      + (" (누르면 접힘)" if on else ""))
 
     @ui.refreshable
     def status_chip() -> None:
@@ -3840,11 +3887,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         await desktop.deliver(name, data)
 
     async def download_notes() -> None:
-        """하이라이트·메모를 마크다운 한 장으로 (인용구 + 그 아래 메모)."""
+        """하이라이트·메모를 마크다운 한 장으로 — 맨 위에 메모 패널의 자유 메모, 그 아래 인용구 + 메모."""
         await ui.run_javascript("window.__mdAnnoFlush && window.__mdAnnoFlush()")
         await asyncio.sleep(0.3)  # 클라이언트의 되저장이 파일에 닿을 짬
-        items = annotations.load(ctrl.wd)
-        if not items:
+        notes_flush()  # 메모 패널의 기다리던 자동 저장도 — 마지막 글자까지 담기게
+        if not annotations.has_any(ctrl.wd):
             ui.notify("표시해 둔 하이라이트·메모가 없습니다.", type="warning")
             return
         name, data = annotations.export_bytes(ctrl.wd, m.title or "")
@@ -4125,6 +4172,31 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         timer = ui.timer(0.5, tick)
         tick()
 
+    def notes_panel() -> None:
+        """메모 패널 속 — 머리(제목 · 저장 상태 · 미리보기 토글) + 편집기 / 렌더된 마크다운."""
+        with ui.row().classes("w-full items-center no-wrap gap-2 shrink-0"):
+            ui.label("메모").classes("md4-panel-title")
+            notes_state["status"] = ui.label("저장됨").classes("md4-notes-status")
+            ui.space()
+            preview_sw = ui.switch("미리보기").props("dense size=sm").classes("text-xs") \
+                .tooltip("켜면 편집기 대신 렌더된 마크다운을 보입니다 — 저장된 내용 그대로")
+
+        editor = ui.codemirror(ctrl.notes(), language="Markdown", line_wrapping=True,
+                               on_change=lambda e: notes_typed(e.value)) \
+            .classes("w-full cm-en-editor").style("height:100%")
+        _extras = ["fenced-code-blocks", "tables", "latex"]
+        preview = ui.markdown("", extras=_extras).classes("md-preview md4-notes-preview w-full")
+        preview.set_visibility(False)
+
+        def toggle_preview(on: bool) -> None:
+            if on:
+                notes_flush()  # 미리보기는 저장된 것과 같은 내용 — 기다리던 저장부터 끝낸다
+                preview.set_content(editor.value or "_아직 메모가 없습니다._")
+            editor.set_visibility(not on)
+            preview.set_visibility(on)
+
+        preview_sw.on_value_change(lambda e: toggle_preview(bool(e.value)))
+
     # ===== 본문: 레일 + (작업 패널 | 캔버스) =====
     # 처음 여는 논문은 번역이 있으면 목차, 없으면 구조부터(먼저 할 일이 섹션 구조 확인이라). 다시 열면
     # 보던 패널로 — 스크롤은 창 쪽 sessionStorage가 기억한다(§ui/scroll_memory.py).
@@ -4217,6 +4289,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         ui.label("설정").classes("md4-panel-title")
                         convert_settings()
                     panel_state["boxes"]["settings"] = box
+
+                    # ---------- 메모 (논문 전체 자유 메모 — notes.md) ----------
+                    with ui.column().classes("w-full gap-2 md4-notes") as box:
+                        notes_panel()
+                    panel_state["boxes"]["notes"] = box
 
                     for key, box in panel_state["boxes"].items():
                         box.set_visibility(key == panel_state["mode"])

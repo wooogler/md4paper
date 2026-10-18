@@ -126,3 +126,40 @@ def test_export_bytes_sanitizes_filename(tmp_path):
     name, data = annotations.export_bytes(wd, "A/B: 논문")
     assert "/" not in name and ":" not in name and name.endswith(".md")
     assert "아직 표시한 내용이 없습니다" in data.decode("utf-8")
+
+
+# --- 자유 메모(notes.md) 병합 ---
+def test_to_markdown_puts_free_notes_on_top():
+    items = annotations.normalize([_item(note="문장 메모", anchors=[_anchor("en", quote="first")])])
+    md = annotations.to_markdown(items, "T", notes="# 전체 인상\n\n방법이 약하다.\n")
+    assert md.startswith("# T — 하이라이트 · 메모\n\n## 메모\n\n# 전체 인상\n\n방법이 약하다.\n\n## 하이라이트\n\n> first")
+    assert "문장 메모" in md
+
+
+def test_to_markdown_unchanged_without_free_notes():
+    items = annotations.normalize([_item(anchors=[_anchor("en", quote="first")])])
+    assert annotations.to_markdown(items, "T") == annotations.to_markdown(items, "T", notes="")
+    assert "## 하이라이트" not in annotations.to_markdown(items, "T")
+
+
+def test_export_with_notes_only(tmp_path):
+    """하이라이트가 하나도 없어도 자유 메모만으로 내려받을 수 있다."""
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.ensure()
+    assert annotations.has_any(wd) is False
+    wd.notes_md.write_text("전체적으로 좋음\n", encoding="utf-8")
+    assert annotations.has_any(wd) is True
+    name, data = annotations.export_bytes(wd, "제목")
+    assert name == "제목 - 메모.md"
+    assert data.decode("utf-8") == "# 제목 — 하이라이트 · 메모\n\n## 메모\n\n전체적으로 좋음\n"
+    assert "_아직 표시한 내용이 없습니다._" not in data.decode("utf-8")
+
+
+def test_export_merges_notes_and_highlights(tmp_path):
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.ensure()
+    wd.notes_md.write_text("요약 메모", encoding="utf-8")
+    annotations.save(wd, [_item(note="여기 중요")])
+    text = annotations.export_bytes(wd)[1].decode("utf-8")
+    assert text.index("## 메모") < text.index("요약 메모") < text.index("## 하이라이트") < text.index("여기 중요")
+
