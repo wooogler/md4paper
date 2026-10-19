@@ -13,11 +13,11 @@ import re
 import time
 from pathlib import Path
 
-from md4paper import config, library, projects
+from md4paper import config, formula_fix, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
-    annotations, chat_panel, desktop, figrefs, find_bar, jobs, mdrender, reanchor, scroll_memory, sentpair, spa,
-    tabstore, update_banner,
+    annotations, chat_panel, desktop, figrefs, find_bar, formula_pop, jobs, mdrender, reanchor, scroll_memory,
+    sentpair, spa, tabstore, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir, paper_title, set_pinned, set_project
@@ -1032,6 +1032,7 @@ _ANNO_HTML = """
     var sel = window.getSelection();
     if (sel && !sel.isCollapsed && scopeOf(sel.anchorNode)) return;   // 드래그 선택 — 색 막대 몫
     if (e.target.closest('a, img, button, input, textarea, mark.md-anno')) return;
+    if (window.__md4FxAt && window.__md4FxAt(e.target)) return;   // 수식 — 원본 대조 팝오버 몫
     var cell = e.target.closest('.sbs-grid.sbs-tip .sbs-cell');
     if (!cell || cell.classList.contains('sbs-ghost')) return;
     var t = e.target.closest('[data-pair]');
@@ -1339,6 +1340,7 @@ _IMG_ZOOM_HTML = """
   document.addEventListener('click', function(ev){
     var t = ev.target;
     if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.md-preview')) return;
+    if (window.__md4FxAt && window.__md4FxAt(t)) return;   // 읽기 실패로 남은 수식 그림 — 원본 대조 팝오버 몫
     ev.preventDefault();             // 그림을 감싼 링크가 있어도 이동하지 않게
     openZoom(t.currentSrc || t.src, t.getAttribute('alt') || t.getAttribute('title') || '');
   });
@@ -2569,6 +2571,30 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_css(_ANNO_CSS)
     spa.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
     spa.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
+    spa.add_css(formula_pop.CSS)  # 수식 클릭 → 원본 크롭 대조 · 다시 생성
+    spa.add_body_html(f"<script>{formula_pop.init_js(tok)}</script>")
+    spa.add_body_html(formula_pop.HTML)
+
+    async def on_formula_apply(e) -> None:  # noqa: ANN001 — 팝오버의 '적용'
+        from nicegui import run
+
+        a = e.args or {}
+        try:
+            res = await run.io_bound(ctrl.apply_formula, str(a.get("id", "")),
+                                     str(a.get("latex", "")), str(a.get("kind", "")))
+        except ValueError as err:
+            ui.notify(f"수식을 반영하지 못했습니다: {err}", type="warning")
+            await ui.run_javascript("window.__md4FxClose && window.__md4FxClose()")
+            return
+        await run.io_bound(library.auto_export, ctrl.wd)
+        ui.run_javascript("window.__md4FxClose && window.__md4FxClose()")
+        refresh_canvas()
+        msg = "수식을 바꿨습니다"
+        if ctrl.ko_markdown():
+            msg += " · 번역문도 같은 자리를 바꿨습니다" if res["ko"] else " · 번역은 다시 번역해야 반영됩니다"
+        ui.notify(msg, type="positive")
+
+    ui.on("md4-fx-apply", on_formula_apply)
     spa.add_css(chat_panel.CSS)  # 뷰어 챗봇 서랍 — 질문 → 정렬 문단 근거 답변
     spa.add_body_html(f"<script>{chat_panel.init_js(tok, *chat_panel.readiness())}</script>")
     spa.add_body_html(chat_panel.HTML)
@@ -2744,8 +2770,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         key = (hash(en_raw), hash(ko_raw))
         if _rows_memo.get("key") == key:
             return _rows_memo["v"]
-        en = served_markdown(en_raw, tok, ctrl.wd.out_images) if en_raw else ""
-        ko = served_markdown(ko_raw, tok, ctrl.wd.out_images) if ko_raw else ""
+        # 수식 블록 앞에 빈 표식 — 클릭하면 원본 크롭과 대조한다 (§formula_fix; 파일엔 안 쓴다)
+        fx_map = ctrl.formula_mapping() if en_raw else {}
+        en = served_markdown(formula_fix.tag(en_raw, fx_map), tok, ctrl.wd.out_images) if en_raw else ""
+        ko = served_markdown(formula_fix.tag(ko_raw, fx_map), tok, ctrl.wd.out_images) if ko_raw else ""
         rows = align_rows(en, ko) if (en and ko) else None
         aligned = rows is not None
         if not aligned:  # 번역이 없거나 섹션 수가 달라 못 맞춤 → 원문 섹션만 행으로 (번역은 단일 패널)
@@ -6345,6 +6373,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         return {"ok": True, "count": len(saved)}
 
     chat_panel.register_routes(fastapi_app, _wd_for)  # 뷰어 챗봇 — /chat/{token}
+    formula_pop.register_routes(fastapi_app, _wd_for)  # 수식 원본 크롭·다시 생성 — /formula/{token}/{id}
     fastapi_app.add_static_files(CREPE_URL, CREPE_DIR)  # 메모 패널 위지윅 편집기 번들
 
     def index_view() -> None:

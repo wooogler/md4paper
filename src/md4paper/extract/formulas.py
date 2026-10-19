@@ -133,6 +133,9 @@ def collect(document, source, images_dir) -> list[dict]:  # noqa: ANN001
         last_real = {
             "id": f"formula-{seq:02d}", "slot": slot, "file": name,
             "page": page + 1, "orig": hint, "number": number, "latex": "",
+            # 크롭한 영역 (`page` 쪽의 좌상단 원점 pt, 여백 포함) — 화면에서 원본과
+            # 대조하거나 더 크게 다시 자를 때의 근거. 이 필드 전에 변환한 논문엔 없다(크롭 PNG로 충분).
+            "bbox": [round(v, 1) for v in rect],
         }
         records.append(last_real)
     return records

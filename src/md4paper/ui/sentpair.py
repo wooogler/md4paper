@@ -39,6 +39,9 @@ JS = """
     }
     for (i = 0; i < groups.length; i++){
       var node = groups[i][0], hs = groups[i][1];
+      // MathML 안의 글자는 감싸지 않는다 — <mi> 안에 HTML span이 들어가면 수식 조판이 풀려
+      // 글자가 띄엄띄엄 흩어진다. 오프셋 계산엔 그대로 들어가므로 앞뒤 구간은 어긋나지 않는다.
+      if (node.parentElement && node.parentElement.closest('math')) continue;
       hs.sort(function(x, y){ return y.a - x.a; });
       for (k = 0; k < hs.length; k++){
         var h = hs[k];
