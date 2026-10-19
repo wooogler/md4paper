@@ -2011,7 +2011,7 @@ _CHROME_CSS = """
 .md4-tabtools { padding-bottom: 5px; opacity: .9; flex: 0 0 auto; }
 /* 헤더 오른쪽 상태 칩 — 이 논문이 어디까지 왔는지 + 다음 할 일(누르면 번역 패널).
    흰 칩(todo)이 '다음 할 일'이고, 번역된 논문은 헤더에 잠긴 옅은 칩으로 조용히. */
-.md4-chipslot { align-self: center; padding: 0 6px 5px 0; }
+.md4-chipslot { align-self: flex-end; padding: 0 8px 3px 0; }  /* 32px 탭과 가운데를 맞춘다: (32-26)/2 */
 .md4-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px 0 8px;
   border-radius: 13px; font-size: 11.5px; font-weight: 500; cursor: pointer; white-space: nowrap;
   color: rgba(255,255,255,.92); background: rgba(255,255,255,.16); transition: background .12s ease; }
