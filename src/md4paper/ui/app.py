@@ -2581,7 +2581,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         a = e.args or {}
         try:
             res = await run.io_bound(ctrl.apply_formula, str(a.get("id", "")),
-                                     str(a.get("latex", "")), str(a.get("kind", "")))
+                                     str(a.get("latex", "")), str(a.get("kind", "")),
+                                     a.get("page"), a.get("rect"), a.get("expect"))
         except ValueError as err:
             ui.notify(f"수식을 반영하지 못했습니다: {err}", type="warning")
             await ui.run_javascript("window.__md4FxClose && window.__md4FxClose()")
@@ -2771,9 +2772,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if _rows_memo.get("key") == key:
             return _rows_memo["v"]
         # 수식 블록 앞에 빈 표식 — 클릭하면 원본 크롭과 대조한다 (§formula_fix; 파일엔 안 쓴다)
-        fx_map = ctrl.formula_mapping() if en_raw else {}
-        en = served_markdown(formula_fix.tag(en_raw, fx_map), tok, ctrl.wd.out_images) if en_raw else ""
-        ko = served_markdown(formula_fix.tag(ko_raw, fx_map), tok, ctrl.wd.out_images) if ko_raw else ""
+        fx_map, fx_inline = ctrl.formula_marks() if en_raw else ({}, {})
+        en = served_markdown(formula_fix.tag(en_raw, fx_map, fx_inline), tok, ctrl.wd.out_images) if en_raw else ""
+        ko = served_markdown(formula_fix.tag(ko_raw, fx_map, fx_inline), tok, ctrl.wd.out_images) if ko_raw else ""
         rows = align_rows(en, ko) if (en and ko) else None
         aligned = rows is not None
         if not aligned:  # 번역이 없거나 섹션 수가 달라 못 맞춤 → 원문 섹션만 행으로 (번역은 단일 패널)
