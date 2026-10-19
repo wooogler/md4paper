@@ -326,6 +326,67 @@ class UIController:
         return {"sections": len(self.manifest.sections), "emphasis": new_meta.get("emphasis", 0),
                 "garbled": new_meta.get("garbled_chars", 0), "has_translation": bool(self.ko_markdown())}
 
+    # --- 수식 한 개 다시 읽기 (캔버스 수식 팝오버) ---
+    def formula_mapping(self) -> dict[str, str]:
+        """en.md 수식 블록 원문 → 레코드 id (화면 표식용; §formula_fix.assign)."""
+        from md4paper import formula_fix, formulas
+
+        records = formulas.load(self.wd)
+        return formula_fix.assign(self.en_markdown(), records) if records else {}
+
+    def regenerate_formula(self, fid: str, provider) -> dict:  # noqa: ANN001
+        from md4paper import formula_fix
+
+        return formula_fix.regenerate(self.wd, fid, provider)
+
+    def apply_formula(self, fid: str, latex: str, kind: str) -> dict:
+        """다시 읽은 수식을 반영 — 원천(formulas.json·raw.md) → en.md 재조립 → ko.md 같은 자리.
+
+        직접 편집한 en.md가 있으면 재조립하지 않고(편집이 사라진다) en.md의 그 자리만 바꾼다.
+        ko.md에서도 같은 블록을 바꾸면 번역 캐시 키를 새 원문으로 옮겨 그 섹션을 '원문 바뀜'으로
+        잡지 않는다. ko.md에서 못 찾으면 캐시를 그대로 둬, 그 섹션이 '원문 바뀜'으로 잡힌다.
+        """
+        from md4paper import formula_fix, formulas, pipeline
+        from md4paper.translate.apply import _build_units
+
+        rec = next((r for r in formulas.load(self.wd) if r.get("id") == fid), None)
+        if rec is None:
+            raise ValueError(f"수식 {fid}를 찾지 못했습니다.")
+        en_before = self.en_markdown()
+        en_old = formula_fix.locate(en_before, rec)
+        res = formula_fix.apply(self.wd, fid, latex, kind)
+        new_block = res["new"]
+        if self.has_manual_edit():
+            patched = formula_fix.patch_text(en_before, rec, new_block)
+            if patched is not None:
+                self._write_atomic(self.wd.en_md, patched)
+        else:
+            pipeline.run_assemble(self.wd, force=True)
+            self.clear_manual_edit()
+        ko_patched = False
+        ko = self.ko_markdown()
+        if ko:
+            new_ko = formula_fix.patch_text(ko, rec, new_block)
+            if new_ko is not None:
+                self._write_atomic(self.wd.ko_md, new_ko)
+                ko_patched = True
+        moved = 0
+        if ko_patched and en_old and self.wd.cache_json.exists():
+            try:
+                stored = json.loads(self.wd.cache_json.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                stored = None
+            if isinstance(stored, dict):
+                units = _build_units(self.wd, self.manifest, en_before.splitlines())
+                sources = [u["source"] for u in units] + [
+                    t for u in units for _sid, t in (u.get("sections") or [])]
+                chunks = stored.setdefault("chunks", {})
+                moved = formula_fix.rekey_cache(chunks, sources, en_old, new_block)
+                if moved:
+                    self.wd.cache_json.write_text(
+                        json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"block": new_block, "ko": ko_patched, "cache_moved": moved}
+
     def can_undo_layout_fix(self) -> bool:
         from md4paper import relayout
 
