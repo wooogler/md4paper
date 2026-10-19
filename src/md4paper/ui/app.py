@@ -727,6 +727,7 @@ _ANNO_HTML = """
 
   // 더블클릭 = 그 문장에 바로 메모 (호버로 보고 있던 그 짝 그대로)
   document.addEventListener('dblclick', function(e){
+    closeTip();   // 더블클릭 간격이 길어 첫 클릭의 짝 툴팁이 이미 떴더라도 메모 칸에 자리를 내준다
     if (!e.target.closest) return;
     var sc = scopeOf(e.target); if (!sc) return;
     dblGuard = true; setTimeout(function(){ dblGuard = false; }, 400);
@@ -889,7 +890,8 @@ _ANNO_HTML = """
   }, true);
   document.addEventListener('keydown', function(e){
     if (e.key !== 'Escape') return;
-    if (pop.classList.contains('open')) closePop();
+    if (stip.classList.contains('open') || stipTimer) closeTip();
+    else if (pop.classList.contains('open')) closePop();
     else if (panel.classList.contains('open')) panel.classList.remove('open');
   });
 
@@ -897,42 +899,44 @@ _ANNO_HTML = """
   // 행에 처음 마우스를 올릴 때만 그 행의 두 셀을 문장으로 쪼개 짝을 지어 span으로 감싼다(지연 처리).
   // 논문 한 편의 문단이 수백 개라 전부 미리 처리하면 첫 렌더가 무거워진다.
   var hoverRow = null, hoverPair = null;
-  // 두 컬럼(.sbs-two)이면 짝 문장을 칠하고, 한 컬럼(.sbs-tip — 반대쪽은 숨은 셀)이면 툴팁으로 보여 준다
+  // 두 컬럼(.sbs-two)이면 올린 문장의 짝을 칠하고, 한 컬럼(.sbs-tip — 반대쪽은 숨은 셀)이면
+  // 문장을 **클릭**했을 때 짝 문장을 툴팁으로 보여 준다 (같은 문장 다시 클릭·바깥 클릭·Esc·스크롤로 닫힘)
   var PAIR_CELL = '.sbs-grid.sbs-two .sbs-cell, .sbs-grid.sbs-tip .sbs-cell';
   var stip = document.getElementById('md-sent-tip');
   if (!stip){ stip = document.createElement('div'); stip.id = 'md-sent-tip'; document.body.appendChild(stip); }
-  var stipTimer = null;
+  var stipTimer = null;   // 클릭 뒤 툴팁 예약 — 더블클릭(메모)이면 두 번째 클릭이 물린다
+  var tipPair = null;     // 지금 툴팁이 가리키는 짝 id (같은 문장을 다시 클릭하면 닫기)
 
   function rowCells(row){
     return [].slice.call(document.querySelectorAll(
       '.sbs-grid.sbs-two .sbs-cell[data-row="' + row + '"], .sbs-grid.sbs-tip .sbs-cell[data-row="' + row + '"]'));
   }
+  // hideTip = 보이는 툴팁만 내린다(누르는 순간 — 드래그 시작에도). closeTip = 짝 기억까지 지운다.
   function hideTip(){ clearTimeout(stipTimer); stipTimer = null; stip.classList.remove('open'); }
-  // 올린 문장(hov)의 짝을 숨은 셀에서 찾아 툴팁으로. 짝을 못 찾은 문장(solo)은 띄우지 않는다.
-  function showTip(id, hov){
+  function closeTip(){ hideTip(); tipPair = null; }
+  // 클릭한 문장(el)의 짝을 숨은 셀에서 찾아 (x, y) 근처에 툴팁으로. 짝을 못 찾은 문장(solo)은
+  // 띄우지 않는다. 실제로 띄웠을 때만 true.
+  function showTip(id, el, x0, y0){
     hideTip();
-    if (!hov || hov.hasAttribute('data-solo')) return;
-    var ghost = hov.closest('.sbs-cell').parentElement.querySelector(
-      '.sbs-ghost[data-row="' + hov.closest('.sbs-cell').getAttribute('data-row') + '"]');
-    if (!ghost) return;
+    if (!el || el.hasAttribute('data-solo')) return false;
+    var cell = el.closest('.sbs-cell');
+    var ghost = cell.parentElement.querySelector('.sbs-ghost[data-row="' + cell.getAttribute('data-row') + '"]');
+    if (!ghost) return false;
     var parts = ghost.querySelectorAll('[data-pair="' + id + '"]'), txt = '', i;
     for (i = 0; i < parts.length; i++) txt += parts[i].textContent;
     txt = txt.replace(/\s+/g, ' ').trim();
-    if (!txt) return;
-    stipTimer = setTimeout(function(){
-      if (hoverPair !== id) return;
-      stip.innerHTML = '<span class="st-side">' + (ghost.getAttribute('data-side') === 'ko' ? '번역' : '원문') + '</span>';
-      stip.appendChild(document.createTextNode(txt));
-      // 문장 첫 줄 아래(자리가 없으면 위)에 — 문장이 여러 줄이면 커서가 있는 줄 기준
-      var rs = hov.getClientRects(), r = rs[0] || hov.getBoundingClientRect();
-      for (i = 0; i < rs.length; i++) if (lastY >= rs[i].top && lastY <= rs[i].bottom){ r = rs[i]; break; }
-      stip.style.left = '0px'; stip.style.top = '0px'; stip.classList.add('open');
-      var w = stip.offsetWidth, h = stip.offsetHeight, x = Math.min(Math.max(8, lastX - 40), innerWidth - w - 8);
-      var y = r.bottom + 8; if (y + h > innerHeight - 8) y = Math.max(8, r.top - h - 8);
-      stip.style.left = x + 'px'; stip.style.top = y + 'px';
-    }, 280);
+    if (!txt) return false;
+    stip.innerHTML = '<span class="st-side">' + (ghost.getAttribute('data-side') === 'ko' ? '번역' : '원문') + '</span>';
+    stip.appendChild(document.createTextNode(txt));
+    // 문장 첫 줄 아래(자리가 없으면 위)에 — 문장이 여러 줄이면 클릭한 줄 기준
+    var rs = el.getClientRects(), r = rs[0] || el.getBoundingClientRect();
+    for (i = 0; i < rs.length; i++) if (y0 >= rs[i].top && y0 <= rs[i].bottom){ r = rs[i]; break; }
+    stip.style.left = '0px'; stip.style.top = '0px'; stip.classList.add('open');
+    var w = stip.offsetWidth, h = stip.offsetHeight, x = Math.min(Math.max(8, x0 - 40), innerWidth - w - 8);
+    var y = r.bottom + 8; if (y + h > innerHeight - 8) y = Math.max(8, r.top - h - 8);
+    stip.style.left = x + 'px'; stip.style.top = y + 'px';
+    return true;
   }
-  var lastX = 0, lastY = 0;
   function prepareRow(cells){
     var en = null, ko = null, i;
     for (i = 0; i < cells.length; i++){
@@ -984,7 +988,6 @@ _ANNO_HTML = """
   }
   function setPair(id){
     if (id === hoverPair) return;
-    if (!id) hideTip();
     var on = document.querySelectorAll('.sent-hl'), i;
     for (i = 0; i < on.length; i++) on[i].classList.remove('sent-hl');
     hoverPair = id;
@@ -997,9 +1000,11 @@ _ANNO_HTML = """
     for (var i = 0; i < on.length; i++) on[i].classList.remove('sbs-hl');
     hoverRow = null; setPair(null);
   }
-  document.addEventListener('mousemove', function(e){ lastX = e.clientX; lastY = e.clientY; }, {passive: true});
-  document.addEventListener('scroll', hideTip, true);
-  document.addEventListener('mousedown', hideTip, true);
+  document.addEventListener('scroll', closeTip, true);
+  document.addEventListener('mousedown', function(e){   // 짝 기억(tipPair)은 click에서 판정
+    hideTip();
+    if (e.button !== 0) tipPair = null;   // 오른쪽 클릭 등은 click이 안 온다 — 여기서 잊는다
+  }, true);
   document.addEventListener('mouseover', function(e){
     var cell = e.target.closest ? e.target.closest(PAIR_CELL) : null;
     if (!cell){ if (hoverRow !== null) clearHover(); return; }
@@ -1016,12 +1021,33 @@ _ANNO_HTML = """
       var under = document.elementFromPoint(e.clientX, e.clientY);
       t = under && under.closest ? under.closest('[data-pair]') : null;
     }
-    var before = hoverPair;
     setPair(t ? t.getAttribute('data-pair') : null);
-    if (cell.parentElement.classList.contains('sbs-tip') && hoverPair !== before){
-      // 인용·각주 링크 위에선 그쪽 툴팁에 자리를 내준다
-      if (hoverPair && !e.target.closest('a')) showTip(hoverPair, t); else hideTip();
+  });
+  // 한 컬럼(.sbs-tip): 문장 클릭 = 짝 문장 툴팁. 더블클릭(메모)과 겹치지 않게 250ms 미뤄 띄우고,
+  // 두 번째 클릭이 오면(e.detail ≥ 2) 예약을 물린다. 드래그 선택·링크·그림·표시(메모) 클릭은 제외.
+  document.addEventListener('click', function(e){
+    var prev = tipPair; tipPair = null;     // 어떤 클릭이든 일단 닫힌 상태(누를 때 이미 내렸다)
+    if (e.detail !== 1){ hideTip(); return; }
+    if (!e.target.closest) return;
+    var sel = window.getSelection();
+    if (sel && !sel.isCollapsed && scopeOf(sel.anchorNode)) return;   // 드래그 선택 — 색 막대 몫
+    if (e.target.closest('a, img, button, input, textarea, mark.md-anno')) return;
+    var cell = e.target.closest('.sbs-grid.sbs-tip .sbs-cell');
+    if (!cell || cell.classList.contains('sbs-ghost')) return;
+    var t = e.target.closest('[data-pair]');
+    if (!t){   // 아직 문장으로 쪼개지 않은 행 (호버 없이 바로 클릭) — 쪼갠 뒤 클릭 지점을 다시 본다
+      prepareRow(rowCells(cell.getAttribute('data-row')));
+      var under = document.elementFromPoint(e.clientX, e.clientY);
+      t = under && under.closest ? under.closest('[data-pair]') : null;
     }
+    if (!t || !cell.contains(t)) return;
+    var id = t.getAttribute('data-pair');
+    if (id === prev) return;                // 같은 문장을 다시 클릭 — 닫기
+    var x = e.clientX, y = e.clientY;
+    stipTimer = setTimeout(function(){
+      stipTimer = null;
+      if (showTip(id, t, x, y)) tipPair = id;
+    }, 250);
   });
 
   setTimeout(applyAll, 400);   // 첫 렌더 안전망 (이후엔 뷰어가 __mdAnnoApply를 부른다)
@@ -3122,10 +3148,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                           on_click=lambda: _vtoggle("sync")).props(
                     "flat dense round " + ("color=primary" if viewer_state["sync"] else "color=grey-6")) \
                     .tooltip("스크롤 시 PDF 페이지 따라오기 " + ("(켜짐)" if viewer_state["sync"] else "(꺼짐)"))
-            if has_ko and viewer_state["en"] != viewer_state["ko"]:  # 한 언어만 볼 때 — 문장 짝 툴팁
+            if has_ko and viewer_state["en"] != viewer_state["ko"]:  # 한 언어만 볼 때 — 문장 짝 툴팁 (클릭)
                 ui.button(icon="translate", on_click=lambda: _vtoggle("stip")).props(
                     "flat dense round " + ("color=primary" if viewer_state["stip"] else "color=grey-6")) \
-                    .tooltip("문장에 마우스를 올리면 " + ("번역" if viewer_state["en"] else "원문")
+                    .tooltip("문장을 클릭하면 " + ("번역" if viewer_state["en"] else "원문")
                              + " 문장 보기 " + ("(켜짐)" if viewer_state["stip"] else "(꺼짐)"))
             ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
