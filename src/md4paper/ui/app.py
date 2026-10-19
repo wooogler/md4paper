@@ -1894,16 +1894,88 @@ _CHROME_CSS = """
 .md4-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; }
 /* 메모 패널 — 머리 한 줄 아래를 위지윅 편집기(Milkdown Crepe)가 꽉 채운다. 편집기 안 빈 곳을 눌러도
    글쓰기로 들어가게 .milkdown·.ProseMirror를 상자 높이까지 늘린다. 블록 핸들(⋮⋮ +)은 숨긴다 — 좁은
-   패널에서 왼쪽 여백만 먹고 쓸 일이 없다. 표·체크박스 삽입은 '/' 메뉴로 그대로 된다. */
+   패널에서 왼쪽 여백만 먹고 쓸 일이 없다. 표·체크박스 삽입은 '/' 메뉴로 그대로 된다.
+   글꼴·크기·간격은 Notion 기준(16px · 1.5, 시스템 산세리프, 촘촘한 블록 리듬)으로 맞춘다. Crepe가 변수로
+   받는 것(--crepe-font-*, --crepe-base-font-size, 글자·코드 색)은 변수로, 나머지는 Crepe 셀렉터 앞에
+   .md4-notes-ed를 붙여 구체도로 덮는다 — Crepe CSS는 나중에 <link>로 붙어 순서로는 이기지 못한다. */
 .md4-notes { flex: 1 1 auto; min-height: 0; flex-wrap: nowrap; }
 .md4-notes .md4-notes-status { font-size: 11px; color: #9a968e; }
 .md4-notes-ed { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   border-radius: 6px; background: #fbfaf9; }
 .md4-notes-ed .milkdown { min-height: 100%; display: flex; flex-direction: column;
-  --crepe-color-background: #fbfaf9; --crepe-base-font-size: 14px;
-  --crepe-font-default: inherit; --crepe-font-title: inherit; }
-.md4-notes-ed .milkdown .ProseMirror { flex: 1 1 auto; padding: 12px 14px 40px 14px; }
+  --md4n-font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  --crepe-font-default: var(--md4n-font); --crepe-font-title: var(--md4n-font);
+  --crepe-font-code: "SFMono-Regular", Menlo, Consolas, "PT Mono", "Liberation Mono", Courier, monospace;
+  --crepe-base-font-size: 16px; --crepe-color-background: #fbfaf9; --crepe-color-on-background: #37352f;
+  --crepe-color-inline-code: #eb5757;
+  --md4n-muted: #9a968e; --md4n-placeholder: #b3b0a8; --md4n-underline: rgba(55,53,47,.4);
+  --md4n-rule: rgba(55,53,47,.16); --md4n-grid: #e6e4e0; --md4n-code-bg: rgba(135,131,120,.15);
+  --md4n-block-bg: #f7f6f3; --md4n-check: #2383e2;
+  line-height: 1.7; -webkit-font-smoothing: antialiased; }
+.md4-notes-ed .milkdown .ProseMirror { flex: 1 1 auto; padding: 12px 14px 40px 14px; line-height: 1.7; }
 .md4-notes-ed milkdown-block-handle { display: none !important; }
+.md4-notes-ed .milkdown .ProseMirror p { padding: 3px 0; margin: 1px 0; line-height: 1.7; }
+.md4-notes-ed .milkdown .ProseMirror strong { font-weight: 600; }
+.md4-notes-ed .milkdown .ProseMirror h1, .md4-notes-ed .milkdown .ProseMirror h2,
+.md4-notes-ed .milkdown .ProseMirror h3, .md4-notes-ed .milkdown .ProseMirror h4,
+.md4-notes-ed .milkdown .ProseMirror h5, .md4-notes-ed .milkdown .ProseMirror h6 {
+  font-family: var(--md4n-font); font-weight: 600; line-height: 1.3; padding: 3px 0; margin-bottom: 1px; }
+.md4-notes-ed .milkdown .ProseMirror h1 { font-size: 1.9em; font-weight: 700; margin-top: 32px; margin-bottom: 4px; }
+.md4-notes-ed .milkdown .ProseMirror h2 { font-size: 1.5em; font-weight: 650; margin-top: 22px; }
+.md4-notes-ed .milkdown .ProseMirror h3 { font-size: 1.2em; margin-top: 16px; }
+.md4-notes-ed .milkdown .ProseMirror h4, .md4-notes-ed .milkdown .ProseMirror h5,
+.md4-notes-ed .milkdown .ProseMirror h6 { font-size: 1em; line-height: 1.5; margin-top: 12px; }
+.md4-notes-ed .milkdown .ProseMirror > :first-child,
+.md4-notes-ed .milkdown .ProseMirror > .prosemirror-virtual-cursor:first-child + * { margin-top: 0; }
+.md4-notes-ed .milkdown .ProseMirror a { color: inherit; text-decoration: underline 1px var(--md4n-underline);
+  text-underline-offset: 2px; transition: text-decoration-color .12s ease; }
+.md4-notes-ed .milkdown .ProseMirror a:hover { text-decoration-color: currentColor; }
+.md4-notes-ed .milkdown .ProseMirror code { display: inline; font-family: var(--crepe-font-code); font-size: 85%;
+  line-height: normal; color: var(--crepe-color-inline-code); background: var(--md4n-code-bg);
+  border-radius: 3px; padding: 0.2em 0.4em; }
+.md4-notes-ed .milkdown .ProseMirror pre code { padding: 0; background: transparent; color: inherit; font-size: inherit; }
+.md4-notes-ed .milkdown .milkdown-list-item-block { margin: 2px 0; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li { gap: 2px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .children p { margin: 0; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper { width: 22px; height: 30px; flex: 0 0 auto;
+  color: var(--crepe-color-on-background); }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper svg { fill: currentColor; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label { height: auto; width: auto; padding: 0;
+  text-align: center; line-height: 1.5; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.checked,
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.unchecked {
+  position: relative; box-sizing: border-box; width: 16px; height: 16px; border: 1.5px solid currentColor;
+  border-radius: 3px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.checked svg,
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.unchecked svg { display: none; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.checked {
+  background: var(--md4n-check); border-color: var(--md4n-check); }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.checked::after { content: "";
+  position: absolute; left: 3.5px; top: 0.5px; width: 3.5px; height: 7.5px; border: solid #fff;
+  border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.md4-notes-ed .milkdown li.list-item:has(> .label-wrapper .label.checked) > .children > .content-dom > p {
+  color: var(--md4n-muted); text-decoration: line-through; }
+.md4-notes-ed .milkdown .ProseMirror blockquote { padding: 0 0 0 14px; margin: 4px 0;
+  border-left: 3px solid currentColor; background: none; }
+.md4-notes-ed .milkdown .ProseMirror blockquote:before { display: none; }
+.md4-notes-ed .milkdown .milkdown-code-block { background: var(--md4n-block-bg); border-radius: 4px;
+  padding: 4px 16px 16px; margin: 4px 0; }
+.md4-notes-ed .milkdown .milkdown-code-block .cm-editor,
+.md4-notes-ed .milkdown .milkdown-code-block .cm-gutters { background: transparent; }
+.md4-notes-ed .milkdown .milkdown-code-block .cm-gutters { display: none; }
+.md4-notes-ed .milkdown .milkdown-code-block .cm-scroller { font-family: var(--crepe-font-code); font-size: 14px;
+  line-height: 1.5; }
+.md4-notes-ed .milkdown .milkdown-code-block .cm-content { padding: 0; }
+.md4-notes-ed .milkdown .milkdown-code-block .cm-line { padding: 0; }
+.md4-notes-ed .milkdown .milkdown-code-block .cm-activeLine { background: transparent; }
+.md4-notes-ed .milkdown .milkdown-table-block { margin: 4px 0; }
+.md4-notes-ed .milkdown .milkdown-table-block th,
+.md4-notes-ed .milkdown .milkdown-table-block td { border: 1px solid var(--md4n-grid); padding: 7px 9px; }
+.md4-notes-ed .milkdown .milkdown-table-block th { background: var(--md4n-block-bg); font-weight: 600; text-align: left; }
+.md4-notes-ed .milkdown .milkdown-table-block th p,
+.md4-notes-ed .milkdown .milkdown-table-block td p { padding: 0; margin: 0; font-size: 0.875em; }
+.md4-notes-ed .milkdown .ProseMirror hr { margin: 10px 0; background-color: var(--md4n-rule); }
+.md4-notes-ed .milkdown .crepe-placeholder:before { color: var(--md4n-placeholder); }
 /* 목차 언어 선택 — 제목 줄 오른쪽의 작은 글자 셋. 고른 것만 파랗게, 나머지는 패널 제목과 같은 회색. */
 .md4-toclang .q-btn { min-height: 18px; padding: 0 5px; font-size: 10.5px; font-weight: 500; color: #9a968e; }
 .md4-toclang .q-btn.text-primary { color: #2383e2; font-weight: 600; }
@@ -1920,6 +1992,10 @@ _CHROME_CSS = """
 @media (prefers-color-scheme: dark) {
   .md4-rail { background: #1b1b1b; border-right-color: #333; }
   .md4-notes-ed, .md4-notes-ed .milkdown { background: #1d1d1d; --crepe-color-background: #1d1d1d; }
+  .md4-notes-ed .milkdown { --crepe-color-on-background: #d4d4d4; --crepe-color-inline-code: #ff7369;
+    --md4n-muted: #7f7f7f; --md4n-placeholder: rgba(255,255,255,.3); --md4n-underline: rgba(255,255,255,.2);
+    --md4n-rule: rgba(255,255,255,.2); --md4n-grid: rgba(255,255,255,.2); --md4n-code-bg: #2f2f2f;
+    --md4n-block-bg: #262626; }
   .md4-railbtn { color: #a8a8a8; }
   .md4-railbtn:hover { background: rgba(255,255,255,.08); color: #e0e0e0; }
   .md4-railbtn.on { background: rgba(90,150,230,.22); color: #7bb7ff; }
