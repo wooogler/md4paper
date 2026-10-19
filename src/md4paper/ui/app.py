@@ -398,6 +398,16 @@ body.ma-open .md4-steps { padding-right: var(--ma-w); }
 .ap-n { font-size: 14px; line-height: 1.6; margin-top: 5px; padding-left: 7px;
   border-left: 2px solid #2383e2; white-space: pre-wrap; }
 .ap-lost .ap-q { opacity: .55; }
+/* 위치를 못 찾은 곳이 있을 때만 — 다시 찾기 단추와 결과 알림 */
+.ap-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid #ecebe8; font-size: 12.5px; color: #8a8780; }
+.ap-refind { border: 1px solid #d9d7d2; background: #fff; color: #37352f; font-size: 12.5px;
+  padding: 3px 10px; border-radius: 7px; cursor: pointer; }
+.ap-refind:hover { background: #f0efec; }
+.ap-tmsg { color: #2383e2; }
+.ap-guessb { font-size: 11.5px; color: #8a5a00; background: rgba(214,150,0,.14); border: none;
+  padding: 0 5px; border-radius: 6px; cursor: pointer; }
+.ap-guessb:hover { background: rgba(214,150,0,.26); }
 
 /* 툴바의 메모 버튼에 개수 배지 (JS가 data-count를 갱신) */
 .md4-anno-btn[data-count]:not([data-count="0"])::after { content: attr(data-count);
@@ -414,7 +424,9 @@ body.ma-open .md4-steps { padding-right: var(--ma-w); }
   #md-anno-pop, #md-anno-panel { background: #1f1f1f; border-color: #3a3a3a; color: #d4d4d4; }
   #md-anno-pop textarea { background: #262626; border-color: #3a3a3a; }
   .apop-quote, .ap-side, .ap-foot, .ap-empty { color: #8f8f8f; }
-  .ap-head, .ap-foot { border-color: #2c2c2c; }
+  .ap-head, .ap-foot, .ap-tools { border-color: #2c2c2c; }
+  .ap-refind { background: #262626; border-color: #3a3a3a; color: #d4d4d4; }
+  .ap-guessb { color: #e0b450; }
   .ap-count { background: #2c2c2c; color: #b8b8b8; }
   .ap-item:hover, .ap-x:hover { background: #2c2c2c; }
   .ap-q { color: #b8b8b8; }
@@ -432,6 +444,7 @@ _ANNO_HTML = """
 <div id="md-anno-panel">
   <div class="ap-head"><b>하이라이트 · 메모</b><span class="ap-count">0</span>
     <span class="apop-sp"></span><button class="ap-x" title="닫기 (Esc)">&#10005;</button></div>
+  <div class="ap-tools" style="display:none"></div>
   <div class="ap-list"></div>
   <div class="ap-foot">드래그 = 끌어 둔 그 자리에 · 더블클릭 = 그 <b>문장</b> 통째로 (원문·번역 함께)</div>
 </div>
@@ -443,6 +456,9 @@ _ANNO_HTML = """
   var CTX = 40;                       // 재탐색용 앞뒤 문맥 길이 (서버 상한 60 안쪽)
   var items = Array.isArray(window.__mdAnno) ? window.__mdAnno : [];
   var lost = {};                      // 위치를 못 찾은 항목 id (지우지는 않고 목록에만 남긴다)
+  var miss = {};                      // 항목 id → 못 찾은 쪽들 ['ko'] — 한쪽만 붙은 표시도 서랍에 알린다
+  var wideNext = false;               // 다음 applyAll은 행 창 없이 문서 전체에서 찾는다 ("다시 찾기")
+  var repairedSince = false;          // 위치를 고쳐 저장할 것이 있다 → 서버가 고치기 전 파일을 .bak으로 한 번 남긴다
   var bar = document.getElementById('md-anno-bar');
   var pop = document.getElementById('md-anno-pop');
   var panel = document.getElementById('md-anno-panel');
@@ -461,8 +477,9 @@ _ANNO_HTML = """
   function flush(){
     if (timer) { clearTimeout(timer); timer = null; }
     var tok = window.__mdAnnoTok; if (!tok) return;
+    var body = {items: items}; if (repairedSince){ body.repaired = true; repairedSince = false; }
     fetch('/annotations/' + tok, {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({items: items})}).catch(function(){});
+      body: JSON.stringify(body)}).catch(function(){});
   }
   function save(){ if (timer) clearTimeout(timer);
     timer = setTimeout(function(){ timer = null; flush(); renderPanel(); }, 300); }
@@ -531,6 +548,7 @@ _ANNO_HTML = """
     for (i = 0; i < sc.length; i++) unwrap(sc[i]);
     if (!sc.length){ renderPanel(); return; }   // 텍스트 패널이 안 보임(PDF만) — 목록만 유지
     var placed = [], has = {}, repaired = false;   // placed: [{item, anchor, sc, s, e}]
+    var later = [], wide = wideNext; wideNext = false;
     for (i = 0; i < sc.length; i++) has[sc[i].getAttribute('data-side')] = 1;
     function done(an){ for (var z = 0; z < placed.length; z++) if (placed[z].an === an) return true; return false; }
     for (i = 0; i < sc.length; i++){
@@ -573,20 +591,7 @@ _ANNO_HTML = """
           for (i = 1; i < hits.length; i++)
             if (Math.abs(hits[i].row - b.row) < Math.abs(pick.row - b.row)) pick = hits[i];
         }
-        if (!pick){
-          // 문구가 바뀌었다(재변환·재번역) — 공백만 다른 같은 문구, 아니면 가장 비슷한 문장으로
-          var same = sc.filter(function(c){ return c.getAttribute('data-side') === b.side; });
-          var f = fuzzyFind(b, same);
-          if (!f) continue;
-          placed.push({it: items[j], an: b, sc: f.sc, s: f.s, e: f.e});
-          if (f.sure && f.sc.classList.contains('sbs-cell')){
-            var ft = f.sc.textContent;
-            b.quote = ft.slice(f.s, f.e); b.row = f.row; b.start = f.s; b.end = f.e;
-            b.prefix = ft.slice(Math.max(0, f.s - CTX), f.s); b.suffix = ft.slice(f.e, f.e + CTX);
-            repaired = true;
-          }
-          continue;
-        }
+        if (!pick){ later.push([items[j], b]); continue; }   // 문구가 바뀌었다 — 짝 앵커가 다 붙은 뒤에
         placed.push({it: items[j], an: b, sc: pick.sc, s: pick.s, e: pick.s + b.quote.length});
         if (firm && pick.sc.classList.contains('sbs-cell')){
           b.row = pick.row; b.start = pick.s; b.end = pick.s + b.quote.length;
@@ -594,15 +599,45 @@ _ANNO_HTML = """
         }
       }
     }
-    // 보이는 쪽 앵커를 하나도 못 찾은 표시만 '위치 못 찾음' — 컬럼을 꺼 둔 쪽은 그냥 안 보이는 것
-    lost = {};
+    // 문구가 바뀐 앵커(재변환·재번역) — 행 번호는 믿지 않는다.
+    //  1) 같은 표시의 다른 쪽이 붙었으면 그 행의 반대쪽 셀에서 짝 문장을 다시 고른다 (만들 때와 같은 pairUp)
+    //  2) 아니면 공백·하이픈만 다른 같은 문구 → 가장 비슷한 문장 (짝 앵커의 행, 없으면 자기 행 근처.
+    //     "다시 찾기"는 문서 전체)
+    // 정렬 격자에서 찾았으면 고친 좌표를 저장한다. 문구가 바뀌었으면 원래 단서를 orig에 한 번 남기고,
+    // 확실하지 않으면 guess(추정) 표시를 붙여 서랍에서 사용자가 확인하게 한다.
+    for (j = 0; j < later.length; j++){
+      var it = later[j][0], b = later[j][1], sib = null, f = null;
+      for (k = 0; k < placed.length; k++)
+        if (placed[k].it === it && placed[k].an !== b && placed[k].sc.classList.contains('sbs-cell')){ sib = placed[k]; break; }
+      var same = sc.filter(function(c){ return c.getAttribute('data-side') === b.side; });
+      if (sib){
+        var srow = +sib.sc.getAttribute('data-row'), cell = null;
+        for (i = 0; i < same.length; i++) if (+same[i].getAttribute('data-row') === srow){ cell = same[i]; break; }
+        f = siblingFind(b, cell, sib.sc, sib.s, sib.e);
+      }
+      if (!f) f = fuzzyFind(b, same, sib ? +sib.sc.getAttribute('data-row') : b.row, wide);
+      if (!f) continue;
+      placed.push({it: it, an: b, sc: f.sc, s: f.s, e: f.e});
+      if (!f.sc.classList.contains('sbs-cell')) continue;   // 폴백 패널(문서 전체가 한 셀)엔 저장하지 않는다
+      var ft = f.sc.textContent, nq = ft.slice(f.s, f.e);
+      if (nq !== b.quote && !b.orig) b.orig = {quote: b.quote, prefix: b.prefix || '', suffix: b.suffix || ''};
+      b.quote = nq; b.row = f.row; b.start = f.s; b.end = f.e;
+      b.prefix = ft.slice(Math.max(0, f.s - CTX), f.s); b.suffix = ft.slice(f.e, f.e + CTX);
+      if (!f.sure) b.guess = true;
+      repaired = true;
+    }
+    // 보이는 쪽 앵커를 하나도 못 찾은 표시만 '위치 못 찾음' — 컬럼을 꺼 둔 쪽은 그냥 안 보이는 것.
+    // 한쪽만 못 찾았으면 miss에 그 쪽을 적어 서랍에 '번역 쪽 못 찾음'으로 알린다.
+    lost = {}; miss = {};
     for (j = 0; j < items.length; j++){
-      var vis = 0, ok = 0;
+      var vis = 0, ok = 0, gone = [];
       for (k = 0; k < items[j].anchors.length; k++){
         if (!has[items[j].anchors[k].side]) continue;
-        vis++; if (done(items[j].anchors[k])) ok++;
+        vis++;
+        if (done(items[j].anchors[k])) ok++; else gone.push(items[j].anchors[k].side);
       }
       if (vis && !ok) lost[items[j].id] = 1;
+      if (gone.length) miss[items[j].id] = gone;
     }
     for (i = 0; i < sc.length; i++){
       var hits = [];
@@ -610,14 +645,15 @@ _ANNO_HTML = """
       if (hits.length) paint(sc[i], hits);
     }
     renderPanel();
-    if (repaired) save();
+    if (repaired){ repairedSince = true; save(); }
   }
+  function missCount(){ var n = 0; for (var id in miss) n += miss[id].length; return n; }
   // 다른 논문으로 탭을 옮기면(본문만 갈아 끼움, §ui/spa.py) 그 논문의 하이라이트로 바꾼다.
   // 미뤄 둔 저장은 **옛 논문 토큰으로** 먼저 내보낸다 — 순서가 바뀌면 메모가 엉뚱한 논문에 쓰인다.
   window.__mdAnnoSwitch = function(tok, list){
     flush();
     window.__mdAnnoTok = tok; window.__mdAnno = list;
-    items = Array.isArray(list) ? list : []; lost = {};
+    items = Array.isArray(list) ? list : []; lost = {}; miss = {};
     closePop(); clearSel();
     window.__mdAnnoApply();
   };
@@ -805,6 +841,14 @@ _ANNO_HTML = """
   });
 
   // ---- 목록 서랍 ----
+  var refindMsg = '';
+  function isGuess(a){ for (var i = 0; i < a.anchors.length; i++) if (a.anchors[i].guess) return true; return false; }
+  function origText(a){   // 추정 배지 툴팁 — 고치기 전 원래 문장
+    var out = '';
+    for (var i = 0; i < a.anchors.length; i++) if (a.anchors[i].guess && a.anchors[i].orig)
+      out += '\\n\\n원래 ' + (a.anchors[i].side === 'ko' ? '번역' : '원문') + ': ' + cut(a.anchors[i].orig.quote, 200);
+    return out;
+  }
   function renderPanel(){
     var list = panel.querySelector('.ap-list');
     panel.querySelector('.ap-count').textContent = items.length;
@@ -819,6 +863,11 @@ _ANNO_HTML = """
       var kx = key(x), ky = key(y);
       return kx[0] - ky[0] || kx[1] - ky[1] || kx[2] - ky[2];
     });
+    var mc = missCount(), tools = panel.querySelector('.ap-tools');
+    tools.innerHTML = (mc ? '<button class="ap-refind">다시 찾기</button>'
+      + '<span class="ap-tnote">위치를 못 찾은 곳 ' + mc + '군데</span>' : '')
+      + (refindMsg ? '<span class="ap-tmsg">' + esc(refindMsg) + '</span>' : '');
+    tools.style.display = tools.innerHTML ? '' : 'none';
     if (!sorted.length){
       list.innerHTML = '<div class="ap-empty">아직 표시한 곳이 없습니다.<br>본문을 드래그해 색을 고르면 여기에 쌓입니다.</div>';
       return;
@@ -828,7 +877,10 @@ _ANNO_HTML = """
       return '<div class="ap-item' + (lost[a.id] ? ' ap-lost' : '') + '" data-id="' + esc(a.id) + '">'
         + '<div class="ap-top"><span class="ap-dot" style="background:' + (SWATCH[a.color] || SWATCH.yellow) + '"></span>'
         + '<span class="ap-side">' + (en && ko ? '원문 · 번역' : (ko ? '번역' : '원문')) + '</span>'
-        + (lost[a.id] ? '<span class="ap-lostb">위치 못 찾음</span>' : '')
+        + (lost[a.id] ? '<span class="ap-lostb">위치 못 찾음</span>'
+           : (miss[a.id] ? '<span class="ap-lostb">' + (miss[a.id][0] === 'ko' ? '번역' : '원문') + ' 쪽 못 찾음</span>' : ''))
+        + (isGuess(a) ? '<button class="ap-guessb" title="문구가 바뀌어 가장 비슷한 문장에 붙였습니다. 눌러서 맞다고 확인'
+           + esc(origText(a)).replace(/"/g, '&quot;') + '">추정 · 확인</button>' : '')
         + '<span class="apop-sp"></span><button class="ap-del" title="삭제">&#10005;</button></div>'
         + (en ? '<div class="ap-q">' + esc(cut(en, 170)) + '</div>' : '')
         + (ko ? '<div class="ap-q ap-ko">' + esc(cut(ko, 170)) + '</div>' : '')
@@ -838,9 +890,23 @@ _ANNO_HTML = """
   }
   panel.addEventListener('click', function(e){
     if (e.target.closest('.ap-x')){ panel.classList.remove('open'); return; }
+    if (e.target.closest('.ap-refind')){   // 행 창 없이 문서 전체에서 다시 찾기 — 결과를 서랍에 알린다
+      var before = missCount();
+      wideNext = true; applyAll();
+      var after = missCount();
+      refindMsg = (before - after) + '군데 다시 붙임 · ' + after + '군데 못 찾음';
+      renderPanel();
+      setTimeout(function(){ refindMsg = ''; renderPanel(); }, 6000);
+      return;
+    }
     var it = e.target.closest('.ap-item'); if (!it) return;
     var id = it.getAttribute('data-id');
     if (e.target.closest('.ap-del')){ if (editing === id) closePop(); remove(id); return; }
+    if (e.target.closest('.ap-guessb')){   // 추정이 맞다 — 표시와 원래 단서를 지운다
+      var g = find(id);
+      if (g) for (var z = 0; z < g.anchors.length; z++){ delete g.anchors[z].guess; delete g.anchors[z].orig; }
+      flush(); renderPanel(); return;
+    }
     var ms = marksFor(id);
     if (!ms.length){ openPop(id); return; }
     ms[0].scrollIntoView({behavior: 'smooth', block: 'center'});
@@ -6375,7 +6441,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         cur = _wd_for(token)
         if cur is None:
             raise HTTPException(status_code=404)
-        saved = annotations.save(cur, body.get("items"))
+        saved = annotations.save(cur, body.get("items"), backup=bool(body.get("repaired")))
         return {"ok": True, "count": len(saved)}
 
     chat_panel.register_routes(fastapi_app, _wd_for)  # 뷰어 챗봇 — /chat/{token}
