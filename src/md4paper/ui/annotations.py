@@ -152,11 +152,10 @@ def _order(item: dict) -> tuple[int, int]:
 
 
 def load_notes(wd: WorkDir) -> str:
-    """논문 전체 자유 메모(notes.md). 없거나 못 읽으면 빈 문자열."""
-    try:
-        return wd.notes_md.read_text(encoding="utf-8")
-    except OSError:
-        return ""
+    """논문 전체 자유 메모 — 메모 탭들을 한 덩어리로(탭이 하나면 그 글 그대로). 없으면 빈 문자열."""
+    from md4paper import notes
+
+    return notes.combined(wd)
 
 
 def to_markdown(items: list[dict], title: str = "", notes: str = "") -> str:

@@ -443,20 +443,23 @@ class UIController:
         status["manual_edit_ko"] = True
         self.wd.save_status(status)
 
-    # --- 자유 메모 (notes.md) ---
-    def notes(self) -> str:
-        """논문 전체 메모(마크다운). 파일이 없으면 빈 문자열."""
-        try:
-            return self.wd.notes_md.read_text(encoding="utf-8")
-        except OSError:
-            return ""
+    # --- 자유 메모 (메모 탭 — 첫 탭은 notes.md, 나머지는 notes/<이름>.md; §md4paper/notes.py) ---
+    def notes(self, tab: str | None = None) -> str:
+        """메모 탭 내용(마크다운). tab이 없으면 첫 탭. 파일이 없으면 빈 문자열."""
+        from md4paper import notes
 
-    def save_notes(self, text: str) -> None:
+        return notes.read(self.wd, tab or notes.tab_names(self.wd)[0])
+
+    def save_notes(self, text: str, tab: str | None = None) -> None:
         """메모 패널의 자동 저장 — 원자적으로 쓰고, 비우면 파일을 지운다(빈 껍데기를 남기지 않게)."""
-        if not text.strip():
-            self.wd.notes_md.unlink(missing_ok=True)
-            return
-        self._write_atomic(self.wd.notes_md, text)
+        from md4paper import notes
+
+        notes.write(self.wd, tab or notes.tab_names(self.wd)[0], text)
+
+    def note_tabs(self) -> list[str]:
+        from md4paper import notes
+
+        return notes.tab_names(self.wd)
 
     def _write_atomic(self, path: Path, text: str) -> None:
         import os

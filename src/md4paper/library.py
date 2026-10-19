@@ -225,12 +225,13 @@ def export_notes(wd: WorkDir, project: str | None = None) -> Path | None:
 
     크기·시각 비교 없이 늘 덮어쓴다 — 같은 길이의 수정("teh"→"the")도 사본에 반영돼야 한다.
     """
+    from md4paper import notes
+
     project = project_of(wd) if project is None else project
     dest = notes_dir(project)
-    src = wd.notes_md
-    if dest is None or not src.is_file():
+    if dest is None:
         return None
-    text = src.read_text(encoding="utf-8")
+    text = notes.combined(wd)  # 메모 탭이 여럿이면 탭마다 '### 이름' 절로 한 파일에
     if not text.strip():
         return None
     dest.mkdir(parents=True, exist_ok=True)

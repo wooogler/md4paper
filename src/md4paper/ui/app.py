@@ -1900,6 +1900,17 @@ _CHROME_CSS = """
    .md4-notes-ed를 붙여 구체도로 덮는다 — Crepe CSS는 나중에 <link>로 붙어 순서로는 이기지 못한다. */
 .md4-notes { flex: 1 1 auto; min-height: 0; flex-wrap: nowrap; }
 .md4-notes .md4-notes-status { font-size: 11px; color: #9a968e; }
+/* 메모 탭 — 패널 제목 아래 작은 글자 줄. 고른 탭만 옅은 바탕에 진하게, 넘치면 가로로 스크롤. */
+.md4-notetabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; margin-top: -4px; }
+.md4-notetabs::-webkit-scrollbar { height: 0; }
+.md4-notetab { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; padding: 2px 8px;
+  border-radius: 6px; font-size: 12.5px; color: #8a8780; cursor: pointer; white-space: nowrap; user-select: none; }
+.md4-notetab:hover { background: rgba(55,53,47,.06); color: #37352f; }
+.md4-notetab.on { background: rgba(55,53,47,.08); color: #37352f; font-weight: 600; }
+.md4-notetab-x { opacity: 0; margin-right: -4px; border-radius: 3px; padding: 1px; }
+.md4-notetab:hover .md4-notetab-x { opacity: .6; }
+.md4-notetab-x:hover { opacity: 1 !important; background: rgba(55,53,47,.12); }
+.md4-notetab-add { flex: 0 0 auto; }
 .md4-notes-ed { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   border-radius: 6px; background: #fbfaf9; }
 .md4-notes-ed .milkdown { min-height: 100%; display: flex; flex-direction: column;
@@ -1992,6 +2003,8 @@ _CHROME_CSS = """
 @media (prefers-color-scheme: dark) {
   .md4-rail { background: #1b1b1b; border-right-color: #333; }
   .md4-notes-ed, .md4-notes-ed .milkdown { background: #1d1d1d; --crepe-color-background: #1d1d1d; }
+  .md4-notetab { color: #9a9a9a; }
+  .md4-notetab:hover, .md4-notetab.on { background: rgba(255,255,255,.08); color: #e0e0e0; }
   .md4-notes-ed .milkdown { --crepe-color-on-background: #d4d4d4; --crepe-color-inline-code: #ff7369;
     --md4n-muted: #7f7f7f; --md4n-placeholder: rgba(255,255,255,.3); --md4n-underline: rgba(255,255,255,.2);
     --md4n-rule: rgba(255,255,255,.2); --md4n-grid: rgba(255,255,255,.2); --md4n-code-bg: #2f2f2f;
@@ -3814,19 +3827,21 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 메모 패널 — 논문 전체에 대한 자유 메모(paper.md4/notes.md). 상태는 파일뿐이고 UI는 모델을 갖지 않는다.
     # 타자가 0.8초쯤 멈추면 원자적으로 저장한다(remember_width와 같은 모아 쓰기). 패널을 떠나거나
     # 내보내기 직전에는 기다리지 않고 바로 쓴다 — 마지막 글자가 빠진 채 내려받히지 않게.
-    notes_state: dict = {"timer": None, "pending": None, "status": None}
+    notes_state: dict = {"timer": None, "pending": None, "status": None, "el_id": None, "tab": None,
+                         "ids": {}}  # ids: 편집기 컨테이너 id → 그 편집기가 맡은 탭 이름
 
     def notes_flush() -> None:
         t = notes_state["timer"]
         if t is not None:
             t.cancel()
             notes_state["timer"] = None
-        text = notes_state["pending"]
-        if text is None:
+        pending = notes_state["pending"]
+        if pending is None:
             return
         notes_state["pending"] = None
+        tab, text = pending
         try:
-            ctrl.save_notes(text)
+            ctrl.save_notes(text, tab)
         except OSError as e:
             notes_set_status(f"저장 실패: {e}")
             return
@@ -3838,7 +3853,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             lbl.set_text(text)
 
     def notes_typed(text: str) -> None:
-        notes_state["pending"] = text
+        notes_state["pending"] = (notes_state["tab"], text)  # 쓰던 탭에 — 탭을 바꿔도 섞이지 않게
         notes_set_status("저장 중…")
         t = notes_state["timer"]
         if t is not None:
@@ -4441,24 +4456,145 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         tick()
 
     def notes_panel() -> None:
-        """메모 패널 속 — 머리(제목 · 저장 상태) + 위지윅 편집기(Milkdown Crepe).
+        """메모 패널 속 — 머리(제목 · 저장 상태) + 탭 줄 + 위지윅 편집기(Milkdown Crepe).
 
-        편집기는 브라우저에만 있고 파이썬은 바뀐 마크다운을 받아 notes.md에 쓰기만 한다. 화면을 지을
-        때마다 notes.md를 다시 읽어 넣으므로 다른 창에서 고친 메모도 새로 열면 보인다."""
+        탭 하나가 마크다운 파일 하나다(§md4paper/notes.py). 편집기는 브라우저에만 있고 파이썬은 바뀐
+        마크다운을 받아 지금 탭의 파일에 쓰기만 한다. 탭을 바꾸면 기다리던 저장을 먼저 끝내고 편집기를
+        그 탭 내용으로 새로 얹는다. 보던 탭은 논문별로 기억한다."""
+        from md4paper import notes as notes_io
+
+        tab_mem = state.setdefault("notes_tab_by_root", {})
+        names = ctrl.note_tabs()
+        notes_state["tab"] = tab_mem.get(root_key) if tab_mem.get(root_key) in names else names[0]
+
+        async def capture() -> None:
+            """지금 편집기의 내용을 브라우저에서 바로 받아 저장한다 — 편집기를 갈아 끼우기 전에.
+
+            편집기는 바뀐 내용을 0.2초 모아 보내는데, 그 사이에 편집기를 치우면(탭 전환) 마지막 글자가
+            영영 오지 않는다. 그래서 치우기 전에 getMarkdown()으로 직접 묻는다."""
+            el_id, tab = notes_state["el_id"], notes_state["tab"]
+            try:
+                md = await ui.run_javascript(
+                    "(function(id){var c=(window.__md4Crepes||{})[id];"
+                    "try{return c?c.getMarkdown():null;}catch(e){return null;}})(%s)" % json.dumps(el_id),
+                    timeout=2.0)
+            except Exception:  # noqa: BLE001 — 응답이 없으면 이벤트로 온 것까지만
+                md = None
+            if isinstance(md, str) and md.strip() != ctrl.notes(tab).strip():
+                notes_state["pending"] = (tab, md)
+            notes_flush()
+
+        async def switch(name: str) -> None:
+            if name == notes_state["tab"]:
+                return
+            await capture()
+            notes_state["tab"] = tab_mem[root_key] = name
+            note_tabs.refresh()
+            note_editor.refresh()
+
+        async def add_tab() -> None:
+            await capture()
+            name = notes_io.add(ctrl.wd)
+            notes_state["tab"] = tab_mem[root_key] = name
+            note_tabs.refresh()
+            note_editor.refresh()
+            rename_dialog(name)  # 만들자마자 이름부터 — '메모 2'로 두고 싶으면 그대로 Enter
+
+        def rename_dialog(name: str) -> None:
+            # 대화상자는 탭 줄 밖의 고정 자리에 — 탭 줄을 다시 그리면(새 탭 추가 직후) 그 안의 슬롯이 사라진다
+            with dlg_host, ui.dialog() as dlg, ui.card().classes("gap-2").style("min-width:280px"):
+                ui.label("메모 탭 이름").classes("text-sm font-medium")
+                inp = ui.input(value=name).props("dense outlined autofocus").classes("w-full")
+                inp.on("focus", js_handler="(e) => e.target.select()")  # 바로 치면 새 이름으로 바뀌게
+
+                def apply() -> None:
+                    notes_flush()
+                    new = notes_io.rename(ctrl.wd, name, inp.value or "")
+                    if notes_state["tab"] == name:
+                        notes_state["tab"] = tab_mem[root_key] = new
+                    for k, v in notes_state["ids"].items():  # 늦게 오는 이벤트도 새 이름의 탭으로
+                        if v == name:
+                            notes_state["ids"][k] = new
+                    dlg.close()
+                    note_tabs.refresh()
+
+                inp.on("keydown.enter", apply)
+                with ui.row().classes("justify-end gap-2 w-full"):
+                    ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
+                    ui.button("바꾸기", on_click=apply).props("unelevated dense no-caps color=primary")
+            dlg.open()
+
+        async def remove_tab(name: str) -> None:
+            def do() -> None:
+                notes_flush()
+                left = notes_io.remove(ctrl.wd, name)
+                if notes_state["tab"] == name or notes_state["tab"] not in left:
+                    notes_state["tab"] = tab_mem[root_key] = left[0]
+                    note_editor.refresh()
+                note_tabs.refresh()
+
+            if notes_state["tab"] == name:
+                await capture()  # 지금 쓰던 글자까지 따져 보고 묻는다
+            if not ctrl.notes(name).strip():
+                do()
+                return
+            with dlg_host, ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:360px"):
+                ui.label(f"‘{name}’ 메모를 지울까요?").classes("text-base font-medium")
+                ui.label("이 탭의 내용이 함께 지워지고 되돌릴 수 없습니다.").classes("text-sm text-gray-600")
+                with ui.row().classes("justify-end gap-2 w-full"):
+                    ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
+                    ui.button("지우기", on_click=lambda: (dlg.close(), do())) \
+                        .props("unelevated dense no-caps color=negative")
+            dlg.open()
+
+        @ui.refreshable
+        def note_tabs() -> None:
+            names = ctrl.note_tabs()
+            with ui.row().classes("w-full items-center no-wrap gap-1 md4-notetabs"):
+                for name in names:
+                    on = name == notes_state["tab"]
+                    tab = ui.element("div").classes("md4-notetab" + (" on" if on else ""))
+                    with tab:
+                        ui.label(name).classes("md4-notetab-t")
+                        if len(names) > 1:
+                            x = ui.icon("close", size="12px").classes("md4-notetab-x")
+                            x.on("click.stop", lambda _, n=name: remove_tab(n))
+                    tab.on("click", lambda _, n=name: switch(n))
+                    tab.on("dblclick", lambda _, n=name: rename_dialog(n))
+                    tab.tooltip("더블클릭하면 이름 바꾸기")
+                ui.button(icon="add", on_click=add_tab).props("flat dense round size=xs color=grey-7") \
+                    .classes("md4-notetab-add").tooltip("메모 탭 추가")
+
+        @ui.refreshable
+        def note_editor() -> None:
+            box = ui.element("div").classes("md4-notes-ed w-full")
+            notes_state["el_id"] = f"c{box.id}"
+            notes_state["ids"][notes_state["el_id"]] = notes_state["tab"]
+            ui.run_javascript(notes_editor_js(notes_state["el_id"], ctrl.notes(notes_state["tab"])))
+
+        def on_notes(e) -> None:  # noqa: ANN001 — GenericEventArguments
+            # 편집기는 바뀐 내용을 0.2초 모아 보내므로, 치자마자 탭을 바꾸면 옛 편집기의 마지막 글자가
+            # 탭을 바꾼 뒤에 도착한다 — 보낸 편집기의 탭으로 바로 써서 잃지 않는다.
+            el_id = e.args.get("id") if isinstance(e.args, dict) else None
+            tab = notes_state["ids"].get(el_id)
+            md = notes_event_text(e.args, el_id) if tab is not None else None
+            if md is None:
+                return
+            if el_id == notes_state["el_id"]:
+                notes_typed(md)
+            else:
+                try:
+                    ctrl.save_notes(md, tab)
+                except OSError as ex:
+                    notes_set_status(f"저장 실패: {ex}")
+
         with ui.row().classes("w-full items-center no-wrap gap-2 shrink-0"):
             ui.label("메모").classes("md4-panel-title")
             notes_state["status"] = ui.label("저장됨").classes("md4-notes-status")
-
-        box = ui.element("div").classes("md4-notes-ed w-full")
-        el_id = f"c{box.id}"
-
-        def on_notes(e) -> None:  # noqa: ANN001 — GenericEventArguments
-            md = notes_event_text(e.args, el_id)
-            if md is not None:
-                notes_typed(md)
-
+            dlg_host = ui.element("div").style("display:none")  # 탭 이름 바꾸기·지우기 대화상자 자리
+        note_tabs()
+        note_editor()
         ui.on("md4-notes", on_notes)
-        ui.run_javascript(notes_editor_js(el_id, ctrl.notes()))
 
     # ===== 본문: 레일 + (작업 패널 | 캔버스) =====
     # 처음 여는 논문은 번역이 있으면 목차, 없으면 구조부터(먼저 할 일이 섹션 구조 확인이라). 다시 열면
