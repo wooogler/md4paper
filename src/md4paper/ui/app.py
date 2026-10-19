@@ -1279,6 +1279,69 @@ _SEC_JUMP_HTML = """
 </script>
 """
 
+# 화살표 자동 변환 — 메모(Crepe)·하이라이트 메모 칸·마크다운 편집기에서 `->`를 치면 →, `<-`는 ←,
+# `<->`는 ↔, `=>`는 ⇒ (Notion과 같게). 마지막 글자를 치는 순간 앞 글자와 합쳐 바꾼다. 한국어 조합 중이거나
+# 선택 영역이 있으면 건드리지 않는다. `-->`(HTML 주석 끝)·`<=`(이하)는 바꾸지 않는다. 바로 Backspace로
+# 지우면 되돌릴 수 있다(→ 대신 원래 두 글자가 남는다).
+_ARROW_HTML = """
+<script>
+(function(){
+  if (window.__md4Arrows) return; window.__md4Arrows = true;
+  var SCOPE = '.md4-notes-ed, #md-anno-pop textarea, .cm-en-editor';
+  var RULES = {'>': {'-': '\\u2192', '=': '\\u21d2', '\\u2190': '\\u2194'}, '-': {'<': '\\u2190'}};
+  var last = null;   // 방금 바꾼 것 — {el, arrow, raw}: 바로 Backspace면 원래 글자로 되돌린다
+  function replaceArrow(e){
+    var map = RULES[e.data]; if (!map) return false;
+    var t = e.target;
+    if (t.tagName === 'TEXTAREA'){
+      var p = t.selectionStart; if (p !== t.selectionEnd || p < 1) return false;
+      var prev = t.value.charAt(p - 1), out = map[prev];
+      if (!out || (prev === '-' && t.value.charAt(p - 2) === '-')) return false;
+      e.preventDefault();
+      t.setRangeText(out, p - 1, p, 'end');
+      t.dispatchEvent(new Event('input', {bubbles: true}));
+      last = {el: t, arrow: out, raw: prev + e.data};
+      return true;
+    }
+    var sel = window.getSelection();
+    if (!sel || !sel.isCollapsed || !sel.rangeCount) return false;
+    var n = sel.anchorNode, off = sel.anchorOffset;
+    if (!n || n.nodeType !== 3 || off < 1) return false;   // 같은 글자 노드 안에서만
+    var prev = n.data.charAt(off - 1), out = map[prev];
+    if (!out || (prev === '-' && n.data.charAt(off - 2) === '-')) return false;
+    if (n.parentElement && n.parentElement.closest('code, pre, .cm-line .tok-monospace')) return false;
+    e.preventDefault();
+    sel.modify('extend', 'backward', 'character');
+    document.execCommand('insertText', false, out);
+    last = {el: null, arrow: out, raw: prev + e.data};
+    return true;
+  }
+  document.addEventListener('beforeinput', function(e){
+    if (e.isComposing || !e.target.closest || !e.target.closest(SCOPE)) { last = null; return; }
+    if (e.inputType === 'deleteContentBackward' && last){   // 바꾼 직후 Backspace = 원래 두 글자로
+      var l = last; last = null;
+      if (l.el){
+        var p = l.el.selectionStart;
+        if (p === l.el.selectionEnd && l.el.value.charAt(p - 1) === l.arrow){
+          e.preventDefault(); l.el.setRangeText(l.raw, p - 1, p, 'end');
+          l.el.dispatchEvent(new Event('input', {bubbles: true}));
+        }
+        return;
+      }
+      var s = window.getSelection(), n = s && s.anchorNode;
+      if (s && s.isCollapsed && n && n.nodeType === 3 && n.data.charAt(s.anchorOffset - 1) === l.arrow){
+        e.preventDefault(); s.modify('extend', 'backward', 'character');
+        document.execCommand('insertText', false, l.raw);
+      }
+      return;
+    }
+    if (e.inputType !== 'insertText' || !e.data || e.data.length !== 1){ last = null; return; }
+    if (!replaceArrow(e)) last = null;
+  }, true);
+})();
+</script>
+"""
+
 # 본문 그림 클릭 → 전체화면 확대 뷰어. 휠(트랙패드 핀치 포함)·버튼·더블클릭으로 확대,
 # 드래그로 이동, Esc·바깥 클릭으로 닫기. 순수 클라이언트 처리 — 이미 받아 둔 이미지를 그대로 쓴다.
 _IMG_ZOOM_HTML = """
@@ -2601,6 +2664,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_body_html(_CITE_TIP_HTML)
     spa.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
     spa.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
+    spa.add_body_html(_ARROW_HTML)  # -> → · <- ← · <-> ↔ · => ⇒ (메모·하이라이트 메모·마크다운 편집기)
     # 본문 그림·표 참조 호버 → 썸네일, 클릭 → 확대 (그림은 위 확대 뷰어, 마크다운 표는 표 오버레이)
     spa.add_css(figrefs.CSS)
     fig_js = figrefs.index_js(served_markdown(ctrl.en_markdown() or "", tok),
@@ -2679,7 +2743,45 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 편집기|프리뷰가 선다(정렬 그리드는 행 단위 셀이라 그 안에서 편집할 수 없고, 프리뷰는 타이핑마다
     # 바뀐 블록만 갈아 끼워야 해서 통째로 다시 짓는 그리드와 성격이 다르다). 끄면 그리드로 돌아간다.
     # lang: 어느 쪽을 고치는지 — 'en'(원문 en.md) | 'ko'(번역 ko.md). 번역문도 같은 편집기로 손본다.
-    edit_state: dict = {"on": False, "editor": None, "live": True, "lang": "en"}
+    edit_state: dict = {"on": False, "editor": None, "live": True, "lang": "en",
+                        "pending": None, "timer": None, "status": None}  # pending: (lang, 글) 자동 저장 대기
+
+    def edit_flush() -> None:
+        """기다리던 마크다운 편집을 바로 파일에 — 타자가 멈췄을 때, 편집을 끄거나 대상을 바꾸거나 떠날 때."""
+        t = edit_state.get("timer")
+        if t is not None:
+            t.cancel()
+            edit_state["timer"] = None
+        pending = edit_state.get("pending")
+        if pending is None:
+            return
+        edit_state["pending"] = None
+        lang, text = pending
+        first = not (ctrl.has_manual_edit() if lang == "en" else ctrl.has_manual_edit_ko())
+        try:
+            if lang == "en":
+                ctrl.save_en_markdown(text)
+            else:
+                ctrl.save_ko_markdown(text)
+        except OSError as ex:
+            _edit_status(f"저장 실패: {ex}")
+            return
+        _edit_status("자동 저장됨")
+        if not edit_state["live"] and edit_state["on"]:
+            preview_pane.refresh()   # 실시간 반영을 꺼 뒀으면 저장할 때 프리뷰를 맞춘다
+        if lang == "en":
+            refresh_staleness()  # 고친 섹션은 번역 패널에 '원문 바뀜'으로
+        status_chip.refresh()
+        toc_panel.refresh()      # 헤더를 고쳤을 수 있다
+        if first:
+            edit_toggle.refresh()  # '수동 편집됨' 배지
+
+    def _edit_status(text: str) -> None:
+        lbl = edit_state.get("status")
+        if lbl is not None and not lbl.is_deleted:
+            lbl.set_text(text)
+
+    ui.context.client.on_disconnect(edit_flush)  # 창을 닫거나 다른 화면으로 가도 마지막 글자까지
 
     def preview_markdown(md: str | None = None) -> str:
         """프리뷰에 넣을 마크다운 — 이미지 경로 치환 + (원문이면) 헤더 줄 끝 앵커(sec-ID·data-page).
@@ -2699,6 +2801,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def toggle_edit(on: bool, lang: str | None = None) -> None:
         """직접 편집 켜기/끄기(+대상 언어). 켜는 동안 PDF는 접는다 — 동시 표시 패널 ≤ 2
         (3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다). 끄면 접었던 PDF를 되살린다."""
+        edit_flush()  # 끄거나 대상을 바꾸기 전에 기다리던 편집부터 저장
         if lang is not None:
             edit_state["lang"] = lang
         edit_state["on"] = on
@@ -2725,7 +2828,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     .classes("conv-viewtoggle").tooltip("어느 쪽 마크다운을 고칠지")
             ui.switch("실시간 반영", value=edit_state["live"],
                       on_change=lambda e: edit_state.update(live=e.value)).props("dense") \
-                .tooltip("끄면 '편집 저장'을 눌러야 프리뷰가 갱신됩니다")
+                .tooltip("끄면 프리뷰는 입력을 멈춰 자동 저장될 때만 갱신됩니다 (긴 문서에서 가볍게)")
         if ctrl.has_manual_edit():
             ui.badge("원문 수동 편집됨", color="orange").props("outline").tooltip(
                 "재조립하면 이 편집은 사라집니다 (섹션 트리에서 다시 만들어지므로)")
@@ -2797,6 +2900,13 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def on_type(e) -> None:  # noqa: ANN001 — NiceGUI 값 변경 이벤트
             if edit_state["live"]:
                 live_update(e.value)
+            # 자동 저장 — 타자가 0.8초 멈추면 파일에 (메모 패널과 같은 모아 쓰기)
+            edit_state["pending"] = (edit_state["lang"], e.value)
+            _edit_status("저장 중…")
+            t = edit_state.get("timer")
+            if t is not None:
+                t.cancel()
+            edit_state["timer"] = ui.timer(0.8, edit_flush, once=True)
 
         editor = ui.codemirror(
             ctrl.en_markdown() if is_en else ctrl.ko_markdown(),
@@ -2804,28 +2914,18 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ).classes("w-full cm-en-editor").style("height:100%")
         edit_state["editor"] = editor
 
-        def save_edit() -> None:
-            if is_en:
-                ctrl.save_en_markdown(editor.value)
-                ui.notify("편집 저장됨 — 번역은 이 내용을 사용합니다.", type="positive")
-                refresh_staleness()
-            else:
-                ctrl.save_ko_markdown(editor.value)
-                ui.notify("번역 편집 저장됨 — 번역을 다시 실행하면 덮어써집니다. 헤더 수를 바꾸면 "
-                          "원문과 나란히 정렬되지 않을 수 있어요.", type="positive", timeout=5000)
-            preview_pane.refresh()
-            edit_toggle.refresh()
-            toc_panel.refresh()
-            status_chip.refresh()
-
         def revert() -> None:
+            edit_state["pending"] = None  # 되돌리면 기다리던 편집은 버린다
             ctrl.save_and_reassemble()
             canvas.refresh()   # 에디터 내용까지 파일에서 다시 읽어야 한다
             edit_toggle.refresh()
             ui.notify("섹션 트리 기준으로 다시 만들었습니다.", type="info")
 
         with ui.row().classes("gap-2 items-center shrink-0 q-pt-xs"):
-            ui.button("편집 저장", icon="save", on_click=save_edit).props("color=primary dense")
+            edit_state["status"] = ui.label(
+                "자동 저장 — 입력을 멈추면 저장됩니다" if is_en else
+                "자동 저장 — 번역을 다시 실행하면 덮어써지고, 헤더 수를 바꾸면 원문과 나란히 정렬되지 않을 수 있어요"
+            ).classes("text-xs text-gray-500")
             if is_en:  # 번역문에는 '원본'이 없다 — 되돌리려면 번역을 다시 실행한다
                 ui.button("되돌리기(원본 다시 렌더)", icon="restore", on_click=revert).props("outline dense")
 
