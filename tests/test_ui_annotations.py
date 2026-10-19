@@ -86,6 +86,30 @@ def test_save_load_roundtrip(tmp_path):
     assert a["note"] == "여기 중요" and len(a["anchors"]) == 2
 
 
+def test_guess_and_orig_survive_normalize():
+    (a,) = annotations.normalize([_item(anchors=[
+        _anchor("ko", guess=1, orig={"quote": "예전 번역", "prefix": "앞", "suffix": "뒤", "x": 1}),
+        _anchor("en", orig={"quote": "  "}),     # 단서 없는 orig는 버린다
+    ])])
+    ko, en = a["anchors"]
+    assert ko["guess"] is True and ko["orig"] == {"quote": "예전 번역", "prefix": "앞", "suffix": "뒤"}
+    assert "guess" not in en and "orig" not in en
+
+
+def test_repair_save_backs_up_original_once(tmp_path):
+    wd = WorkDir(tmp_path / "p.md4")
+    annotations.save(wd, [_item(note="원본")])
+    original = wd.annotations_json.read_bytes()
+    annotations.save(wd, [_item(note="보통 저장")])           # 수리가 아닌 저장은 백업하지 않는다
+    assert not annotations.backup_path(wd).exists()
+    original = wd.annotations_json.read_bytes()
+    annotations.save(wd, [_item(note="1차 수리")], backup=True)
+    assert annotations.backup_path(wd).read_bytes() == original
+    annotations.save(wd, [_item(note="2차 수리")], backup=True)  # 두 번째 수리가 수리 전 원본을 덮지 않는다
+    assert annotations.backup_path(wd).read_bytes() == original
+    assert annotations.load(wd)[0]["note"] == "2차 수리"
+
+
 def test_save_empty_removes_file(tmp_path):
     wd = WorkDir(tmp_path / "p.md4")
     wd.ensure()

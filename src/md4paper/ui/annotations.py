@@ -8,6 +8,8 @@
   row   — 정렬 그리드의 행 번호 (align_rows의 인덱스)
   start/end — 그 셀 평문에서의 문자 오프셋
   quote/prefix/suffix — 문서가 바뀌어 오프셋이 밀렸을 때 다시 찾기 위한 단서
+  guess — 문구가 바뀌어 비슷한 문장으로 '추정'해 붙였다(뷰어 서랍에 배지). 사용자가 확인하면 지운다
+  orig  — 추정으로 quote를 고치기 전 원래 단서(quote/prefix/suffix). 처음 한 번만 남기고 덮지 않는다
 
 재조립·재번역으로 행이 밀리면 클라이언트가 quote로 다시 찾아 붙이고, 고쳐진 좌표를 되저장한다.
 그래도 못 찾으면 버리지 않고 '위치를 찾지 못한 메모'로 목록에만 남긴다 — 사용자가 쓴 글은
@@ -44,6 +46,15 @@ def _int(value: object, default: int = 0) -> int:
     return n if n >= 0 else default
 
 
+def _orig(raw: object) -> dict | None:
+    """추정 전 원래 단서 — quote가 비면 의미가 없으므로 버린다."""
+    if not isinstance(raw, dict) or not str(raw.get("quote") or "").strip():
+        return None
+    return {"quote": _clip(raw.get("quote"), MAX_QUOTE),
+            "prefix": _clip(raw.get("prefix"), MAX_CONTEXT),
+            "suffix": _clip(raw.get("suffix"), MAX_CONTEXT)}
+
+
 def _anchor(raw: object) -> dict | None:
     """앵커 하나를 정리. quote가 없으면 다시 찾을 방법이 없으므로 버린다."""
     if not isinstance(raw, dict):
@@ -54,7 +65,7 @@ def _anchor(raw: object) -> dict | None:
     side = raw.get("side")
     start = _int(raw.get("start"))
     end = _int(raw.get("end"), start + len(quote))
-    return {
+    out = {
         "side": side if side in SIDES else "en",
         "row": _int(raw.get("row")),
         "start": start,
@@ -63,6 +74,12 @@ def _anchor(raw: object) -> dict | None:
         "prefix": _clip(raw.get("prefix"), MAX_CONTEXT),
         "suffix": _clip(raw.get("suffix"), MAX_CONTEXT),
     }
+    if raw.get("guess"):
+        out["guess"] = True
+    orig = _orig(raw.get("orig"))
+    if orig:
+        out["orig"] = orig
+    return out
 
 
 def _anchors(raw: object) -> list[dict]:
@@ -123,10 +140,23 @@ def load(wd: WorkDir) -> list[dict]:
     return normalize(data.get("items") if isinstance(data, dict) else data)
 
 
-def save(wd: WorkDir, items: object) -> list[dict]:
-    """정리 후 저장하고, 저장된 목록을 돌려준다. 비면 파일을 지운다(빈 껍데기를 남기지 않게)."""
+def backup_path(wd: WorkDir):
+    return wd.annotations_json.with_name(wd.annotations_json.name + ".bak")
+
+
+def save(wd: WorkDir, items: object, backup: bool = False) -> list[dict]:
+    """정리 후 저장하고, 저장된 목록을 돌려준다. 비면 파일을 지운다(빈 껍데기를 남기지 않게).
+
+    backup=True(뷰어가 위치를 다시 찾아 앵커를 고친 저장)면 고치기 전 파일을 annotations.json.bak으로
+    **처음 한 번만** 남긴다 — 이미 있으면 그대로 둔다(두 번째 수리가 수리 전 원본을 덮지 않게).
+    """
     clean = normalize(items)
     path = wd.annotations_json
+    bak = backup_path(wd)
+    if backup and path.exists() and not bak.exists():
+        tmp_bak = bak.with_name(bak.name + ".tmp")
+        tmp_bak.write_bytes(path.read_bytes())
+        tmp_bak.replace(bak)
     if not clean:
         path.unlink(missing_ok=True)
         return []
