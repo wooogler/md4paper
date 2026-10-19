@@ -1893,7 +1893,8 @@ _CHROME_CSS = """
 .md4-panel { height: 100%; width: 100%; overflow-y: auto; padding: 12px; gap: 12px; flex-wrap: nowrap; }
 .md4-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; }
 /* 메모 패널 — 머리 한 줄 아래를 위지윅 편집기(Milkdown Crepe)가 꽉 채운다. 편집기 안 빈 곳을 눌러도
-   글쓰기로 들어가게 .milkdown·.ProseMirror를 상자 높이까지 늘린다. 왼쪽 여백은 블록 핸들(⋮⋮ +) 자리. */
+   글쓰기로 들어가게 .milkdown·.ProseMirror를 상자 높이까지 늘린다. 블록 핸들(⋮⋮ +)은 숨긴다 — 좁은
+   패널에서 왼쪽 여백만 먹고 쓸 일이 없다. 표·체크박스 삽입은 '/' 메뉴로 그대로 된다. */
 .md4-notes { flex: 1 1 auto; min-height: 0; flex-wrap: nowrap; }
 .md4-notes .md4-notes-status { font-size: 11px; color: #9a968e; }
 .md4-notes-ed { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
@@ -1901,7 +1902,8 @@ _CHROME_CSS = """
 .md4-notes-ed .milkdown { min-height: 100%; display: flex; flex-direction: column;
   --crepe-color-background: #fbfaf9; --crepe-base-font-size: 14px;
   --crepe-font-default: inherit; --crepe-font-title: inherit; }
-.md4-notes-ed .milkdown .ProseMirror { flex: 1 1 auto; padding: 12px 12px 40px 44px; }
+.md4-notes-ed .milkdown .ProseMirror { flex: 1 1 auto; padding: 12px 14px 40px 14px; }
+.md4-notes-ed milkdown-block-handle { display: none !important; }
 /* 목차 언어 선택 — 제목 줄 오른쪽의 작은 글자 셋. 고른 것만 파랗게, 나머지는 패널 제목과 같은 회색. */
 .md4-toclang .q-btn { min-height: 18px; padding: 0 5px; font-size: 10.5px; font-weight: 500; color: #9a968e; }
 .md4-toclang .q-btn.text-primary { color: #2383e2; font-weight: 600; }
