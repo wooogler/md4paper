@@ -2043,7 +2043,7 @@ _CHROME_CSS = """
 .md4-notetabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; margin-top: -4px; }
 .md4-notetabs::-webkit-scrollbar { height: 0; }
 .md4-notetab { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; padding: 2px 8px;
-  border-radius: 6px; font-size: 12.5px; color: #8a8780; cursor: pointer; white-space: nowrap; user-select: none; }
+  border-radius: 6px; font-size: 13.5px; font-weight: 500; color: #6b6862; cursor: pointer; white-space: nowrap; user-select: none; }
 .md4-notetab:hover { background: rgba(55,53,47,.06); color: #37352f; }
 .md4-notetab.on { background: rgba(55,53,47,.08); color: #37352f; font-weight: 600; }
 .md4-notetab-x { opacity: 0; margin-right: -4px; border-radius: 3px; padding: 1px; }
@@ -2166,16 +2166,16 @@ _CHROME_CSS = """
   .md4-railbtn.on { background: rgba(90,150,230,.22); color: #7bb7ff; }
 }
 /* 탭 하나 — 위만 둥근 사각형. 비활성은 헤더에 잠긴 색, 활성은 본문과 같은 흰 바닥. */
-.md4-tab { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+.md4-tab { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px;
   flex: 0 1 240px; max-width: 240px; min-width: 64px; border-radius: 8px 8px 0 0; cursor: pointer;
-  font-size: 12.5px; line-height: 1; color: rgba(255,255,255,.86);
-  background: rgba(255,255,255,.13); transition: background .12s ease, color .12s ease; }
+  font-size: 13.5px; font-weight: 500; line-height: 1; color: rgba(255,255,255,.96);
+  background: rgba(255,255,255,.16); transition: background .12s ease, color .12s ease; }
 .md4-tab + .md4-tab { margin-left: 2px; }
 .md4-tab:hover { background: rgba(255,255,255,.24); color: #fff; }
 .md4-tab.on { background: #fff; color: #37352f; font-weight: 600; cursor: default; }
 .md4-tab.on:hover { background: #fff; }
 .md4-tab-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.md4-tab-ico { flex: 0 0 auto; opacity: .55; }
+.md4-tab-ico { flex: 0 0 auto; opacity: .75; }
 .md4-tab.on .md4-tab-ico { opacity: .5; }
 .md4-tab-ico.md4-tab-busy { opacity: .9; animation: md4spin 1s linear infinite; }
 .md4-jobsbtn { margin-right: 2px; }
