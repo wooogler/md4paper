@@ -216,11 +216,18 @@ sup.md-fn a:hover { text-decoration: underline; }
 .vcol-handle { position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: col-resize; z-index: 3; }
 .vcol-handle::after { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 1px; background: #e6e4e0; }
 .vcol-handle:hover::after { background: #2383e2; width: 2px; }
+/* 한 패널 본문의 좌우 가장자리 — 창 가장자리를 끌듯 끌어서 본문 폭을 바꾼다(_BODY_DRAG_JS가 위치를 맞춘다).
+   평소엔 안 보이고, 본문에 마우스를 올리면 옅은 선, 핸들 위·드래그 중엔 파랗게. */
+.vbody-handle { position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: col-resize; z-index: 3; }
+.vbody-handle::after { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 1px;
+  background: #e6e4e0; opacity: 0; transition: opacity .15s ease; }
+.vbodywrap:hover .vbody-handle::after { opacity: 1; }
+.vbody-handle:hover::after, .vbody-handle.dragging::after { background: #2383e2; width: 2px; opacity: 1; }
 .vpdf { height: 100%; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px; background: #f4f3f1; }
 .vpane { height: 100%; overflow-y: auto; overscroll-behavior: contain; }  /* 정렬 불가 시 단일 마크다운 패널 */
 /* 한 패널만 보일 때(원문만·번역만·PDF만) 본문이 창 폭을 다 먹으면 한 줄이 너무 길어 읽기 어렵다 →
    최대 폭(--md4-maxw, 캔버스 열에 인라인)으로 묶고 가운데 둔다. 두 컬럼(원문|번역)이나 PDF 나란히면
-   각 컬럼이 이미 좁으므로 그대로. 폭은 툴바의 '본문 폭' 메뉴로 조절·기억한다. */
+   각 컬럼이 이미 좁으므로 그대로. 폭은 본문 좌우 가장자리 핸들(.vbody-handle)을 끌어 조절·기억한다. */
 .sbs-grid:not(.sbs-two) > .sbs-cell { width: 100%; max-width: var(--md4-maxw, 820px); justify-self: center; }
 .vpane-in { max-width: var(--md4-maxw, 820px); margin: 0 auto; }
 .vpdf img { max-width: var(--md4-maxw, 900px) !important; }
@@ -290,6 +297,7 @@ sup.md-fn a:hover { text-decoration: underline; }
   .vtoc-item:hover { background: #2c2c2c; }
   .vtoc-item:hover .vtoc-l1 { color: #e0e0e0; }
   .vcol-handle::after { background: #3a3a3a; }
+  .vbody-handle::after { background: #3a3a3a; }
   .vpdf { background: #151515; }
   .sbs-row-sep { border-top-color: #2c2c2c; }
 }
@@ -2674,6 +2682,73 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     })();
     """
 
+    # 한 패널(단일 컬럼 그리드·.vpane·PDF만)일 때 본문 좌우 가장자리 핸들(.vbody-handle)로 본문 폭을 끈다.
+    # 본문은 스크롤 상자 콘텐츠 폭의 가운데에 놓이므로 폭 = 2 × |마우스X − 가운데X| (480px 이상), 상자 폭
+    # 이상이면 '제한 없음'(none). 끄는 동안 .md4-canvascol의 --md4-maxw를 바로 바꾸고, 놓으면 서버에
+    # md4-body-width {w: px 또는 0}로 알려 기억한다. 더블클릭 = 820px로 되돌리기.
+    # 재렌더마다 실행되므로 window 리스너는 1회, 상자 바인딩은 dataset 플래그로 멱등하게. 새 패널이 DOM에
+    # 붙기 전에 돌 수 있어(_pdf_sync_js 참고) 바인딩 안 된 상자가 생길 때까지 잠깐씩 다시 시도한다.
+    _BODY_DRAG_JS = """
+    (function(){
+      var MINW=480, DEF=820;
+      function col(){ return document.querySelector('.md4-canvascol'); }
+      function curW(){ var c=col(); var v=c ? getComputedStyle(c).getPropertyValue('--md4-maxw').trim() : '';
+        if(v==='none') return 0; var n=parseFloat(v); return isNaN(n) ? DEF : n; }
+      function setW(w){ var c=col(); if(c) c.style.setProperty('--md4-maxw', w ? w+'px' : 'none'); }
+      function box(wrap){  // 본문 스크롤 상자 — 스크롤바·안쪽 여백을 뺀 콘텐츠 폭과 그 가운데(화면 X)
+        var sc=wrap.querySelector(':scope > .sbs-grid, :scope > .vpane, :scope > .vpdf'); if(!sc) return null;
+        var cs=getComputedStyle(sc), pl=parseFloat(cs.paddingLeft)||0, pr=parseFloat(cs.paddingRight)||0;
+        var avail=sc.clientWidth-pl-pr, r=sc.getBoundingClientRect(), wl=wrap.getBoundingClientRect().left;
+        var lo=r.left+sc.clientLeft-wl;  // 스크롤 상자 안쪽(스크롤바 제외)의 왼쪽 끝, 상자 기준 X
+        return {sc: sc, avail: avail, cx: r.left+sc.clientLeft+pl+avail/2, wl: wl, lo: lo, hi: lo+sc.clientWidth};
+      }
+      function place(wrap){
+        var b=box(wrap); if(!b || b.avail<=0) return;
+        var w=curW(); w=(w && w<b.avail) ? w : b.avail;
+        [].forEach.call(wrap.querySelectorAll(':scope > .vbody-handle'), function(h){
+          // 제한 없음이면 상자 가장자리 — 잡는 폭(10px)이 스크롤 상자 밖(옆 패널 경계·스크롤바)으로 나가지 않게
+          var x=b.cx-b.wl+(h.dataset.side==='left' ? -1 : 1)*w/2;
+          h.style.left=Math.min(b.hi-5, Math.max(b.lo+5, x))+'px'; });
+      }
+      function placeAll(){ [].forEach.call(document.querySelectorAll('.vbodywrap'), place); }
+      window.__md4BodyPlace=placeAll;
+      function emit(w){ if(typeof emitEvent==='function') emitEvent('md4-body-width', {w: w}); }
+      function bindWrap(wrap){
+        wrap.dataset.bodybound='1';
+        [].forEach.call(wrap.querySelectorAll(':scope > .vbody-handle'), function(h){
+          h.addEventListener('mousedown', function(e){ if(e.button!==0) return; e.preventDefault();
+            window.__bodyDrag={wrap: wrap, h: h, w0: curW(), w: curW(), moved: false};
+            h.classList.add('dragging'); document.body.style.userSelect='none'; });
+          h.addEventListener('dblclick', function(e){ e.preventDefault(); setW(DEF); placeAll(); emit(DEF); });
+        });
+        var b=box(wrap);
+        if(b && typeof ResizeObserver!=='undefined') new ResizeObserver(function(){ place(wrap); }).observe(b.sc);
+      }
+      if(!window.__bodyDragInit){ window.__bodyDragInit=true;
+        window.addEventListener('mousemove', function(e){ var d=window.__bodyDrag; if(!d) return;
+          var b=box(d.wrap); if(!b || b.avail<=0) return;
+          var w=Math.max(MINW, Math.round(2*Math.abs(e.clientX-b.cx)));
+          if(w>=b.avail) w=0;  // 상자 폭 이상 = 제한 없음
+          d.w=w; d.moved=true; setW(w); placeAll(); });
+        window.addEventListener('mouseup', function(){ var d=window.__bodyDrag; if(!d) return;
+          window.__bodyDrag=null; d.h.classList.remove('dragging'); document.body.style.userSelect='';
+          if(d.moved && d.w!==d.w0) emit(d.w); });
+        window.addEventListener('resize', placeAll);
+      }
+      (function bind(attempt){
+        var ws=[].filter.call(document.querySelectorAll('.vbodywrap'), function(w){ return !w.dataset.bodybound; });
+        if(!ws.length){ if(attempt<60) setTimeout(function(){ bind(attempt+1); }, 50); return; }
+        ws.forEach(bindWrap); placeAll();
+      })(0);
+    })();
+    """
+
+    def _body_handles() -> None:
+        """한 패널 본문의 좌우 폭 핸들 — .vbodywrap(상대 위치 상자) 안, 스크롤 상자 옆에 둔다."""
+        tip = "끌어서 본문 폭 조절 · 더블클릭하면 기본(820px)으로"
+        ui.element("div").classes("vbody-handle").props('data-side=left').tooltip(tip)
+        ui.element("div").classes("vbody-handle").props('data-side=right').tooltip(tip)
+
     # 텍스트 스크롤 → PDF 따라오기(섹션 단위). scroll_sel 컨테이너 안의 최상단 [data-page]로 PDF를 스크롤.
     # 컨테이너는 재렌더마다 새 요소라 리스너가 쌓이지 않는다(요소당 1회).
     def _pdf_sync_js(scroll_sel: str) -> str:
@@ -2863,13 +2938,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if not (show_en or show_ko or show_pdf):
             show_en = True  # 최소 하나는 보이도록
 
-        def text_area() -> None:
+        def text_area(solo: bool = False) -> None:
+            """solo = 텍스트 한 패널만(PDF 옆이 아님) — 그때만 단일 컬럼 본문에 폭 핸들을 둔다."""
             two = show_en and show_ko and aligned
             # 한 언어만 볼 때 반대쪽을 숨은 셀로 같이 그린다 — 문장에 올리면 그 짝을 툴팁으로(JS)
             ghost = aligned and show_en != show_ko and viewer_state["stip"]
             if aligned or show_en:
                 # 정렬 그리드 (원문/번역 컬럼 토글). 정렬 실패 시엔 EN만 그리드로(그때 KO 컬럼 생략).
-                with ui.element("div").classes("vwrap"):
+                handles = solo and not two
+                with ui.element("div").classes("vwrap" + (" vbodywrap" if handles else "")):
                     two_cls = " sbs-two" if two else (" sbs-tip" if ghost else "")
                     with ui.element("div").classes(f"sbs-grid{two_cls}").style(
                             f"--sbs-cols:{'1fr 1fr' if two else '1fr'}"):
@@ -2895,14 +2972,23 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                     ui.markdown((kob or "") if show_en else enb, extras=_md).classes("md-preview sbs-md")
                     if two:
                         ui.element("div").classes("vcol-handle")
+                    elif handles:
+                        _body_handles()
                 if two:
                     ui.run_javascript(_ENKO_DRAG_JS)
+                elif handles:
+                    ui.run_javascript(_BODY_DRAG_JS)
             else:
                 # 정렬 실패 + 번역만 → 단일 패널 (여기서도 하이라이트·메모는 그대로 된다)
-                with ui.element("div").classes("vpane anno-scope").style(
-                        "padding:1px 22px 8px").props("data-row=0 data-side=ko"):
-                    with ui.element("div").classes("vpane-in md-preview"):
-                        ui.markdown(info["ko"], extras=_md)
+                with ui.element("div").classes("vwrap" + (" vbodywrap" if solo else "")):
+                    with ui.element("div").classes("vpane anno-scope").style(
+                            "padding:1px 22px 8px").props("data-row=0 data-side=ko"):
+                        with ui.element("div").classes("vpane-in md-preview"):
+                            ui.markdown(info["ko"], extras=_md)
+                    if solo:
+                        _body_handles()
+                if solo:
+                    ui.run_javascript(_BODY_DRAG_JS)
 
         with ui.element("div").classes("vshell"), ui.element("div").classes("vmain"):
             if (show_en or show_ko) and show_pdf:
@@ -2915,9 +3001,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 if row_page0 and viewer_state["sync"]:  # 텍스트 스크롤 → PDF 페이지 따라오기 (토글)
                     ui.run_javascript(_PDF_SYNC_JS)
             elif show_pdf:
-                _pdf_pane()
+                with ui.element("div").classes("vwrap vbodywrap"):  # PDF만 — 쪽 그림 폭을 같은 핸들로
+                    _pdf_pane()
+                    _body_handles()
+                ui.run_javascript(_BODY_DRAG_JS)
             else:
-                text_area()
+                text_area(solo=True)
         ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")  # 하이라이트 다시 얹기
         # 토글 전 캡처해 둔 텍스트 스크롤 위치 복원 + (PDF 있으면) 그 위치로 PDF 정렬
         r = viewer_state.pop("_restore", None)
@@ -2979,51 +3068,33 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def body_width() -> int:
         """한 패널만 볼 때의 본문 최대 폭(px). 0 = 제한 없음. 전역 설정([ui].body_width)에 기억."""
         v = config.load_config().get("ui", {}).get("body_width", 820)
-        return int(v) if isinstance(v, (int, float)) and (v == 0 or 480 <= v <= 1600) else 820
+        return int(v) if isinstance(v, (int, float)) and (v == 0 or 480 <= v <= 4000) else 820
 
     def body_width_css() -> str:
         w = body_width()
         return f"--md4-maxw:{w}px" if w else "--md4-maxw:none"
 
     def set_body_width(w: int) -> None:
-        config.set_section_value("ui", "body_width", int(w))
+        w = 0 if w <= 0 else max(480, min(int(w), 4000))  # body_width()가 받아들이는 범위로 — 저장값 = 보이는 값
+        config.set_section_value("ui", "body_width", w)
         # 다시 그리지 않고 변수만 바꾼다 — 읽던 자리·하이라이트가 흔들리지 않게
         ui.run_javascript("document.querySelector('.md4-canvascol')?.style.setProperty('--md4-maxw',"
-                          + json.dumps(f"{int(w)}px" if w else "none") + ")")
+                          + json.dumps(f"{w}px" if w else "none") + ")"
+                          + ";window.__md4BodyPlace&&window.__md4BodyPlace()")
 
-    def body_width_menu() -> None:
-        """툴바의 '본문 폭' 단추 — 슬라이더로 한 패널 본문의 최대 폭을, 또는 제한 없음."""
-        cur = body_width()
-        btn = ui.button(icon="settings_ethernet").props("flat dense round color=grey-7") \
-            .tooltip("본문 폭 — 원문·번역·PDF 중 하나만 볼 때 한 줄이 너무 길지 않게 최대 폭을 정합니다")
-        with btn, ui.menu().props("anchor='bottom left' self='top left'").classes("md4-widthmenu"):
-            with ui.column().classes("q-pa-md gap-1").style("width:260px"):
-                ui.label("본문 최대 폭 (한 패널만 볼 때)").classes("text-xs text-gray-500")
-                lbl = ui.label(f"{cur}px" if cur else "제한 없음").classes("text-sm font-medium")
-                sl = ui.slider(min=560, max=1400, step=20, value=cur or 820)
-                full = ui.switch("제한 없음 (창 폭 전체)", value=cur == 0).props("dense")
+    def on_body_width(e) -> None:  # noqa: ANN001 — GenericEventArguments
+        """본문 가장자리 핸들을 놓거나 더블클릭했을 때(_BODY_DRAG_JS) — 폭(px, 0 = 제한 없음)을 기억."""
+        try:
+            w = int((e.args or {}).get("w", 0))
+        except (TypeError, ValueError, AttributeError):
+            return
+        set_body_width(w)
 
-                def on_slide(e) -> None:  # noqa: ANN001
-                    if full.value:
-                        full.value = False  # 슬라이더를 만지면 제한이 다시 켜진다
-                    lbl.text = f"{int(e.value)}px"
-                    set_body_width(int(e.value))
-
-                def on_full(e) -> None:  # noqa: ANN001
-                    if e.value:
-                        lbl.text = "제한 없음"
-                        set_body_width(0)
-                    else:
-                        lbl.text = f"{int(sl.value)}px"
-                        set_body_width(int(sl.value))
-
-                sl.on_value_change(on_slide)
-                full.on_value_change(on_full)
-                cap("두 컬럼을 나란히 보거나 PDF를 옆에 둘 때는 적용되지 않습니다.")
+    ui.on("md4-body-width", on_body_width)
 
     @ui.refreshable
     def viewer_toolbar() -> None:
-        """캔버스 위 한 줄 — 무엇을 볼지(원문·번역·PDF), 편집, 본문 폭, 메모·챗, 내보내기."""
+        """캔버스 위 한 줄 — 무엇을 볼지(원문·번역·PDF), 편집, 메모·챗, 내보내기."""
         has_ko = bool(ctrl.ko_markdown())
         has_pdf = ctrl.pdf_page_count() > 0
 
@@ -3056,7 +3127,6 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     "flat dense round " + ("color=primary" if viewer_state["stip"] else "color=grey-6")) \
                     .tooltip("문장에 마우스를 올리면 " + ("번역" if viewer_state["en"] else "원문")
                              + " 문장 보기 " + ("(켜짐)" if viewer_state["stip"] else "(꺼짐)"))
-            body_width_menu()
             ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
