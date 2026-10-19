@@ -2088,6 +2088,19 @@ _CHROME_CSS = """
 .md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper { width: 22px; height: 30px; flex: 0 0 auto;
   color: var(--crepe-color-on-background); }
 .md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper svg { fill: currentColor; }
+/* 글머리 기호 — 중첩 깊이마다 ● ○ ■ 를 돌려 쓴다(Notion·브라우저 기본과 같게). Crepe의 svg 점은 숨기고
+   라벨 자리에 CSS로 그린다. 깊이는 조상 목록 블록 수로 가린다(더 깊은 규칙이 더 구체적이라 이긴다). */
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.bullet svg { display: none; }
+.md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.bullet::before { content: ""; display: block;
+  box-sizing: border-box; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 1.4px solid currentColor; border-radius: 50%; background: transparent; width: 6.5px; height: 6.5px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 0; border-radius: 0; background: currentColor; width: 5.5px; height: 5.5px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 0; border-radius: 50%; background: currentColor; width: 6px; height: 6px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 1.4px solid currentColor; border-radius: 50%; background: transparent; width: 6.5px; height: 6.5px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 0; border-radius: 0; background: currentColor; width: 5.5px; height: 5.5px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 0; border-radius: 50%; background: currentColor; width: 6px; height: 6px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 1.4px solid currentColor; border-radius: 50%; background: transparent; width: 6.5px; height: 6.5px; }
+.md4-notes-ed .milkdown .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block .milkdown-list-item-block li .label-wrapper .label.bullet::before { border: 0; border-radius: 0; background: currentColor; width: 5.5px; height: 5.5px; }
 .md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label { height: auto; width: auto; padding: 0;
   text-align: center; line-height: 1.5; }
 .md4-notes-ed .milkdown .milkdown-list-item-block li .label-wrapper .label.checked,
