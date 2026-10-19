@@ -340,62 +340,62 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
 .ab-dot:hover { transform: scale(1.16); }
 .ab-dot.on { border-color: #2383e2; box-shadow: 0 0 0 2px rgba(35,131,226,.35); }
 .ab-sep { width: 1px; height: 16px; background: rgba(255,255,255,.22); margin: 0 3px; }
-#md-anno-bar .ab-btn { border: none; background: none; color: #e8e8e8; font-size: 12.5px;
+#md-anno-bar .ab-btn { border: none; background: none; color: #e8e8e8; font-size: 14px;
   padding: 3px 7px; border-radius: 7px; cursor: pointer; }
 #md-anno-bar .ab-btn:hover { background: rgba(255,255,255,.16); }
 
 /* 하이라이트를 누르면 뜨는 메모 카드 */
-#md-anno-pop { position: fixed; z-index: 10003; display: none; width: 282px; padding: 10px;
+#md-anno-pop { position: fixed; z-index: 10003; display: none; width: 340px; padding: 12px;
   border-radius: 12px; background: #fff; border: 1px solid #e6e4e0; color: #37352f;
   box-shadow: 0 12px 36px rgba(0,0,0,.18); }
 #md-anno-pop.open { display: block; }
 .apop-row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
 .apop-sp { flex: 1 1 auto; }
-.apop-del { border: none; background: none; color: #b3261e; font-size: 12.5px; padding: 3px 7px;
+.apop-del { border: none; background: none; color: #b3261e; font-size: 14px; padding: 3px 7px;
   border-radius: 7px; cursor: pointer; }
 .apop-del:hover { background: rgba(179,38,30,.12); }
-.apop-quote { font-size: 11.5px; line-height: 1.5; color: #8a8780; margin-bottom: 6px;
+.apop-quote { font-size: 13.5px; line-height: 1.55; color: #8a8780; margin-bottom: 6px;
   max-height: 52px; overflow: hidden; }
 .apop-quote.apop-ko, .ap-q.ap-ko { padding-left: 7px; border-left: 2px solid #e0ded9; }
 .apop-row + .apop-quote.apop-ko { border-left-color: #cfcdc8; }
 #md-anno-pop textarea { width: 100%; min-height: 66px; resize: vertical; box-sizing: border-box;
-  border: 1px solid #e0ded9; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 12.5px;
+  border: 1px solid #e0ded9; border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 14.5px;
   background: #fff; color: inherit; outline: none; }
 #md-anno-pop textarea:focus { border-color: #2383e2; }
 
 /* 오른쪽 목록 서랍 — 챗봇 서랍과 같은 규칙: 본문을 덮지 않고 오른쪽을 차지한다.
    (--ma-top은 헤더를 실제로 재서 넣는다. 헤더 높이가 고정이 아니라 상수로 두면 탭 라벨을 가린다.) */
-:root { --ma-w: 320px; --ma-top: 50px; }
+:root { --ma-w: 360px; --ma-top: 50px; }
 #md-anno-panel { position: fixed; top: var(--ma-top); right: 0; bottom: 0; width: var(--ma-w); z-index: 9000;
   display: none; flex-direction: column; background: #fff; border-left: 1px solid #e6e4e0;
   color: #37352f; }
 #md-anno-panel.open { display: flex; }
 body.ma-open .md4-steps { padding-right: var(--ma-w); }
 .ap-head { display: flex; align-items: center; gap: 7px; padding: 10px 12px;
-  border-bottom: 1px solid #ecebe8; font-size: 13px; }
-.ap-count { font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #f0efec; color: #6b6862; }
-.ap-x { border: none; background: none; font-size: 13px; color: #8a8780; cursor: pointer;
+  border-bottom: 1px solid #ecebe8; font-size: 14.5px; }
+.ap-count { font-size: 12px; padding: 1px 7px; border-radius: 9px; background: #f0efec; color: #6b6862; }
+.ap-x { border: none; background: none; font-size: 14px; color: #8a8780; cursor: pointer;
   padding: 3px 6px; border-radius: 7px; }
 .ap-x:hover { background: #f0efec; }
 .ap-list { flex: 1 1 auto; overflow-y: auto; padding: 6px; }
-.ap-foot { padding: 8px 12px; border-top: 1px solid #ecebe8; font-size: 11px; color: #97948d; }
-.ap-empty { padding: 22px 14px; font-size: 12px; color: #97948d; text-align: center; line-height: 1.6; }
+.ap-foot { padding: 8px 12px; border-top: 1px solid #ecebe8; font-size: 12.5px; color: #97948d; }
+.ap-empty { padding: 22px 14px; font-size: 13.5px; color: #97948d; text-align: center; line-height: 1.6; }
 .ap-item { padding: 8px 9px; border-radius: 9px; cursor: pointer; }
 .ap-item:hover { background: #f7f6f3; }
 .ap-item + .ap-item { margin-top: 2px; }
 .ap-top { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .ap-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 10px; }
-.ap-side { font-size: 10.5px; color: #8a8780; }
-.ap-lostb { font-size: 10px; color: #b3261e; background: rgba(179,38,30,.10);
+.ap-side { font-size: 12px; color: #8a8780; }
+.ap-lostb { font-size: 11.5px; color: #b3261e; background: rgba(179,38,30,.10);
   padding: 0 5px; border-radius: 6px; }
-.ap-del { border: none; background: none; color: #a9a69f; font-size: 11px; cursor: pointer;
+.ap-del { border: none; background: none; color: #a9a69f; font-size: 13px; cursor: pointer;
   padding: 2px 5px; border-radius: 6px; opacity: 0; }
 .ap-item:hover .ap-del { opacity: 1; }
 .ap-del:hover { background: rgba(179,38,30,.12); color: #b3261e; }
-.ap-q { font-size: 12px; line-height: 1.55; color: #5b5851;
+.ap-q { font-size: 14px; line-height: 1.6; color: #5b5851;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .ap-q.ap-ko { margin-top: 3px; color: #86837c; }
-.ap-n { font-size: 12px; line-height: 1.55; margin-top: 5px; padding-left: 7px;
+.ap-n { font-size: 14px; line-height: 1.6; margin-top: 5px; padding-left: 7px;
   border-left: 2px solid #2383e2; white-space: pre-wrap; }
 .ap-lost .ap-q { opacity: .55; }
 
@@ -783,12 +783,18 @@ _ANNO_HTML = """
   function remove(id){
     for (var i = 0; i < items.length; i++) if (items[i].id === id){ items.splice(i, 1); break; }
     applyAll(); flush();
+    renderPanel();   // 목록 서랍에서도 바로 빠지게 — 안 그리면 지운 항목이 남아 한 번 더 눌러야 사라졌다
   }
   pop.addEventListener('click', function(e){
     var a = find(editing); if (!a) return;
     var d = e.target.closest('.ab-dot');
     if (d){ a.color = lastColor = d.getAttribute('data-color'); applyAll(); flush(); openPop(a.id); return; }
-    if (e.target.closest('.apop-del')){ closePop(); remove(a.id); }
+  });
+  pop.addEventListener('mousedown', function(e){
+    if (!e.target.closest('.apop-del') || e.button !== 0) return;
+    e.preventDefault();   // 메모 칸 포커스를 뺏지 않는다 — 블러로 상자가 흔들려 click이 빗나가지 않게
+    var a = find(editing); if (!a) return;
+    closePop(); remove(a.id);
   });
   pop.addEventListener('input', function(e){
     var a = find(editing); if (!a || e.target.tagName !== 'TEXTAREA') return;
