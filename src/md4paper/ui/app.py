@@ -2000,6 +2000,8 @@ _PREPAINT_HTML = """
 """
 
 _CHROME_CSS = """
+/* 호버 툴팁(Quasar q-tooltip) — 기본 10px은 앱 창에서 읽기 힘들다. 본문 보조 글자 크기에 맞춘다. */
+.q-tooltip { font-size: 13px; line-height: 1.45; padding: 6px 10px; max-width: 380px; white-space: pre-line; }
 /* 헤더 한 줄 — 논문 탭은 아래 끝에 물리고, 그림자를 없애야 활성 탭이 본문으로 이어져 보인다. */
 .md4-header { min-height: 44px; padding: 0 8px !important; box-shadow: none !important; gap: 4px; }
 /* 탭 줄은 헤더 남는 폭을 다 쓴다 — 탭은 240px까지 넓게, 모자라면 다 같이 줄고(크롬처럼), 64px 밑으로는
