@@ -19,3 +19,7 @@ config.toml
 
 # OS
 .DS_Store
+
+# 메모 편집기 번들 작업 폴더 (결과물만 src/md4paper/ui/assets/crepe/에 커밋)
+tools/bundle_crepe/node_modules/
+tools/bundle_crepe/package-lock.json

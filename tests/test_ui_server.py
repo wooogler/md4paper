@@ -31,6 +31,11 @@ def _free_port() -> int:
 
 def _serve_and_get(args: list[str], port: int, path: str = "/") -> str:
     """서버를 띄우고 path를 GET해 본문 반환 (정리 포함)."""
+    return _serve_and_get_many(args, port, [path])[0]
+
+
+def _serve_and_get_many(args: list[str], port: int, paths: list[str]) -> list[str]:
+    """서버를 한 번 띄워 paths를 차례로 GET해 본문들을 반환 (정리 포함)."""
     # pytest/nicegui 테스트 모드 env 제거 (하위 서버가 스크린테스트 모드로 오인하지 않도록)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST", "NICEGUI"))}
     proc = subprocess.Popen(
@@ -45,15 +50,20 @@ def _serve_and_get(args: list[str], port: int, path: str = "/") -> str:
                 out = proc.stdout.read().decode() if proc.stdout else ""
                 pytest.fail(f"UI 서버가 조기 종료됨:\n{out}")
             try:
-                r = urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=2)
+                r = urllib.request.urlopen(f"http://127.0.0.1:{port}{paths[0]}", timeout=2)
                 assert r.status == 200, "서버가 200을 반환하지 않음"
-                return r.read().decode("utf-8", "replace")
+                bodies = [r.read().decode("utf-8", "replace")]
+                for path in paths[1:]:
+                    r = urllib.request.urlopen(f"http://127.0.0.1:{port}{path}", timeout=10)
+                    assert r.status == 200, f"{path}가 200을 반환하지 않음"
+                    bodies.append(r.read().decode("utf-8", "replace"))
+                return bodies
             except AssertionError:
                 raise
             except Exception:  # noqa: BLE001 — 부팅 대기
                 time.sleep(0.5)
         pytest.fail("서버가 시간 내에 응답하지 않음")
-        return ""
+        return []
     finally:
         proc.terminate()
         try:
@@ -85,6 +95,18 @@ def test_ui_server_renders(tmp_path):
     assert "레이아웃 자동 수정" in body
     assert "추가 지시 (선택)" in body
     assert "직전 상태로 되돌리기" in body
+
+
+def test_ui_serves_notes_editor_bundle(tmp_path):
+    """메모 패널 위지윅 편집기(Milkdown Crepe) 번들 — 오프라인으로 서버가 직접 내준다."""
+    js, css, ver = _serve_and_get_many(
+        ["--upload-dir", str(tmp_path)], _free_port(),
+        ["/home", "/static/crepe/crepe.min.js", "/static/crepe/crepe.min.css", "/static/crepe/VERSION"],
+    )[1:]
+    assert "MilkdownCrepe" in js
+    assert ".milkdown" in css and "prefers-color-scheme: dark" in css.replace("prefers-color-scheme:dark",
+                                                                               "prefers-color-scheme: dark")
+    assert "@milkdown/crepe" in ver and "MIT" in ver
 
 
 def test_ui_home_upload_page(tmp_path):

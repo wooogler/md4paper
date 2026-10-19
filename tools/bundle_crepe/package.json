@@ -1,0 +1,12 @@
+{
+  "name": "md4paper-bundle-crepe",
+  "private": true,
+  "description": "메모 패널 위지윅 편집기(Milkdown Crepe)를 src/md4paper/ui/assets/crepe/에 한 파일로 묶는다",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@milkdown/crepe": "7.22.3",
+    "esbuild": "0.28.2"
+  }
+}
