@@ -1500,6 +1500,70 @@ def anno_items_js(items: list[dict], token: str) -> str:
             f" else {{ window.__mdAnnoTok = {tok}; window.__mdAnno = {payload}; }}")
 
 
+# 메모 패널 위지윅 편집기(Milkdown Crepe) — 개발 시점에 묶어 둔 파일을 그대로 서빙한다
+# (오프라인·빌드 도구 없음, 다시 묶기: tools/bundle_crepe/README.md). 주소의 ?v=는 판이 바뀌면 캐시를 깬다.
+CREPE_DIR = Path(__file__).resolve().parent / "assets" / "crepe"
+CREPE_URL = "/static/crepe"
+
+
+def _crepe_version() -> str:
+    try:
+        return (CREPE_DIR / "VERSION").read_text(encoding="utf-8").split()[1]
+    except (OSError, IndexError):
+        return "0"
+
+
+def notes_editor_js(el_id: str, md: str) -> str:
+    """메모 컨테이너(el_id)에 Crepe 편집기를 얹는 JS. 라이브러리는 처음 한 번만 불러온다.
+
+    갈아 끼우기(§ui/spa.py)에서는 이 스크립트가 새 요소보다 먼저 도착할 수 있어 요소가 생길 때까지
+    기다린다. DOM에서 사라진 옛 편집기는 새로 얹을 때 치운다. 바뀐 마크다운은 리스너가 이미 0.2초
+    모아 주므로 그대로 보내고, 0.8초 모아 쓰기·저장 상태는 파이썬(notes_typed)이 맡는다 — 패널을
+    떠나거나 내보낼 때 기다리던 글자까지 바로 쓰려면 마지막 내용이 서버에 있어야 해서다.
+    편집기 쪽으로 되쓰는 경로는 없다(한국어 조합 중 글자를 건드리지 않게)."""
+    ver = _crepe_version()
+    return (
+        "(function(id, md){var W=window;"
+        "if(!W.__md4CrepeLoad){W.__md4CrepeLoad=new Promise(function(ok, no){"
+        "if(W.MilkdownCrepe)return ok();"
+        f"var l=document.createElement('link');l.rel='stylesheet';l.href='{CREPE_URL}/crepe.min.css?v={ver}';"
+        "document.head.appendChild(l);"
+        f"var s=document.createElement('script');s.src='{CREPE_URL}/crepe.min.js?v={ver}';"
+        "s.onload=function(){ok();};s.onerror=function(e){W.__md4CrepeLoad=null;no(e);};"
+        "document.head.appendChild(s);});}"
+        "var tries=0;"
+        "function mount(){var el=document.getElementById(id);"
+        "if(!el){if(++tries<400)setTimeout(mount,50);return;}"
+        "if(el.__md4crepe)return;"
+        "var all=W.__md4Crepes=W.__md4Crepes||{};"
+        "Object.keys(all).forEach(function(k){if(!document.getElementById(k)){"
+        "try{all[k].destroy();}catch(e){}delete all[k];}});"
+        "var crepe=new W.MilkdownCrepe({root:el, defaultValue:md,"
+        "featureConfigs:{placeholder:{text:'메모를 입력하세요 — / 를 누르면 표·체크박스·코드 등을 넣을 수 있습니다',"
+        "mode:'doc'}}});"
+        "el.__md4crepe=crepe;all[id]=crepe;"
+        # 표가 든 문서는 만들자마자 표 정리 트랜잭션이 돌아 내용이 같은 채로 한 번 불린다 → 같으면 건너뜀
+        "crepe.on(function(api){api.markdownUpdated(function(ctx, m, prev){"
+        "if(m===prev||m===el.__md4sent)return;el.__md4sent=m;"
+        "if(typeof emitEvent==='function')emitEvent('md4-notes',{id:id, md:m});});});"
+        "crepe.create();}"
+        "W.__md4CrepeLoad.then(mount, function(){var el=document.getElementById(id);"
+        "if(el)el.textContent='메모 편집기를 불러오지 못했습니다.';});"
+        f"}})({json.dumps(el_id)}, {json.dumps(md, ensure_ascii=False)});"
+    )
+
+
+def notes_event_text(args: object, el_id: str) -> str | None:
+    """'md4-notes' 이벤트 인자에서 저장할 마크다운을 꺼낸다 — 이 편집기(el_id)가 보낸 것만.
+
+    `ui.on` 핸들러는 창(클라이언트) 단위라 논문 탭을 오가며 화면을 다시 지으면 옛 핸들러가 남는다.
+    컨테이너 id를 맞춰 보지 않으면 다른 논문 메모가 이 논문의 notes.md로 들어간다."""
+    if not isinstance(args, dict) or args.get("id") != el_id:
+        return None
+    md = args.get("md")
+    return md if isinstance(md, str) else None
+
+
 _HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
 
 
@@ -1828,13 +1892,16 @@ _CHROME_CSS = """
 .md4-railbtn.on { background: rgba(35,131,226,.13); color: #2383e2; }
 .md4-panel { height: 100%; width: 100%; overflow-y: auto; padding: 12px; gap: 12px; flex-wrap: nowrap; }
 .md4-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; }
-/* 메모 패널 — 머리 한 줄 아래를 편집기(또는 미리보기)가 꽉 채운다 (.conv-ed와 같은 규칙, 범위만 따로) */
+/* 메모 패널 — 머리 한 줄 아래를 위지윅 편집기(Milkdown Crepe)가 꽉 채운다. 편집기 안 빈 곳을 눌러도
+   글쓰기로 들어가게 .milkdown·.ProseMirror를 상자 높이까지 늘린다. 왼쪽 여백은 블록 핸들(⋮⋮ +) 자리. */
 .md4-notes { flex: 1 1 auto; min-height: 0; flex-wrap: nowrap; }
-.md4-notes .cm-en-editor { flex: 1 1 auto; min-height: 0; }
-.md4-notes .cm-editor { height: 100%; background: #fbfaf9; }
-.md4-notes .cm-scroller { overscroll-behavior: contain; }
-.md4-notes .md4-notes-preview { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .md4-notes .md4-notes-status { font-size: 11px; color: #9a968e; }
+.md4-notes-ed { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  border-radius: 6px; background: #fbfaf9; }
+.md4-notes-ed .milkdown { min-height: 100%; display: flex; flex-direction: column;
+  --crepe-color-background: #fbfaf9; --crepe-base-font-size: 14px;
+  --crepe-font-default: inherit; --crepe-font-title: inherit; }
+.md4-notes-ed .milkdown .ProseMirror { flex: 1 1 auto; padding: 12px 12px 40px 44px; }
 /* 목차 언어 선택 — 제목 줄 오른쪽의 작은 글자 셋. 고른 것만 파랗게, 나머지는 패널 제목과 같은 회색. */
 .md4-toclang .q-btn { min-height: 18px; padding: 0 5px; font-size: 10.5px; font-weight: 500; color: #9a968e; }
 .md4-toclang .q-btn.text-primary { color: #2383e2; font-weight: 600; }
@@ -1850,7 +1917,7 @@ _CHROME_CSS = """
 .md4-exportmenu .q-item { min-height: 36px; }
 @media (prefers-color-scheme: dark) {
   .md4-rail { background: #1b1b1b; border-right-color: #333; }
-  .md4-notes .cm-editor { background: #1d1d1d; }
+  .md4-notes-ed, .md4-notes-ed .milkdown { background: #1d1d1d; --crepe-color-background: #1d1d1d; }
   .md4-railbtn { color: #a8a8a8; }
   .md4-railbtn:hover { background: rgba(255,255,255,.08); color: #e0e0e0; }
   .md4-railbtn.on { background: rgba(90,150,230,.22); color: #7bb7ff; }
@@ -3737,7 +3804,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                        "structure": "구조 — 헤더 레벨·섹션 트리·레이아웃 수정·다시 변환",
                        "translate": "번역 — 번역할 섹션·용어집·실행",
                        "settings": "설정 — 인용 표기·캡션·저자",
-                       "notes": "메모 — 논문 전체에 대한 자유 메모 (마크다운, 자동 저장)"}[key]
+                       "notes": "메모 — 논문 전체에 대한 자유 메모 (위지윅, 자동 저장)"}[key]
                       + (" (누르면 접힘)" if on else ""))
 
     @ui.refreshable
@@ -4296,29 +4363,24 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         tick()
 
     def notes_panel() -> None:
-        """메모 패널 속 — 머리(제목 · 저장 상태 · 미리보기 토글) + 편집기 / 렌더된 마크다운."""
+        """메모 패널 속 — 머리(제목 · 저장 상태) + 위지윅 편집기(Milkdown Crepe).
+
+        편집기는 브라우저에만 있고 파이썬은 바뀐 마크다운을 받아 notes.md에 쓰기만 한다. 화면을 지을
+        때마다 notes.md를 다시 읽어 넣으므로 다른 창에서 고친 메모도 새로 열면 보인다."""
         with ui.row().classes("w-full items-center no-wrap gap-2 shrink-0"):
             ui.label("메모").classes("md4-panel-title")
             notes_state["status"] = ui.label("저장됨").classes("md4-notes-status")
-            ui.space()
-            preview_sw = ui.switch("미리보기").props("dense size=sm").classes("text-xs") \
-                .tooltip("켜면 편집기 대신 렌더된 마크다운을 보입니다 — 저장된 내용 그대로")
 
-        editor = ui.codemirror(ctrl.notes(), language="Markdown", line_wrapping=True,
-                               on_change=lambda e: notes_typed(e.value)) \
-            .classes("w-full cm-en-editor").style("height:100%")
-        _extras = ["fenced-code-blocks", "tables", "latex"]
-        preview = ui.markdown("", extras=_extras).classes("md-preview md4-notes-preview w-full")
-        preview.set_visibility(False)
+        box = ui.element("div").classes("md4-notes-ed w-full")
+        el_id = f"c{box.id}"
 
-        def toggle_preview(on: bool) -> None:
-            if on:
-                notes_flush()  # 미리보기는 저장된 것과 같은 내용 — 기다리던 저장부터 끝낸다
-                preview.set_content(editor.value or "_아직 메모가 없습니다._")
-            editor.set_visibility(not on)
-            preview.set_visibility(on)
+        def on_notes(e) -> None:  # noqa: ANN001 — GenericEventArguments
+            md = notes_event_text(e.args, el_id)
+            if md is not None:
+                notes_typed(md)
 
-        preview_sw.on_value_change(lambda e: toggle_preview(bool(e.value)))
+        ui.on("md4-notes", on_notes)
+        ui.run_javascript(notes_editor_js(el_id, ctrl.notes()))
 
     # ===== 본문: 레일 + (작업 패널 | 캔버스) =====
     # 처음 여는 논문은 번역이 있으면 목차, 없으면 구조부터(먼저 할 일이 섹션 구조 확인이라). 다시 열면
@@ -6069,6 +6131,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         return {"ok": True, "count": len(saved)}
 
     chat_panel.register_routes(fastapi_app, _wd_for)  # 뷰어 챗봇 — /chat/{token}
+    fastapi_app.add_static_files(CREPE_URL, CREPE_DIR)  # 메모 패널 위지윅 편집기 번들
 
     def index_view() -> None:
         # CLI로 워크디렉토리를 지정해 띄웠으면 그 리뷰로, 아니면 업로드 홈

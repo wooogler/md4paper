@@ -1,0 +1,4 @@
+@milkdown/crepe 7.22.3 (MIT)
+bundled with esbuild 0.28.2 on 2026-10-19
+theme: common + frame (frame-dark under prefers-color-scheme: dark)
+regenerate: see tools/bundle_crepe/README.md

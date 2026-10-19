@@ -660,3 +660,33 @@ def test_save_notes_empty_removes_file(ctrl):
     assert not ctrl.wd.notes_md.exists()  # 빈 껍데기를 남기지 않는다
     assert ctrl.notes() == ""
 
+
+
+def test_notes_event_text_only_accepts_own_editor():
+    """'md4-notes' 핸들러는 창 단위로 쌓인다 — 이 편집기 id가 보낸 마크다운만 받아야 한다."""
+    from md4paper.ui.app import notes_event_text
+
+    assert notes_event_text({"id": "c12", "md": "# 메모\n\n- [ ] 할 일\n"}, "c12") == "# 메모\n\n- [ ] 할 일\n"
+    assert notes_event_text({"id": "c12", "md": ""}, "c12") == ""  # 다 지웠다 → 파일 삭제로 이어진다
+    assert notes_event_text({"id": "c99", "md": "다른 논문"}, "c12") is None  # 옛 화면의 핸들러
+    assert notes_event_text({"id": "c12", "md": None}, "c12") is None
+    assert notes_event_text({"md": "id 없음"}, "c12") is None
+    assert notes_event_text("문자열", "c12") is None
+
+
+def test_notes_event_saves_through_controller(ctrl):
+    """이벤트 → notes_event_text → save_notes 경로로 notes.md가 원자적으로 쓰인다."""
+    from md4paper.ui.app import notes_event_text
+
+    md = notes_event_text({"id": "c3", "md": "한국어 메모 **굵게**\n"}, "c3")
+    ctrl.save_notes(md)
+    assert ctrl.wd.notes_md.read_text(encoding="utf-8") == "한국어 메모 **굵게**\n"
+
+
+def test_notes_editor_js_embeds_content_safely():
+    from md4paper.ui.app import CREPE_URL, notes_editor_js
+
+    js = notes_editor_js("c7", '메모 "따옴표" </script>\n줄')
+    assert '"c7"' in js and "new W.MilkdownCrepe" in js and "emitEvent('md4-notes'" in js
+    assert '메모 \\"따옴표\\" </script>\\n줄' in js  # JSON 문자열로 실린다 (run_javascript라 태그 탈출 없음)
+    assert f"{CREPE_URL}/crepe.min.js?v=" in js and f"{CREPE_URL}/crepe.min.css?v=" in js
