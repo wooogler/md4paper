@@ -151,6 +151,8 @@ def test_configure_sets_window_icon_and_downloads():
         # pywebview 기본값(False)이면 body에 user-select:none이 주입돼 본문을 드래그로 못 고른다
         assert app.native.window_args["text_select"] is True
         assert Path(app.native.start_args["icon"]).is_file()  # macOS Dock 아이콘
+        # private_mode(기본 True)면 시작할 때 웹뷰 데이터가 지워져 읽던 자리(localStorage)가 사라진다
+        assert app.native.start_args["private_mode"] is False
     finally:
         for cfg in (app.native.window_args, app.native.settings, app.native.start_args):
             cfg.clear()
@@ -171,3 +173,22 @@ def test_open_file_uses_system_opener(monkeypatch, tmp_path):
     pdf.write_bytes(b"%PDF-1.4")
     assert desktop.open_file(pdf) is True
     assert calls == [["open", str(pdf)]]
+
+
+def test_sibling_window_keeps_web_storage(monkeypatch):
+    """형제 창도 private_mode를 꺼야 한다 — 켜져 있으면 뜰 때 본 창과 같은 스토어를 지운다."""
+    import sys
+    import types
+
+    from md4paper.ui import window
+
+    calls = {}
+    fake = types.SimpleNamespace(
+        settings={},
+        create_window=lambda *a, **kw: calls.setdefault("create", kw),
+        start=lambda **kw: calls.setdefault("start", kw),
+    )
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    assert window._main(["http://127.0.0.1:8093/"]) == 0
+    assert calls["start"]["private_mode"] is False
+    assert fake.settings["ALLOW_DOWNLOADS"] is True

@@ -379,3 +379,17 @@ def test_scroll_memory_script_carries_the_paper_key():
     assert "sessionStorage" in js and "md4:pos:" in js
     for sel in (".conv-md", ".sbs-grid", ".vpdf", ".md4-scroll"):
         assert sel in js
+
+
+def test_scroll_memory_persists_papers_but_not_home():
+    """논문 화면은 localStorage에도 적어 앱을 다시 켜도 남고, 홈 목록은 창 안에서만 기억한다."""
+    from md4paper.ui import scroll_memory
+
+    js = scroll_memory.init_js("abc123")
+    assert "localStorage.setItem" in js and "md4:last:" in js
+    assert f"KEEP = {scroll_memory.KEEP}," in js          # 오래된 항목 정리 상한이 내려간다
+    assert json.dumps(list(scroll_memory.SESSION_ONLY)) in js
+    assert "home" in scroll_memory.SESSION_ONLY
+    # 되돌릴 때는 이 창의 sessionStorage가 먼저, localStorage는 그다음
+    load = js[js.index("function load()"):]
+    assert load.index("sessionStorage.getItem") < load.index("localStorage.getItem")

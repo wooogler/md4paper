@@ -236,6 +236,13 @@ def configure() -> None:
     app.native.window_args["text_select"] = True
     # 웹뷰가 자체 저장 패널을 띄울 수 있게 — 우리가 처리하지 못한 다운로드가 조용히 사라지지 않도록.
     app.native.settings["ALLOW_DOWNLOADS"] = True
+    # 읽던 자리(§ui/scroll_memory.py)를 앱을 다시 켜도 기억하려면 localStorage가 남아야 한다.
+    # pywebview는 private_mode 기본값이 True라, macOS(cocoa)에서는 시작할 때 WKWebView 기본
+    # 데이터 스토어(WKWebsiteDataStore.defaultDataStore — ~/Library/WebKit/<실행 파일 번들 ID 또는
+    # 이름>/WebsiteData 아래)를 통째로 비운다 → 끈다. private_mode는 settings가 아니라
+    # webview.start()의 인자라 start_args에 넣는다. 형제 창(§ui/window.py)도 같은 값이어야 한다 —
+    # 하나라도 켜져 있으면 그 창이 뜰 때 같은 스토어를 지워 버린다.
+    app.native.start_args["private_mode"] = False
     if ICON.is_file():
         # macOS Dock 아이콘 (setApplicationIconImage_). 번들 없이 띄워도 파이썬 아이콘이 뜨지 않는다.
         app.native.start_args["icon"] = str(ICON)

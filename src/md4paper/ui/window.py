@@ -86,7 +86,9 @@ def _main(argv: list[str]) -> int:
     # 아이콘은 PNG다. cocoa·GTK·Qt는 PNG를 받지만 윈도우(winforms)는 System.Drawing.Icon으로
     # 넘겨 .ico가 아니면 예외가 난다 → 윈도우에서는 넘기지 않는다(창이 안 뜨는 것보다 낫다).
     icon = str(desktop.ICON) if not sys.platform.startswith("win") and Path(desktop.ICON).is_file() else None
-    webview.start(**({"icon": icon} if icon else {}))
+    # private_mode=False — 본 창과 같은 WKWebView 기본 데이터 스토어를 쓰고 지우지 않는다
+    # (켜 두면 이 창이 뜰 때 본 창의 localStorage, 곧 읽던 자리까지 지운다; §ui/desktop.py configure).
+    webview.start(private_mode=False, **({"icon": icon} if icon else {}))
     return 0
 
 

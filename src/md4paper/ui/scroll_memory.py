@@ -1,11 +1,15 @@
-"""읽던 자리 기억 — 논문·단계별 스크롤 위치를 창(세션) 안에 저장하고 되돌린다.
+"""읽던 자리 기억 — 논문·단계별 스크롤 위치를 저장하고(앱을 다시 켜도) 되돌린다.
 
 헤더 탭으로 다른 논문에 갔다 오면 페이지가 새로 그려진다(탭 = 페이지 이동). 그때마다 스크롤이
 맨 위로 튄다. 논문을 오가며 읽는 도구에서 "읽던 자리"가 사라지는 건 곧 흐름이 끊긴다는 뜻이라,
 스크롤 상자마다 위치를 적어 둔다.
 
-- 저장 위치는 `sessionStorage`다: 창마다 따로 기억하고(창을 나란히 띄워도 서로 안 섞인다),
-  앱을 닫으면 사라진다. 서버(status.json)에 적지 않는 이유 — 읽던 자리는 그 창의 사정이다.
+- 저장 위치는 두 곳이다. `sessionStorage`는 '이 창이 보던 자리'(창을 나란히 띄워도 서로 안
+  섞인다), `localStorage`는 '어느 창이든 마지막으로 보던 자리'(저장 시각과 함께; 앱을 껐다 켜도
+  남는다). 되돌릴 때는 sessionStorage가 먼저고, 없을 때만(새 창·재시작) localStorage를 쓴다.
+  localStorage는 논문 화면만 적고(홈 목록은 창 안에서만), 논문 화면 항목이 `KEEP`개를 넘으면
+  저장 시각이 오래된 것부터 지운다. 서버(status.json)에 적지 않는 이유 — 읽던 자리는 보는 쪽의
+  사정이다. 앱 창에서 localStorage가 남으려면 pywebview private_mode를 꺼야 한다(§ui/desktop.py).
 - 열쇠는 `논문 토큰 → 화면 → 스크롤 상자`다. 화면은 이제 하나(캔버스 + 왼쪽 작업 패널)라 단계 구분은
   없고('-'), 상자는 클래스 셀렉터 + 같은 셀렉터 안 순번으로 가리킨다(캔버스 본문·PDF·왼쪽 패널은
   각자 다른 상자다).
@@ -28,12 +32,20 @@ SELECTORS = (
     ".md4-scroll",  # 그 외 우리가 표시해 둔 스크롤 열 (왼쪽 작업 패널·설정 열·논문 목록 등)
 )
 
+# localStorage에 남겨 둘 '마지막으로 보던 자리' 항목 수 상한 (논문 × 화면)
+KEEP = 200
+# 창을 넘어 영속화하지 않는 화면 열쇠 — 홈 목록은 창 안에서만 기억하면 충분하다
+SESSION_ONLY = ("home",)
+
 _JS = """
 (function(){
   // 탭 전환은 문서를 버리지 않고 본문만 갈아 끼운다(§ui/spa.py) → 이미 떠 있으면 화면 키만 바꾼다
   if (window.__mdScrollMem) { window.__mdScrollMem.setPaper(%s); return; }
-  var PAPER = %s, SELS = %s;
+  var PAPER = %s, SELS = %s, KEEP = %s, SESSION_ONLY = %s;
   var PREFIX = 'md4:pos:' + PAPER + ':';
+  var LAST = 'md4:last:';                    // localStorage — {t: 저장 시각, pos} (앱을 다시 켜도 남는다)
+  function lastKey(){ return LAST + PAPER + ':' + stepKey(); }
+  function persists(){ return SESSION_ONLY.indexOf(PAPER) < 0; }
   var quiet = 0, timer = null, moved = false;
   var pending = null, done = {}, watcher = null, raf = 0, stopAt = 0, lastTry = 0;
 
@@ -54,6 +66,36 @@ _JS = """
     var pos = {w: window.scrollY || 0};
     boxes().forEach(function(b){ if (b.el.scrollTop > 0) pos[b.key] = b.el.scrollTop; });
     try { sessionStorage.setItem(PREFIX + stepKey(), JSON.stringify(pos)); } catch (e) {}
+    if (!persists()) return;
+    try {
+      localStorage.setItem(lastKey(), JSON.stringify({t: Date.now(), pos: pos}));
+      prune();
+    } catch (e) {}
+  }
+  function prune(){                          // KEEP개를 넘으면 저장 시각이 오래된 것부터 지운다
+    var items = [];
+    for (var i = 0; i < localStorage.length; i++){
+      var k = localStorage.key(i);
+      if (!k || k.indexOf(LAST) !== 0) continue;
+      var t = 0;
+      try { t = JSON.parse(localStorage.getItem(k)).t || 0; } catch (e) {}
+      items.push({k: k, t: t});
+    }
+    if (items.length <= KEEP) return;
+    items.sort(function(a, b){ return a.t - b.t; });
+    items.slice(0, items.length - KEEP).forEach(function(it){ localStorage.removeItem(it.k); });
+  }
+  function load(){                           // 이 창이 보던 자리가 먼저, 없으면 마지막으로 보던 자리
+    try {
+      var raw = sessionStorage.getItem(PREFIX + stepKey());
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    if (!persists()) return null;
+    try {
+      var last = localStorage.getItem(lastKey());
+      if (last) return JSON.parse(last).pos || null;
+    } catch (e) {}
+    return null;
   }
   // 되돌리기는 **상자가 화면에 붙는 그 순간** 해야 한다. 일정 시간마다 두드리면 본문이 맨 위로
   // 한 번 그려진 뒤 뒤늦게 튀어서, 그 튐이 '반짝'으로 보인다. 그래서 DOM 변화를 지켜보다가
@@ -67,6 +109,9 @@ _JS = """
       if (!want || done[b.key]) return;
       var max = b.el.scrollHeight - b.el.clientHeight;
       if (max <= 0) return;                  // 아직 내용이 안 실렸다 → 다음 변화 때
+      // 반쯤 그려진 상자에 옮기면 바닥에 걸린 채 끝난다(새로 켠 앱 창에서 본문이 나눠 실릴 때) →
+      // 그 자리까지 내려갈 만큼 자랄 때까지 기다리고, 끝내 안 자라면 마감 때 갈 수 있는 데까지 간다.
+      if (max < want && Date.now() < stopAt) return;
       b.el.scrollTop = Math.min(want, max);
       done[b.key] = 1;
     });
@@ -80,10 +125,8 @@ _JS = """
   }
   function restoreSoon(){
     moved = false; done = {}; pending = null;
-    var raw = null;
-    try { raw = sessionStorage.getItem(PREFIX + stepKey()); } catch (e) {}
-    if (!raw) return;
-    try { pending = JSON.parse(raw); } catch (e) { return; }
+    pending = load();
+    if (!pending) return;
     stopAt = Date.now() + 3000;
     tryRestore();
     if (!watcher){
@@ -98,7 +141,7 @@ _JS = """
       });
     }
     watcher.observe(document.body, {childList: true, subtree: true});
-    [80, 300, 800, 1600, 2600].forEach(function(ms){ setTimeout(tryRestore, ms); });
+    [80, 300, 800, 1600, 2600, 3100].forEach(function(ms){ setTimeout(tryRestore, ms); });
   }
 
   // 사용자가 직접 움직이면 복원 재시도를 멈추고 저장도 막지 않는다 (자기가 고른 자리가 이긴다)
@@ -129,7 +172,8 @@ _JS = """
 
 def init_js(paper_key: str) -> str:
     """이 논문(또는 화면)의 스크롤 기억 스크립트."""
-    return _JS % (json.dumps(paper_key), json.dumps(paper_key), json.dumps(list(SELECTORS)))
+    return _JS % (json.dumps(paper_key), json.dumps(paper_key), json.dumps(list(SELECTORS)), KEEP,
+                  json.dumps(list(SESSION_ONLY)))
 
 
 def install(paper_key: str) -> None:
