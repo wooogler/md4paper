@@ -361,8 +361,9 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
 .apop-del { border: none; background: none; color: #b3261e; font-size: 14px; padding: 3px 7px;
   border-radius: 7px; cursor: pointer; }
 .apop-del:hover { background: rgba(179,38,30,.12); }
+/* 인용은 네 줄까지 보이고 그보다 길면 칸 안에서 스크롤 (잘린 채 끝나지 않게) */
 .apop-quote { font-size: 13.5px; line-height: 1.55; color: #8a8780; margin-bottom: 6px;
-  max-height: 52px; overflow: hidden; }
+  max-height: calc(1.55em * 4); overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
 .apop-quote.apop-ko, .ap-q.ap-ko { padding-left: 7px; border-left: 2px solid #e0ded9; }
 .apop-row + .apop-quote.apop-ko { border-left-color: #cfcdc8; }
 #md-anno-pop textarea { width: 100%; min-height: 66px; resize: vertical; box-sizing: border-box;
