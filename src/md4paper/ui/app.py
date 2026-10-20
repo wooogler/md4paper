@@ -16,8 +16,8 @@ from pathlib import Path
 from md4paper import config, formula_fix, library, projects
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
-    annotations, chat_panel, desktop, figrefs, find_bar, formula_pop, jobs, mdrender, reanchor, scroll_memory,
-    sentpair, spa, tabstore, update_banner,
+    annotations, chat_panel, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, mdrender, reanchor,
+    scroll_memory, sentpair, spa, tabstore, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir, left_panel, paper_title, set_left_panel, set_pinned, set_project
@@ -1372,6 +1372,10 @@ _IMG_ZOOM_HTML = """
       <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
         <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/>
       </svg></button>
+    <button data-act="recrop" title="그림 영역 다시 지정 — PDF에서 다시 자르기">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
+        <path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/>
+      </svg></button>
     <span class="mdz-sep"></span>
     <button data-act="close" title="닫기 (Esc)">&#10005;</button>
   </div>
@@ -1488,6 +1492,10 @@ _IMG_ZOOM_HTML = """
       cap.classList.toggle('long', info.text.length > 160);
     } else { cap.textContent = alt || ''; cap.classList.remove('long'); }
     cap.scrollTop = 0;
+    // 본문 그림(수식 크롭 말고)이면 영역 다시 지정 단추 (figure_crop.py)
+    var path = imgPath();
+    box.classList.toggle('can-recrop', !!window.__md4FigRecrop
+      && new RegExp('^/wdimages/[^/]+/(?!formula-)[^/]+$').test(path));
     box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
     layoutFoot();
     if (img.complete) fit(); else img.onload = fit;
@@ -1510,6 +1518,7 @@ _IMG_ZOOM_HTML = """
       var a = b.getAttribute('data-act');
       if (a === 'in') zoomBy(1.25); else if (a === 'out') zoomBy(0.8);
       else if (a === 'fit') fit(); else if (a === 'copy') copyImg(); else if (a === 'save') saveImg();
+      else if (a === 'recrop'){ var p = imgPath(); close(); if (window.__md4FigRecrop) window.__md4FigRecrop(p); }
       else close();
     });
   });
@@ -2771,6 +2780,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_css(formula_pop.CSS)  # 수식 클릭 → 원본 크롭 대조 · 다시 생성
     spa.add_body_html(f"<script>{formula_pop.init_js(tok)}</script>")
     spa.add_body_html(formula_pop.HTML)
+    spa.add_css(figure_crop.CSS)  # 확대 뷰어 ✂ → 그림 영역 다시 지정 (위 영역 지정 화면을 같이 쓴다)
+    spa.add_body_html(figure_crop.HTML)
+
+    async def on_figure_recropped(e) -> None:  # noqa: ANN001 — 그림 파일은 이미 바뀌었다(서버 라우트)
+        a = e.args or {}
+        if not a.get("ok"):
+            ui.notify(f"그림을 바꾸지 못했습니다: {a.get('error', '')}", type="warning")
+            return
+        refresh_canvas()  # 표시 폭 힌트(#mdw=)를 새 그림 크기로
+        ui.notify("원래 그림으로 되돌렸습니다" if a.get("what") == "restore" else "그림을 고른 영역으로 바꿨습니다",
+                  type="positive")
+
+    ui.on("md4-fig-recropped", on_figure_recropped)
 
     async def on_formula_apply(e) -> None:  # noqa: ANN001 — 팝오버의 '적용'
         from nicegui import run
@@ -6620,7 +6642,8 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         return {"ok": True, "count": len(saved)}
 
     chat_panel.register_routes(fastapi_app, _wd_for)  # 뷰어 챗봇 — /chat/{token}
-    formula_pop.register_routes(fastapi_app, _wd_for)  # 수식 원본 크롭·다시 생성 — /formula/{token}/{id}
+    formula_pop.register_routes(fastapi_app, _wd_for)
+    figure_crop.register_routes(fastapi_app, _wd_for)  # 그림 영역 다시 지정 — /figure/{token}/{name}  # 수식 원본 크롭·다시 생성 — /formula/{token}/{id}
     fastapi_app.add_static_files(CREPE_URL, CREPE_DIR)  # 메모 패널 위지윅 편집기 번들
 
     def index_view() -> None:
