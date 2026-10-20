@@ -286,7 +286,8 @@ sup.md-fn a:hover { text-decoration: underline; }
   text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; }
 /* 그림·표 캡션 전문 — 길면 왼쪽 정렬로 몇 줄, 그 이상은 캡션 안에서 스크롤. 글자는 골라 복사할 수 있다 */
 #md-img-zoom .mdz-cap { max-height: 30vh; overflow-y: auto; pointer-events: auto; user-select: text;
-  color: #e2e2e2; font-size: 13.5px; }
+  color: #e2e2e2; font-size: 16px; line-height: 1.6;   /* 본문 캡션(.md-preview 16px)과 같은 크기 */
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
 #md-img-zoom .mdz-cap.long { text-align: left; }
 #md-img-zoom .mdz-cap b { color: #fff; }
 #md-img-zoom .mdz-hint { color: #8e8e8e; font-size: 11.5px; }
