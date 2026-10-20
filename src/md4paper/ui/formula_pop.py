@@ -176,8 +176,9 @@ HTML = """
       <button data-c="prev" title="이전 쪽">‹</button><span class="fxc-pg"></span>
       <button data-c="next" title="다음 쪽">›</button>
       <button data-c="zout" title="축소">−</button><button data-c="zin" title="확대">+</button>
-      <span class="fxc-hint">드래그해 수식을 넉넉히 감싸세요</span>
+      <span class="fxc-hint"></span>
       <span class="fxc-gap"></span>
+      <button data-c="extra" style="display:none"></button>
       <button data-c="cancel">취소</button>
       <button class="fx-primary" data-c="ok" disabled>이 영역으로 다시 생성</button>
     </div>
@@ -316,8 +317,11 @@ HTML = """
   var cimg = crop.querySelector('img'), csel = crop.querySelector('.fxc-sel'),
       cpage = crop.querySelector('.fxc-page'), cscroll = crop.querySelector('.fxc-scroll'),
       cok = crop.querySelector('[data-c="ok"]');
-  var cs = null, drag = null;   // cs = {page, rect(pt), scale}
-  function sizeOf(p){ var ps = cur && cur.info.pages; return ps && ps[p - 1] ? ps[p - 1] : [612, 792]; }
+  // 그림 영역 다시 지정(figure_crop.py)도 이 화면을 쓴다 — 무엇을 할지는 ctx가 정한다:
+  // ctx = {tok, pages[[w,h]…], hint, ok(단추 글자), onOk(page, rect), extra?: {label, run}}
+  var cs = null, drag = null, ctx = null;   // cs = {page, rect(pt), scale}
+  var cextra = crop.querySelector('[data-c="extra"]');
+  function sizeOf(p){ var ps = ctx && ctx.pages; return ps && ps[p - 1] ? ps[p - 1] : [612, 792]; }
   function drawSel(){
     if (!cs || !cs.rect){ csel.style.display = 'none'; cok.disabled = true; return; }
     var k = cimg.clientWidth / sizeOf(cs.page)[0], r = cs.rect;
@@ -327,14 +331,14 @@ HTML = """
     cok.disabled = (r[2] - r[0]) < 3 || (r[3] - r[1]) < 3;
   }
   function showPage(p, rect){
-    var n = (cur.info.pages || []).length || 1;
+    var n = (ctx.pages || []).length || 1;
     p = Math.max(1, Math.min(n, p));
     cs = {page: p, rect: rect || null, scale: cs ? cs.scale : 1};
     var sz = sizeOf(p), w = Math.round(Math.min(980, innerWidth * 0.9) * cs.scale);
     cpage.style.width = w + 'px'; cimg.style.width = w + 'px';
     cimg.style.height = Math.round(w * sz[1] / sz[0]) + 'px';
     crop.querySelector('.fxc-pg').textContent = 'p.' + p + ' / ' + n;
-    cimg.src = '/pdfpage/' + cur.tok + '/' + (p - 1);
+    cimg.src = '/pdfpage/' + ctx.tok + '/' + (p - 1);
     drawSel();
     if (cs.rect){   // 지금 영역이 보이게
       var k = w / sz[0];
@@ -342,13 +346,28 @@ HTML = """
       cscroll.scrollLeft = Math.max(0, cs.rect[0] * k - 40);
     } else { cscroll.scrollTop = 0; }
   }
+  function openCropWith(c, page, rect){
+    ctx = c; cs = null;
+    crop.querySelector('.fxc-hint').textContent = c.hint || '';
+    cok.textContent = c.ok || '이 영역으로';
+    cextra.style.display = c.extra ? '' : 'none';
+    cextra.textContent = c.extra ? c.extra.label : '';
+    crop.classList.add('open');
+    showPage(page || 1, rect ? rect.slice() : null);
+  }
+  window.__md4CropOpen = openCropWith;
   function openCrop(){
     if (!cur) return;
-    var d = cur.info, r = cur.region;
+    var d = cur.info, r = cur.region, me = cur;
     var p = r ? r.page : (d.page || cur.rowPage || 1);
-    cs = null;
-    crop.classList.add('open');
-    showPage(p, r ? r.rect.slice() : (d.bbox && p === d.page ? d.bbox.slice() : null));
+    openCropWith({tok: cur.tok, pages: d.pages, hint: '드래그해 수식을 넉넉히 감싸세요',
+                  ok: '이 영역으로 다시 생성',
+                  onOk: function(page, rect){
+                    if (cur !== me) return;
+                    cur.region = {page: page, rect: rect};
+                    regen();
+                  }},
+                 p, r ? r.rect : (d.bbox && p === d.page ? d.bbox : null));
   }
   function closeCrop(){ crop.classList.remove('open'); drag = null; }
   function ptAt(e){
@@ -381,10 +400,11 @@ HTML = """
       cs.scale = Math.max(0.6, Math.min(3, cs.scale * (c === 'zin' ? 1.4 : 1 / 1.4)));
       showPage(cs.page, keep);
     }
+    else if (c === 'extra' && ctx.extra){ var x = ctx.extra.run; closeCrop(); x(); }
     else if (c === 'ok' && cs.rect){
-      cur.region = {page: cs.page, rect: cs.rect.map(function(v){ return Math.round(v * 10) / 10; })};
+      var done = ctx.onOk, page = cs.page, rect = cs.rect.map(function(v){ return Math.round(v * 10) / 10; });
       closeCrop();
-      regen();
+      done(page, rect);
     }
   });
 

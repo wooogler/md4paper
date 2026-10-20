@@ -114,6 +114,16 @@ class WorkDir:
         return self.extract / "formulas.json"
 
     @property
+    def figures_json(self) -> Path:
+        """그림 자리 {extract 그림 파일명: {page, bbox, manual?}} — 영역 다시 지정의 근거 (§figure_fix)."""
+        return self.extract / "figures.json"
+
+    @property
+    def figure_backup(self) -> Path:
+        """영역을 다시 지정하기 전의 원래 그림 — extract/images 밖에 둔다(조립이 images를 통째로 복사한다)."""
+        return self.extract / "figure-backup"
+
+    @property
     def headings_json(self) -> Path:
         """추출기가 준 헤더별 원본 PDF 페이지/좌표 (섹션↔PDF 대조용)."""
         return self.extract / "headings.json"

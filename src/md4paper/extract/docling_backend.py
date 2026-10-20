@@ -1140,14 +1140,8 @@ FIG_ZOOM = 4.0
 _IMAGES_SCALE = 2.0  # docling 페이지 래스터 배율 — 아티팩트 크기 대조의 기준
 
 
-def _picture_png(source: Path, pic, document, artifact: Path) -> bytes | None:  # noqa: ANN001
-    """픽처의 bbox를 원본 PDF에서 FIG_ZOOM 배율로 다시 렌더한 PNG. 좌표가 없거나 실패하면 None.
-
-    docling이 잘라 낸 래스터(`artifact`)와 크기가 맞을 때만 쓴다 — 짝이 어긋난 픽처면
-    엉뚱한 그림으로 바꿔치기하느니 흐린 원래 그림이 낫다.
-    """
-    from md4paper import pdfio
-
+def _picture_rect(pic, document) -> tuple[int, tuple[float, float, float, float]] | None:  # noqa: ANN001
+    """픽처 → (1-based 쪽, 좌상단 원점 rect pt). 좌표가 없으면 None."""
     prov = getattr(pic, "prov", None)
     if not prov:
         return None
@@ -1158,7 +1152,21 @@ def _picture_png(source: Path, pic, document, artifact: Path) -> bytes | None:  
         return None
     box = prov[0].bbox
     top, bottom = _top_left(box, height)
-    rect = (min(box.l, box.r), top, max(box.l, box.r), bottom)
+    return page_no, (min(box.l, box.r), top, max(box.l, box.r), bottom)
+
+
+def _picture_png(source: Path, pic, document, artifact: Path) -> bytes | None:  # noqa: ANN001
+    """픽처의 bbox를 원본 PDF에서 FIG_ZOOM 배율로 다시 렌더한 PNG. 좌표가 없거나 실패하면 None.
+
+    docling이 잘라 낸 래스터(`artifact`)와 크기가 맞을 때만 쓴다 — 짝이 어긋난 픽처면
+    엉뚱한 그림으로 바꿔치기하느니 흐린 원래 그림이 낫다.
+    """
+    from md4paper import pdfio
+
+    placed = _picture_rect(pic, document)
+    if placed is None:
+        return None
+    page_no, rect = placed
     try:
         from PIL import Image
 
@@ -1386,6 +1394,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         artifacts = md_path.parent / f"{md_path.stem}_artifacts"
         mapping: dict[str, str] = {}
         page_by_name: dict[str, int] = {}
+        fig_places: dict[str, dict] = {}  # 그림 자리 — 화면에서 영역을 다시 지정할 때 처음 사각형
         if artifacts.is_dir():
             for i, img in enumerate(sorted(p for p in artifacts.iterdir() if p.is_file()), start=1):
                 new_name = _short_name(img, i)
@@ -1393,6 +1402,11 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
                 png = _picture_png(source, pic, result.document, img) if pic is not None else None
                 if png is not None and img.suffix.lower() == ".png":
                     (wd.extract_images / new_name).write_bytes(png)
+                    # 다시 그린 그림만 — 그 bbox가 곧 이 그림이다(크기 대조를 통과했다)
+                    placed = _picture_rect(pic, result.document)
+                    if placed is not None:
+                        fig_places[new_name] = {"page": placed[0],
+                                                "bbox": [round(v, 1) for v in placed[1]]}
                 else:
                     shutil.copy2(img, wd.extract_images / new_name)
                 mapping[str(img)] = new_name
@@ -1401,6 +1415,11 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
                 if pg is not None:
                     page_by_name[new_name] = pg
         md = rewrite_image_refs(md, mapping)
+        import json as _json
+
+        # 새로 뽑았으니 옛 그림의 자리 기록·백업은 남의 것이다 — 이번 그림 것으로 갈아 끼운다
+        shutil.rmtree(wd.figure_backup, ignore_errors=True)
+        wd.figures_json.write_text(_json.dumps(fig_places, ensure_ascii=False, indent=2), encoding="utf-8")
         # 모든 그림(그룹 픽처 포함)의 캡션을 페이지·순서로 이미지에 짝지어 배치 (유실 방지)
         md = _place_captions(md, _collect_captions(result.document), page_by_name)
         md = _drop_figure_text(md)  # 그림 안 차트 제목·축 이름이 헤더로 오분류된 것 제거(래스터에 이미 있음)
