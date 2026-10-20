@@ -327,37 +327,85 @@ class UIController:
                 "garbled": new_meta.get("garbled_chars", 0), "has_translation": bool(self.ko_markdown())}
 
     # --- 수식 한 개 다시 읽기 (캔버스 수식 팝오버) ---
-    def formula_mapping(self) -> dict[str, str]:
-        """en.md 수식 블록 원문 → 레코드 id (화면 표식용; §formula_fix.assign)."""
+    def formula_marks(self) -> tuple[dict[str, str], dict]:
+        """화면 표식용 (블록 원문 → 레코드 id, 인라인 (원문, 순위) → 번호) — §formula_fix.tag."""
         from md4paper import formula_fix, formulas
 
+        en = self.en_markdown()
         records = formulas.load(self.wd)
-        return formula_fix.assign(self.en_markdown(), records) if records else {}
+        return (formula_fix.assign(en, records) if records else {}), formula_fix.inline_index(en)
 
-    def regenerate_formula(self, fid: str, provider) -> dict:  # noqa: ANN001
+    def formula_mapping(self) -> dict[str, str]:
+        return self.formula_marks()[0]
+
+    def regenerate_formula(self, fid: str, provider, page: int | None = None, rect=None) -> dict:  # noqa: ANN001
         from md4paper import formula_fix
 
-        return formula_fix.regenerate(self.wd, fid, provider)
+        return formula_fix.regenerate(self.wd, fid, provider, page=page, rect=rect)
 
-    def apply_formula(self, fid: str, latex: str, kind: str) -> dict:
-        """다시 읽은 수식을 반영 — 원천(formulas.json·raw.md) → en.md 재조립 → ko.md 같은 자리.
+    def apply_formula(self, fid: str, latex: str, kind: str, page: int | None = None, rect=None,  # noqa: ANN001
+                      expect: str | None = None) -> dict:
+        """다시 읽은 수식을 반영 — 원천(raw.md, 레코드면 formulas.json·크롭도) → en.md 재조립 → ko.md 같은 자리.
 
         직접 편집한 en.md가 있으면 재조립하지 않고(편집이 사라진다) en.md의 그 자리만 바꾼다.
-        ko.md에서도 같은 블록을 바꾸면 번역 캐시 키를 새 원문으로 옮겨 그 섹션을 '원문 바뀜'으로
+        ko.md에서도 같은 자리를 바꾸면 번역 캐시 키를 새 원문으로 옮겨 그 섹션을 '원문 바뀜'으로
         잡지 않는다. ko.md에서 못 찾으면 캐시를 그대로 둬, 그 섹션이 '원문 바뀜'으로 잡힌다.
+        인라인 수식(`inline-N`)은 레코드가 없어 raw.md·en.md·ko.md의 같은 글자 중 같은 순번 자리를 바꾼다.
         """
-        from md4paper import formula_fix, formulas, pipeline
+        from md4paper import formula_fix, formulas
+
+        en_before = self.en_markdown()
+        raw_before = self.wd.raw_md.read_text(encoding="utf-8")
+        n = formula_fix._inline_n(fid)
+        if n is not None:
+            text, rank, total = formula_fix.inline_target(en_before, n, expect)
+            latex = formula_fix._checked(latex, "inline" if kind != "text" else "text")
+            new_text = formula_fix.inline_text(latex, kind)
+            raw = self.wd.raw_md.read_text(encoding="utf-8")
+            where = formula_fix.nth_same(raw, text, rank, total)
+            if where is None:
+                raise ValueError("원문(raw.md)에서 이 수식 자리를 하나로 특정하지 못했습니다.")
+            self.wd.raw_md.write_text(formula_fix.replace_at(raw, where, new_text), encoding="utf-8")
+
+            def patch(md: str) -> str | None:
+                at = formula_fix.nth_same(md, text, rank, total)
+                return None if at is None else formula_fix.replace_at(md, at, new_text)
+            en_old = text
+            en_at = formula_fix.inline_spans(en_before)[n][0]
+        else:
+            rec = next((r for r in formulas.load(self.wd) if r.get("id") == fid), None)
+            if rec is None:
+                raise ValueError(f"수식 {fid}를 찾지 못했습니다.")
+            en_old = formula_fix.locate(en_before, rec)
+            en_at = formula_fix.line_position(en_before, en_old) if en_old else None
+            new_text = formula_fix.apply(self.wd, fid, latex, kind, page=page, rect=rect)["new"]
+
+            def patch(md: str) -> str | None:
+                return formula_fix.patch_text(md, rec, new_text)
+        self._follow_raw_lines(raw_before)
+        return self._after_formula(en_before, en_old, en_at, new_text, patch)
+
+    def _follow_raw_lines(self, raw_before: str) -> None:
+        """여러 줄 수식(aligned)이 한 줄이 되는 등 raw.md 줄 수가 바뀌었으면 라인 앵커를 민다.
+
+        섹션은 raw.md의 절대 줄 번호에 붙어 있어서, 안 밀면 재조립 때 그 뒤 헤더가 통째로 중복된다(실측).
+        """
+        raw = self.wd.raw_md.read_text(encoding="utf-8")
+        delta = raw.count("\n") - raw_before.count("\n")
+        if not delta:
+            return
+        at = next((i for i, (a, b) in enumerate(zip(raw_before, raw)) if a != b), len(raw_before))
+        self._shift_line_anchors(raw_before.count("\n", 0, at), delta, raw)
+        manifest_io.save(self.manifest, self.wd)  # 재조립은 sections.yaml을 디스크에서 읽는다
+
+    def _after_formula(self, en_before: str, en_old: str | None, en_at: int | None, new_text: str,
+                       patch) -> dict:  # noqa: ANN001
+        """원천을 바꾼 뒤 — en.md(재조립 또는 그 자리만) · ko.md 같은 자리 · 번역 캐시 키 옮기기."""
+        from md4paper import formula_fix, pipeline
         from md4paper.translate.apply import _build_units
 
-        rec = next((r for r in formulas.load(self.wd) if r.get("id") == fid), None)
-        if rec is None:
-            raise ValueError(f"수식 {fid}를 찾지 못했습니다.")
-        en_before = self.en_markdown()
-        en_old = formula_fix.locate(en_before, rec)
-        res = formula_fix.apply(self.wd, fid, latex, kind)
-        new_block = res["new"]
         if self.has_manual_edit():
-            patched = formula_fix.patch_text(en_before, rec, new_block)
+            patched = patch(en_before)
             if patched is not None:
                 self._write_atomic(self.wd.en_md, patched)
         else:
@@ -366,12 +414,12 @@ class UIController:
         ko_patched = False
         ko = self.ko_markdown()
         if ko:
-            new_ko = formula_fix.patch_text(ko, rec, new_block)
+            new_ko = patch(ko)
             if new_ko is not None:
                 self._write_atomic(self.wd.ko_md, new_ko)
                 ko_patched = True
         moved = 0
-        if ko_patched and en_old and self.wd.cache_json.exists():
+        if ko_patched and en_old and en_at is not None and self.wd.cache_json.exists():
             try:
                 stored = json.loads(self.wd.cache_json.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
@@ -381,11 +429,11 @@ class UIController:
                 sources = [u["source"] for u in units] + [
                     t for u in units for _sid, t in (u.get("sections") or [])]
                 chunks = stored.setdefault("chunks", {})
-                moved = formula_fix.rekey_cache(chunks, sources, en_old, new_block)
+                moved = formula_fix.rekey_cache(chunks, sources, en_before, en_at, en_old, new_text)
                 if moved:
                     self.wd.cache_json.write_text(
                         json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
-        return {"block": new_block, "ko": ko_patched, "cache_moved": moved}
+        return {"block": new_text, "ko": ko_patched, "cache_moved": moved}
 
     def can_undo_layout_fix(self) -> bool:
         from md4paper import relayout

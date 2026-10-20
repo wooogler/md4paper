@@ -89,10 +89,15 @@ def test_replace_once_refuses_ambiguity():
 def test_rekey_cache_moves_translation():
     from md4paper.workdir import hash_text
 
-    src = "Intro.\n\n$$a$$\n"
-    cache = {hash_text(src): "소개.\n\n$$a$$\n"}
-    assert formula_fix.rekey_cache(cache, [src, "other"], "$$a$$", "$$b$$") == 1
-    assert cache[hash_text("Intro.\n\n$$b$$\n")] == "소개.\n\n$$b$$\n"
+    doc = "# T\n\nIntro $x$ and $x$.\n\n$$a$$\n"
+    src = doc[5:]
+    cache = {hash_text(src): "소개 $x$와 $x$.\n\n$$a$$\n"}
+    at = doc.index("$$a$$")
+    assert formula_fix.rekey_cache(cache, [src, "other"], doc, at, "$$a$$", "$$b$$") == 1
+    assert cache[hash_text(src.replace("$$a$$", "$$b$$"))] == "소개 $x$와 $x$.\n\n$$b$$\n"
+    at2 = doc.index("$x$", doc.index("$x$") + 1)  # 두 번째 $x$만
+    assert formula_fix.rekey_cache(cache, [src], doc, at2, "$x$", "$y$") == 1
+    assert cache[hash_text("Intro $x$ and $y$.\n\n$$a$$\n")] == "소개 $x$와 $y$.\n\n$$a$$\n"
 
 
 def test_collect_records_bbox(monkeypatch, tmp_path):
@@ -156,7 +161,8 @@ def test_regenerate_returns_candidate_without_touching_doc(ctrl):
     before = ctrl.wd.raw_md.read_text()
     prov, seen = _fake(r"a - b")
     got = ctrl.regenerate_formula("formula-01", prov)
-    assert got == {"latex": "a - b", "kind": "display", "block": r"$$a - b \tag{1}$$", "error": ""}
+    assert got == {"latex": "a - b", "kind": "display", "block": r"$$a - b \tag{1}$$", "error": "",
+                   "crop": None}
     assert "judged it WRONG" in seen[0] and "a + b" in seen[0]  # 틀린 판본을 알려 준다
     assert ctrl.wd.raw_md.read_text() == before  # 후보일 뿐 — 적용 전엔 문서 그대로
 
@@ -179,6 +185,22 @@ def test_apply_updates_source_and_reassembles(ctrl):
     assert ctrl.formula_mapping()[r"$$a - b \tag{1}$$"] == "formula-01"  # 새 글자로도 이어진다
 
 
+def test_apply_multiline_to_single_line_keeps_headings(tmp_path):
+    # 여러 줄 aligned → 한 줄: raw.md 줄 수가 줄어도 뒤 섹션 헤더가 중복되면 안 된다 (실측 회귀)
+    src = tmp_path / "paper.md"
+    src.write_text(PAPER.replace(r"$$a + b \tag{1}$$", formula_fix.block(R4)), encoding="utf-8")
+    wd = WorkDir(tmp_path / "paper.md4")
+    pipeline.convert(src, wd)
+    wd.extract_images.mkdir(parents=True, exist_ok=True)
+    wd.formulas_json.write_text(json.dumps([R4]), encoding="utf-8")
+    c = UIController(wd)
+    heads = [ln for ln in c.en_markdown().splitlines() if ln.startswith("#")]
+    c.apply_formula("formula-04", "x = 1, y = 2", "display")
+    assert "$$x = 1, y = 2$$" in c.en_markdown()
+    assert [ln for ln in c.en_markdown().splitlines() if ln.startswith("#")] == heads
+    assert "Then the rest." in c.en_markdown() and c.en_markdown().count("Done.") == 1
+
+
 def test_apply_image_fallback(ctrl):
     ctrl.apply_formula("formula-03", r"c = d", "display")
     assert "$$c = d$$" in ctrl.wd.raw_md.read_text()
@@ -199,14 +221,14 @@ def test_apply_keeps_manual_edit(ctrl):
     assert ctrl.has_manual_edit()
 
 
-def _translate(ctrl):
+def _translate(ctrl, check=r"$$a + b \tag{1}$$"):
     from md4paper.ir import GlossaryList
 
     fake = FakeProvider(complete_fn=lambda s, u: u, parse_fn=lambda s, u, sc: GlossaryList(entries=[]),
                         model="fake-tr")
     ctrl.generate_glossary(fake)
     ctrl.translate(fake, "해라체")
-    assert r"$$a + b \tag{1}$$" in ctrl.ko_markdown()
+    assert check in ctrl.ko_markdown()
     assert ctrl.stale_sections() == set()
 
 
@@ -224,3 +246,132 @@ def test_apply_marks_stale_when_translation_lacks_block(ctrl):
     res = ctrl.apply_formula("formula-01", r"a - b", "display")
     assert not res["ko"]
     assert ctrl.stale_sections()  # 번역에 못 옮긴 섹션은 '원문 바뀜'으로 잡힌다
+
+
+# --- 인라인 수식 ---
+
+def test_inline_spans_follow_markdown2_and_skip_code():
+    md = "Let $x_i$ be `$not$` and\n\n```\n$no$\n```\n\n$$y$$ then $z$."
+    assert [t for _s, _e, t in formula_fix.inline_spans(md)] == ["$x_i$", "$z$"]
+
+
+def test_tag_inline_shares_ids_between_en_and_ko():
+    en = "We set $a$ and $b$, then $a$ again.\n\n$$c$$"
+    ko = "$a$와 $b$를 두고, 다시 $a$.\n\n$$c$$"
+    idx = formula_fix.inline_index(en)
+    out_en = formula_fix.tag(en, {}, idx)
+    out_ko = formula_fix.tag(ko, {}, idx)
+    mark = '<span class="md4-fx" data-fx="inline-{}"></span>'
+    assert mark.format(2) + "$a$ again" in out_en  # 두 번째 $a$ = 인라인 2번
+    assert out_ko.startswith(mark.format(0) + "$a$와 ")
+    assert mark.format(2) + "$a$." in out_ko  # 번역에서도 같은 글자의 같은 순번
+    assert "$$c$$" in out_en and out_en.count("md4-fx") == 3  # 블록은 인라인으로 세지 않는다
+
+
+def test_record_inline_line_is_not_tagged_twice():
+    md = r"Intro." + "\n\n" + r"$u(x) \sim k$" + "\n"
+    out = formula_fix.tag(md, formula_fix.assign(md, [R2]), formula_fix.inline_index(md))
+    assert out.count("md4-fx") == 1 and 'data-fx="formula-02"' in out
+
+
+def test_guess_page_from_surrounding_words(monkeypatch, tmp_path):
+    from md4paper import pdfio
+
+    wd = WorkDir(tmp_path / "p.md4")
+    monkeypatch.setattr(formula_fix, "source_pdf", lambda w: "x.pdf")
+    monkeypatch.setattr(pdfio, "page_texts", lambda src: [
+        "Intro text here.", "the pairwise com-\nparison of outcomes where 𝑥 ≻ 𝑦 holds", "end"])
+    before = "Some para.\n\nWe model the pairwise comparison of outcomes where "
+    assert formula_fix.guess_page(wd, before, " holds for all.") == 2
+    assert formula_fix.guess_page(wd, "nothing matches at all here", "") is None
+
+
+def test_guess_bbox_finds_old_crop_on_page(monkeypatch, tmp_path):
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+
+    from md4paper import pdfio
+
+    page = np.full((300, 240), 255, np.uint8)  # 배율 1.5의 쪽 (160×200pt)
+    cv2.putText(page, "E=mc2", (60, 150), cv2.FONT_HERSHEY_SIMPLEX, 1.0, 0, 2)
+    cv2.rectangle(page, (50, 120), (190, 160), 0, 1)
+    big = cv2.resize(page, (480, 600), interpolation=cv2.INTER_CUBIC)  # 배율 3 = 크롭 배율
+    tpl = big[230:330, 90:390]  # 쪽 (30, 76.7)pt~(130, 110)pt
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.extract_images.mkdir(parents=True)
+    (wd.extract_images / "formula-01.png").write_bytes(cv2.imencode(".png", tpl)[1].tobytes())
+    monkeypatch.setattr(formula_fix, "source_pdf", lambda w: "x.pdf")
+    monkeypatch.setattr(pdfio, "render_page_png",
+                        lambda src, p, zoom: cv2.imencode(".png", page)[1].tobytes())
+    box = formula_fix.guess_bbox(wd, {"file": "formula-01.png", "page": 1})
+    assert box is not None and abs(box[0] - 30) <= 1.5 and abs(box[1] - 76.7) <= 1.5
+    assert formula_fix.guess_bbox(wd, {"bbox": [1, 2, 3, 4]}) == [1, 2, 3, 4]  # 저장된 게 있으면 그것
+
+
+INLINE_PAPER = """# A Paper
+
+## 1 Intro
+
+We define $x_i$ as the input and $y$ as output, and again $x_i$ here.
+
+## 2 Method
+
+$$a + b \\tag{1}$$
+
+Done.
+"""
+
+
+@pytest.fixture
+def ictrl(tmp_path, monkeypatch):
+    src = tmp_path / "paper.md"
+    src.write_text(INLINE_PAPER, encoding="utf-8")
+    wd = WorkDir(tmp_path / "paper.md4")
+    pipeline.convert(src, wd)
+    wd.extract_images.mkdir(parents=True, exist_ok=True)
+    (wd.extract_images / R1["file"]).write_bytes(b"\x89PNG old")
+    wd.formulas_json.write_text(json.dumps([R1]), encoding="utf-8")
+    monkeypatch.setattr(formula_fix, "render_crop", lambda w, page, rect: b"\x89PNG new crop")
+    monkeypatch.setattr(formula_fix, "guess_page", lambda w, b, a: 2)
+    return UIController(wd)
+
+
+def _inline_id(ctrl, text, nth=0):
+    spans = formula_fix.inline_spans(ctrl.en_markdown())
+    hits = [i for i, (_s, _e, t) in enumerate(spans) if t == text]
+    return f"inline-{hits[nth]}"
+
+
+def test_inline_subject_and_regenerate_needs_region(ictrl):
+    fid = _inline_id(ictrl, "$y$")
+    sub = formula_fix.subject(ictrl.wd, fid)
+    assert sub["inline"] and sub["latex"] == "y" and sub["page"] == 2
+    prov, _ = _fake("y_0", kind="display")
+    assert "영역" in ictrl.regenerate_formula(fid, prov)["error"]  # 크롭이 없으니 영역부터
+    got = ictrl.regenerate_formula(fid, prov, page=2, rect=[10, 20, 60, 40])
+    assert got["kind"] == "inline" and got["block"] == "$y_0$"  # 문장 속 자리는 인라인으로
+    assert got["crop"] == b"\x89PNG new crop"
+
+
+def test_apply_inline_replaces_only_that_occurrence(ictrl):
+    _translate(ictrl, check=r"$x_i$")
+    fid = _inline_id(ictrl, "$x_i$", nth=1)  # 두 번째 $x_i$만
+    res = ictrl.apply_formula(fid, r"x_{i}'", "inline", expect="x_i")
+    assert res["ko"]
+    for md in (ictrl.wd.raw_md.read_text(), ictrl.en_markdown(), ictrl.ko_markdown()):
+        assert "$x_i$ as the input" in md and "again $x_{i}'$ here" in md
+    assert ictrl.stale_sections() == set()
+
+
+def test_apply_inline_refuses_when_doc_changed(ictrl):
+    fid = _inline_id(ictrl, "$y$")
+    with pytest.raises(ValueError):
+        ictrl.apply_formula(fid, "z", "inline", expect="not-y")
+
+
+def test_apply_with_region_saves_new_crop(ictrl):
+    ictrl.apply_formula("formula-01", r"a - b", "display", page=3, rect=[50, 80, 20, 100])
+    assert (ictrl.wd.extract_images / "formula-01.png").read_bytes() == b"\x89PNG new crop"
+    assert (ictrl.wd.out_images / "formula-01.png").read_bytes() == b"\x89PNG new crop"
+    rec = formulas.load(ictrl.wd)[0]
+    assert rec["page"] == 3 and rec["bbox"] == [20.0, 80.0, 50.0, 100.0] and rec["manual_crop"]
