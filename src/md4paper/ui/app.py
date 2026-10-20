@@ -2086,7 +2086,7 @@ _CHROME_CSS = """
   --md4n-block-bg: #f7f6f3; --md4n-check: #2383e2;
   line-height: 1.7; -webkit-font-smoothing: antialiased; }
 .md4-notes-ed .milkdown .ProseMirror { flex: 1 1 auto; padding: 12px 14px 40px 14px; line-height: 1.7; }
-.md4-notes-ed milkdown-block-handle { display: none !important; }
+.md4-notes-ed .milkdown-block-handle { display: none !important; }  /* Crepe가 만드는 건 div.milkdown-block-handle — 태그가 아니라 클래스 */
 .md4-notes-ed .milkdown .ProseMirror p { padding: 3px 0; margin: 1px 0; line-height: 1.7; }
 .md4-notes-ed .milkdown .ProseMirror strong { font-weight: 600; }
 .md4-notes-ed .milkdown .ProseMirror h1, .md4-notes-ed .milkdown .ProseMirror h2,
