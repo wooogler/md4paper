@@ -359,6 +359,40 @@ def set_hidden(root: Path, hidden: bool = True) -> bool:
     return True
 
 
+def set_left_panel(root: Path, mode: str | None) -> bool:
+    """논문별로 마지막에 펴 둔 왼쪽 작업 패널(목차·구조·번역·설정·메모, None = 접힘)을 status.json에 적는다.
+
+    앱을 다시 켜도 그 논문은 그 패널로 열린다. 읽던 자리처럼 보는 쪽 사정이지만, 패널은 논문마다
+    하는 일(구조 손보기·번역 확인·메모)이 달라 논문에 붙여 둔다. 고정처럼 폴더 수정시각은 되돌린다.
+    """
+    wd = WorkDir(Path(root))
+    if not wd.status_json.exists():
+        return False
+    try:
+        before = wd.root.stat()
+        status = wd.load_status()
+        if "left_panel" in status and status["left_panel"] == mode:
+            return True
+        status["left_panel"] = mode
+        wd.save_status(status)
+        try:
+            os.utime(wd.root, (before.st_atime, before.st_mtime))
+        except OSError:
+            pass
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def left_panel(root: Path) -> str | None:
+    """set_left_panel로 적어 둔 패널. 적힌 적이 없으면 '?'(처음 여는 논문 — 기본 패널을 고른다)."""
+    try:
+        status = WorkDir(Path(root)).load_status()
+    except (OSError, ValueError):
+        return "?"
+    return status.get("left_panel", "?")
+
+
 def set_pinned(root: Path, pinned: bool = True) -> bool:
     """논문을 목록 위에 고정하거나 해제한다 (status.json의 pinned_at).
 

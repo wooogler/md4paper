@@ -20,9 +20,11 @@ from md4paper.ui import jobs, tabstore
 from md4paper.workdir import (
     WorkDir,
     is_pinned,
+    left_panel,
     paper_title,
     recent_workdirs,
     rename_workdir,
+    set_left_panel,
     set_pinned,
 )
 
@@ -50,6 +52,18 @@ def test_pin_marks_and_unmarks(tmp_path):
     assert set_pinned(wd.root, False) is True
     assert is_pinned(wd.root) is False
     assert "pinned_at" not in wd.load_status()
+
+
+def test_left_panel_is_remembered_per_paper(tmp_path):
+    """왼쪽 작업 패널은 논문별로 status.json에 남는다 — 접힘(None)도 기억하고, 폴더 수정시각은 그대로."""
+    a, b = _paper(tmp_path, "a"), _paper(tmp_path, "b")
+    assert left_panel(a.root) == "?"                     # 처음 여는 논문 — 기본 패널을 고른다
+    mtime = a.root.stat().st_mtime
+    assert set_left_panel(a.root, "notes") is True
+    assert set_left_panel(b.root, None) is True
+    assert left_panel(a.root) == "notes" and left_panel(b.root) is None
+    assert a.root.stat().st_mtime == mtime              # 최근순 목록을 흔들지 않는다
+    assert set_left_panel(tmp_path / "missing", "toc") is False
 
 
 def test_pin_keeps_original_order_when_pinned_again(tmp_path):
@@ -393,3 +407,18 @@ def test_scroll_memory_persists_papers_but_not_home():
     # 되돌릴 때는 이 창의 sessionStorage가 먼저, localStorage는 그다음
     load = js[js.index("function load()"):]
     assert load.index("sessionStorage.getItem") < load.index("localStorage.getItem")
+
+
+def test_viewer_panels_are_remembered_globally():
+    """원문/번역/PDF 패널 구성은 전역 설정에 남아 다음에 여는 논문(재시작 뒤에도)이 그대로 연다."""
+    from md4paper import config
+    from md4paper.ui import app
+
+    assert app.load_panels() == {"en": True, "ko": True, "pdf": False}   # 처음엔 기본값
+    app.save_panels({"en": False, "ko": True, "pdf": True, "split": 58})
+    assert config.load_config()["ui"]["panels"] == ["ko", "pdf"]
+    assert app.load_panels() == {"en": False, "ko": True, "pdf": True}
+    app.save_panels({"en": False, "ko": False, "pdf": False})          # 다 꺼진 값은 적지 않는다
+    assert app.load_panels() == {"en": False, "ko": True, "pdf": True}
+    config.set_section_value("ui", "panels", "broken")                  # 깨진 값 → 기본값
+    assert app.load_panels() == {"en": True, "ko": True, "pdf": False}

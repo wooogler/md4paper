@@ -20,7 +20,7 @@ from md4paper.ui import (
     sentpair, spa, tabstore, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
-from md4paper.workdir import WorkDir, paper_title, set_pinned, set_project
+from md4paper.workdir import WorkDir, left_panel, paper_title, set_left_panel, set_pinned, set_project
 
 # 설명이 붙은 옵션 (값 → 사람이 이해하기 쉬운 라벨)
 _KSTYLE = {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)", "해요체": "해요체 (~해요 · 부드럽게)"}
@@ -1576,6 +1576,28 @@ _MD_IMG_RE = re.compile(r"(!\[[^\]]*\]\()([^)]+)(\))")
 _HTML_IMG_RE = re.compile(r'(<img\s[^>]*src=["\'])([^"\']+)(["\'])', re.IGNORECASE)
 
 
+_CANVAS_PANELS = ("en", "ko", "pdf")
+_DEFAULT_CANVAS_PANELS = {"en": True, "ko": True, "pdf": False}
+
+
+def load_panels() -> dict:
+    """마지막으로 쓰던 캔버스 패널(원문/번역/PDF) — 전역 설정([ui].panels)에 기억, 논문마다 따로 두지 않는다.
+
+    값이 없거나 깨졌으면(목록이 아니거나 아는 패널이 하나도 없으면) 기본값(원문+번역).
+    """
+    v = config.load_config().get("ui", {}).get("panels")
+    if not isinstance(v, list) or not any(k in v for k in _CANVAS_PANELS):
+        return dict(_DEFAULT_CANVAS_PANELS)
+    return {k: k in v for k in _CANVAS_PANELS}
+
+
+def save_panels(state: dict) -> None:
+    """켜 둔 패널을 전역 설정에 적는다 — 다음에 여는 논문(앱을 다시 켜도)이 그 구성으로 열린다."""
+    on = [k for k in _CANVAS_PANELS if state.get(k)]
+    if on:
+        config.set_section_value("ui", "panels", on)
+
+
 def wd_token(root: Path) -> str:
     """워크디렉토리별 짧은 토큰 — 이미지/PDF URL에 넣어 논문 간 캐시 충돌을 막는다.
 
@@ -2970,7 +2992,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.button("되돌리기(원본 다시 렌더)", icon="restore", on_click=revert).props("outline dense")
 
     # 캔버스 표시 상태 — 원문/번역/PDF 패널 토글 + 텍스트↔PDF 분할 비율 + PDF 스크롤 싱크 + 편집 분할 비율
-    viewer_state = {"en": True, "ko": True, "pdf": False, "split": 58, "sync": True,
+    # en/ko/pdf는 마지막으로 쓰던 구성으로 연다(전역 — load_panels)
+    viewer_state = {**load_panels(), "split": 58, "sync": True,
                     "stip": True, "edsplit": 50}  # stip: 한 언어만 볼 때 문장 짝 툴팁
 
     # 정렬 행 — 그리드·목차·섹션 점프가 모두 같은 행 목록을 봐야 한다(따로 계산하면 레벨을 바꾼 뒤
@@ -3484,6 +3507,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             "if(!e)return null;var m=e.scrollHeight-e.clientHeight;return m>0?e.scrollTop/m:0;})()")
         viewer_state[key] = not viewer_state[key]
         viewer_state["_restore"] = ratio
+        if key in ("en", "ko", "pdf"):
+            # 편집 때문에 잠시 접어 둔 PDF는 '쓰던 패널'로 친다 — 편집을 끄면 되살아나는 자리다
+            save_panels({**viewer_state, "pdf": viewer_state["pdf"] or viewer_state.get("pdf_folded", False)})
         viewer_toolbar.refresh()
         canvas.refresh()
         if key in ("en", "ko"):
@@ -4108,7 +4134,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if prev == "notes" and mode != "notes":
             notes_flush()
         panel_state["mode"] = mode
+        if mode is not None:
+            panel_state["last"] = mode  # 끌어서 다시 열 때 돌아갈 패널
         state.setdefault("panel_by_root", {})[root_key] = mode
+        set_left_panel(ctrl.wd.root, mode)  # 앱을 다시 켜도 이 논문은 이 패널로
         for key, box in panel_state["boxes"].items():
             box.set_visibility(key == mode)
         sp = panel_state["splitter"]
@@ -4839,18 +4868,24 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # ===== 본문: 레일 + (작업 패널 | 캔버스) =====
     # 처음 여는 논문은 번역이 있으면 목차, 없으면 구조부터(먼저 할 일이 섹션 구조 확인이라). 다시 열면
     # 보던 패널로 — 스크롤은 창 쪽 sessionStorage가 기억한다(§ui/scroll_memory.py).
+    # 보던 패널은 논문별로 status.json에도 적혀 있어(§workdir.set_left_panel) 앱을 다시 켜도 남는다.
     _seen_mode = state.get("panel_by_root", {}).get(root_key, "?")
+    if _seen_mode == "?":
+        _seen_mode = left_panel(ctrl.wd.root)
     _valid_modes = (None, *(k for k, _l, _i in _PANELS))
     panel_state["mode"] = _seen_mode if _seen_mode in _valid_modes else ("toc" if ctrl.ko_markdown() else "structure")
+    panel_state["last"] = panel_state["mode"]
 
     def _on_split(e) -> None:  # noqa: ANN001 — 패널 폭 드래그. 끝까지 밀어 닫으면 레일도 '접힘'으로
         if e.value > 1:
             if panel_state["mode"] is None:  # 닫힌 패널을 끌어 열었다 → 마지막 모드로 (없으면 목차)
-                set_panel(state.get("panel_by_root", {}).get(root_key) or "toc", toggle=False)
+                set_panel(panel_state.get("last") or "toc", toggle=False)
             else:
                 remember_width(panel_state["mode"], e.value)
         elif panel_state["mode"] is not None:
             panel_state["mode"] = None
+            state.setdefault("panel_by_root", {})[root_key] = None  # 끌어서 접은 것도 '접힘'으로 기억
+            set_left_panel(ctrl.wd.root, None)
             for box in panel_state["boxes"].values():
                 box.set_visibility(False)
             rail.refresh()
