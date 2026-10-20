@@ -392,11 +392,25 @@ HTML = """
     h.classList.remove('md-sec-flash'); void h.offsetWidth; h.classList.add('md-sec-flash');
     setTimeout(function(){ h.classList.remove('md-sec-flash'); }, 1700);
   }
+  // 확대 뷰어가 본문 그림을 열 때 캡션을 찾는다 — 같은 그림 파일을 가리키는 맵 항목(클릭한 쪽 언어 먼저)
+  function pathOf(u){ try { return new URL(u, location.href).pathname; } catch (e) { return ''; } }
+  window.__mdFigCaptionFor = function(src, el){
+    var m = window.__mdFigRefs || {}, p = pathOf(src), side = (el && el.closest && sideOf(el)) || 'en';
+    var sides = side === 'en' ? ['en'] : [side, 'en'];
+    for (var i = 0; i < sides.length; i++){
+      var mp = m[sides[i]] || {};
+      for (var k in mp) if (mp[k].src && pathOf(mp[k].src) === p && mp[k].cap) return {label: label(k), text: mp[k].cap};
+    }
+    return null;
+  };
   function openBig(it){
     tip.classList.remove('open');
     if (it.head){ cur = null; if (it.head.isConnected) jump(it.head); return; }
     var cap = label(it.key) + '. ' + (it.e.cap || '');
-    if (it.e.src){ if (window.__mdImgZoomOpen) window.__mdImgZoomOpen(it.e.src, cap); return; }
+    if (it.e.src){
+      if (window.__mdImgZoomOpen) window.__mdImgZoomOpen(it.e.src, cap, {label: label(it.key), text: it.e.cap || ''});
+      return;
+    }
     view.querySelector('.mtv-cap').innerHTML = '<b>' + label(it.key) + '.</b> ' + esc(it.e.cap || '');
     view.querySelector('.mtv-body').innerHTML = it.e.html;
     view.classList.add('open');

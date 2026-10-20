@@ -262,10 +262,11 @@ sup.md-fn a:hover { text-decoration: underline; }
 /* 그림 확대 뷰어(라이트박스) — 본문 그림을 클릭하면 화면 전체에 띄우고 휠·버튼으로 확대.
    position:fixed + 높은 z-index(인용 툴팁 10000보다 위)라 스크롤 컨테이너 안에서도 잘리지 않는다. */
 #md-img-zoom { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10001; display: none;
-  align-items: center; justify-content: center; overflow: hidden; background: rgba(18,18,20,.93); }
+  align-items: center; justify-content: center; overflow: hidden; background: rgba(18,18,20,.93);
+  padding: 52px 0 var(--mdz-foot, 52px); box-sizing: border-box; }
 #md-img-zoom.open { display: flex; }
-/* 위 52px은 도구막대, 아래 52px은 캡션 자리 — 그림이 그 위로 올라타지 않게 비워 둔다 */
-#md-img-zoom img { max-width: calc(100vw - 64px); max-height: calc(100vh - 104px);
+/* 위 52px은 도구막대, 아래는 캡션 자리(--mdz-foot, 캡션 길이만큼) — 그림이 그 위로 올라타지 않게 비워 둔다 */
+#md-img-zoom img { max-width: calc(100vw - 64px); max-height: calc(100vh - 52px - var(--mdz-foot, 52px));
   background: #fff; border-radius: 4px;
   box-shadow: 0 12px 44px rgba(0,0,0,.55); transform-origin: center center; will-change: transform;
   cursor: grab; user-select: none; -webkit-user-drag: none; }
@@ -281,8 +282,13 @@ sup.md-fn a:hover { text-decoration: underline; }
   font-variant-numeric: tabular-nums; }
 /* 캡션(alt) + 조작 힌트 — 그림 아래 가운데 */
 #md-img-zoom .mdz-foot { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
-  max-width: 78vw; text-align: center; color: #c9c9c9; font-size: 12.5px; line-height: 1.5;
+  width: max-content; max-width: min(78vw, 920px); text-align: center; color: #c9c9c9; font-size: 12.5px; line-height: 1.5;
   text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; }
+/* 그림·표 캡션 전문 — 길면 왼쪽 정렬로 몇 줄, 그 이상은 캡션 안에서 스크롤. 글자는 골라 복사할 수 있다 */
+#md-img-zoom .mdz-cap { max-height: 30vh; overflow-y: auto; pointer-events: auto; user-select: text;
+  color: #e2e2e2; font-size: 13.5px; }
+#md-img-zoom .mdz-cap.long { text-align: left; }
+#md-img-zoom .mdz-cap b { color: #fff; }
 #md-img-zoom .mdz-hint { color: #8e8e8e; font-size: 11.5px; }
 @media (prefers-color-scheme: dark) {
   .md-preview { color: #d4d4d4; }
@@ -1396,8 +1402,13 @@ _IMG_ZOOM_HTML = """
   var s = 1, tx = 0, ty = 0, base = 1, drag = null, moved = false;
   // base = 열었을 때의 배율(화면에 꽉 차게, 저해상도 그림을 너무 흐리게 늘리지 않도록 3배까지).
   // 논문 그림은 원본이 작은 경우가 많아 1배로 열면 본문에서 보던 크기와 다를 게 없다.
+  var foot = box.querySelector('.mdz-foot'), footH = 52;
+  function layoutFoot(){             // 캡션 높이만큼 아래를 비운다 (CSS --mdz-foot)
+    footH = Math.max(52, (foot ? foot.offsetHeight : 0) + 24);
+    box.style.setProperty('--mdz-foot', footH + 'px');
+  }
   function fitScale(){
-    var availW = box.clientWidth - 64, availH = box.clientHeight - 104;  // CSS max-*와 같은 여백
+    var availW = box.clientWidth - 64, availH = box.clientHeight - 52 - footH;  // CSS max-*와 같은 여백
     var w = img.offsetWidth, h = img.offsetHeight;   // CSS max-*로 이미 화면에 맞춰진 레이아웃 크기
     if (!w || !h) return 1;
     return Math.max(1, Math.min(availW / w, availH / h, 3));
@@ -1412,13 +1423,13 @@ _IMG_ZOOM_HTML = """
   function clampPan(){               // 확대한 그림이 화면 밖으로 완전히 빠지지 않도록
     var r = box.getBoundingClientRect();
     var mx = Math.max(0, (img.offsetWidth * s - r.width) / 2);
-    var my = Math.max(0, (img.offsetHeight * s - r.height) / 2);
+    var my = Math.max(0, (img.offsetHeight * s - (r.height - 52 - footH)) / 2);
     tx = Math.min(mx, Math.max(-mx, tx));
     ty = Math.min(my, Math.max(-my, ty));
   }
   function zoomAt(mx, my, ns){       // (mx,my) 아래에 있던 지점을 제자리에 두고 확대/축소
     ns = Math.min(base * 8, Math.max(base, ns));    // 연 크기 아래로는 안 줄이고, 그 8배까지
-    var r = box.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    var r = box.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + 52 + (r.height - 52 - footH) / 2;
     var px = (mx - cx - tx) / s, py = (my - cy - ty) / s;
     tx = mx - cx - ns * px; ty = my - cy - ns * py; s = ns;
     if (s <= base) { tx = 0; ty = 0; }
@@ -1426,7 +1437,7 @@ _IMG_ZOOM_HTML = """
   }
   function zoomBy(f){
     var r = box.getBoundingClientRect();
-    zoomAt(r.left + r.width / 2, r.top + r.height / 2, s * f);
+    zoomAt(r.left + r.width / 2, r.top + 52 + (r.height - 52 - footH) / 2, s * f);
   }
   function fit(){ base = fitScale(); s = base; tx = 0; ty = 0; apply(); }
   function close(){ box.classList.remove('open'); }
@@ -1465,10 +1476,18 @@ _IMG_ZOOM_HTML = """
   }
   window.__mdImgCopied = function(){ flash('copy'); };
 
-  function openZoom(src, alt){
+  function esc(t){ var d = document.createElement('div'); d.textContent = t == null ? '' : t; return d.innerHTML; }
+  // info = {label: 'Figure 3', text: 캡션} — 없으면 그림·표 맵(figrefs.py)에서 이 그림의 캡션을 찾는다
+  function openZoom(src, alt, info, from){
+    if (!info && window.__mdFigCaptionFor) info = window.__mdFigCaptionFor(src, from);
     img.src = src;
-    cap.textContent = alt || '';
+    if (info && info.text){
+      cap.innerHTML = '<b>' + esc(info.label) + '.</b> ' + esc(info.text);
+      cap.classList.toggle('long', info.text.length > 160);
+    } else { cap.textContent = alt || ''; cap.classList.remove('long'); }
+    cap.scrollTop = 0;
     box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
+    layoutFoot();
     if (img.complete) fit(); else img.onload = fit;
   }
   window.__mdImgZoomOpen = openZoom;   // 본문의 그림·표 참조(figrefs.py) 클릭도 이 뷰어로 연다
@@ -1477,11 +1496,11 @@ _IMG_ZOOM_HTML = """
     if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.md-preview')) return;
     if (window.__md4FxAt && window.__md4FxAt(t)) return;   // 읽기 실패로 남은 수식 그림 — 원본 대조 팝오버 몫
     ev.preventDefault();             // 그림을 감싼 링크가 있어도 이동하지 않게
-    openZoom(t.currentSrc || t.src, t.getAttribute('alt') || t.getAttribute('title') || '');
+    openZoom(t.currentSrc || t.src, t.getAttribute('alt') || t.getAttribute('title') || '', null, t);
   });
   box.addEventListener('click', function(ev){
     if (moved) { moved = false; return; }               // 드래그 끝의 클릭은 닫기가 아니다
-    if (ev.target === img || (ev.target.closest && ev.target.closest('.mdz-bar'))) return;
+    if (ev.target === img || (ev.target.closest && ev.target.closest('.mdz-bar, .mdz-cap'))) return;
     close();                                            // 배경 클릭 → 닫기
   });
   [].forEach.call(box.querySelectorAll('.mdz-bar button'), function(b){
@@ -1493,6 +1512,8 @@ _IMG_ZOOM_HTML = """
     });
   });
   box.addEventListener('wheel', function(ev){
+    // 긴 캡션 위의 휠은 캡션 스크롤 — 그림 확대가 아니다
+    if (ev.target.closest && ev.target.closest('.mdz-cap') && cap.scrollHeight > cap.clientHeight) return;
     ev.preventDefault();                                // 뒤 패널이 같이 스크롤되지 않게
     var d = ev.deltaY * (ev.deltaMode === 1 ? 16 : 1);  // 줄 단위로 오는 브라우저 보정
     var f = Math.exp(-d * (ev.ctrlKey ? 0.008 : 0.0015));  // ctrl+휠 = 트랙패드 핀치 (더 민감하게)
@@ -1522,6 +1543,7 @@ _IMG_ZOOM_HTML = """
   });
   window.addEventListener('resize', function(){   // 창 크기가 바뀌면 기준 배율도 바뀐다
     if (!box.classList.contains('open')) return;
+    layoutFoot();                                 // 폭이 바뀌면 캡션 줄 수도 바뀐다
     var nb = fitScale();
     s = s * (nb / base); base = nb;               // 보고 있던 확대 비율은 유지
     clampPan(); apply();
