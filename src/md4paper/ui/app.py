@@ -1287,6 +1287,28 @@ _SEC_JUMP_HTML = """
 </script>
 """
 
+# 바깥 링크(참고문헌의 DOI·arXiv, 본문 URL 등)는 새 창으로 — 그냥 두면 앱 창(pywebview)이 그 페이지로
+# 넘어가 버려 논문 화면을 잃는다. 누르는 순간 target=_blank를 달면, 브라우저에선 새 탭으로, 앱 창에선
+# pywebview가(OPEN_EXTERNAL_LINKS_IN_BROWSER) 시스템 기본 브라우저로 연다. 같은 서버 주소·문서 안 앵커는 그대로.
+_EXTLINK_HTML = """
+<script>
+(function(){
+  if (window.__md4ExtLinks) return; window.__md4ExtLinks = true;
+  function mark(e){
+    var a = e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a) return;
+    var href = a.getAttribute('href') || '';
+    if (!/^(https?:)?\/\//i.test(href) && !/^mailto:/i.test(href)) return;
+    var u; try { u = new URL(a.href, location.href); } catch (err) { return; }
+    if (u.origin === location.origin) return;
+    a.target = '_blank'; a.rel = 'noopener noreferrer';
+  }
+  document.addEventListener('click', mark, true);
+  document.addEventListener('auxclick', mark, true);
+})();
+</script>
+"""
+
 # 화살표 자동 변환 — 메모(Crepe)·하이라이트 메모 칸·마크다운 편집기에서 `->`를 치면 →, `<-`는 ←,
 # `<->`는 ↔, `=>`는 ⇒ (Notion과 같게). 마지막 글자를 치는 순간 앞 글자와 합쳐 바꾼다. 한국어 조합 중이거나
 # 선택 영역이 있으면 건드리지 않는다. `-->`(HTML 주석 끝)·`<=`(이하)는 바꾸지 않는다. 바로 Backspace로
@@ -2762,6 +2784,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_body_html(_CITE_TIP_HTML)
     spa.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
     spa.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
+    spa.add_body_html(_EXTLINK_HTML)  # 바깥 링크는 새 창(앱 창이면 시스템 브라우저)으로
     spa.add_body_html(_ARROW_HTML)  # -> → · <- ← · <-> ↔ · => ⇒ (메모·하이라이트 메모·마크다운 편집기)
     # 본문 그림·표 참조 호버 → 썸네일, 클릭 → 확대 (그림은 위 확대 뷰어, 마크다운 표는 표 오버레이)
     spa.add_css(figrefs.CSS)
@@ -5920,6 +5943,7 @@ def build_home(state: dict) -> None:
         return state["upload_dir"]
 
     spa.add_css(_HOME_CSS)
+    spa.add_body_html(_EXTLINK_HTML)  # 바깥 링크는 새 창(앱 창이면 시스템 브라우저)으로
     spa.add_css(_CHROME_CSS)  # 헤더 탭 줄 + 카드의 '새 창으로' 링크
     # 논문 화면에서 열어 둔 서랍·툴팁(본문 밖 오버레이라 화면을 갈아 끼워도 남는다)은 홈에서 닫는다
     ui.run_javascript("document.querySelectorAll('#md-anno-panel.open, #md-chat-panel.open')"
