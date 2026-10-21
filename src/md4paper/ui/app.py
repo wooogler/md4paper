@@ -250,7 +250,7 @@ sup.md-fn a:hover { text-decoration: underline; }
 }
 /* 정렬 그리드 — 한 행의 두 셀이 같은 grid row라 높이가 큰 쪽에 맞춰져 스크롤이 안 어긋난다.
    컬럼 수/비율은 인라인 --sbs-cols로 지정(원문/번역 토글·드래그). */
-.sbs-grid { display: grid; grid-template-columns: var(--sbs-cols, 1fr 1fr); align-content: start;
+.sbs-grid { display: grid; grid-template-columns: var(--sbs-cols, 1fr 1fr); align-content: start; padding-bottom: 48px;
   overflow-y: auto; overscroll-behavior: contain; height: 100%; }
 .sbs-cell { min-width: 0; padding: 1px 22px 8px; overflow-wrap: break-word; word-break: break-word; }
 .sbs-cell-div { border-right: 1px solid #e6e4e0; }
@@ -2097,9 +2097,11 @@ _CHROME_CSS = """
 .md4-chip.todo:hover { background: #f3f8ff; }
 .md4-chip.warn { background: #f59e0b; color: #fff; }
 /* 본문 = 레일 + (작업 패널 | 캔버스). 높이는 헤더(44px)와 페이지 여백(16px×2)을 뺀 나머지. */
-/* 높이 = 창 − 헤더(44) − 페이지 여백(16×2) − 아래 빈 자식(대화상자 자리 등)과의 간격(16). 이보다 크면
-   창 전체가 16px 스크롤돼, 안쪽 스크롤(메모·본문)과 함께 스크롤이 두 겹이 된다. */
-.md4-body { height: calc(100vh - 92px); align-items: stretch; }
+/* 리뷰 화면은 앱처럼 창 끝까지 채운다 — 페이지 여백(16px)·자식 간격을 걷어 레일이 왼쪽 끝, 본문이 아래
+   끝에 닿게. 여백을 남기면 아래에 어중간한 빈 띠가 생기고, 높이를 잘못 빼면 창 전체가 따로 스크롤된다. */
+.nicegui-content:has(> .nicegui-sub-pages .md4-body) { padding: 0; gap: 0; }
+.nicegui-content:has(> .nicegui-sub-pages .md4-body) > :not(.nicegui-sub-pages) { display: none; }
+.md4-body { height: calc(100vh - 44px); align-items: stretch; }
 .md4-rail { flex: 0 0 54px; width: 54px; height: 100%; background: #f4f3f1; border-right: 1px solid #e6e4e0;
   padding: 6px 0; align-items: center; flex-wrap: nowrap; }
 .md4-railbtn { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 46px;
@@ -2108,7 +2110,7 @@ _CHROME_CSS = """
 .md4-railbtn + .md4-railbtn { margin-top: 2px; }
 .md4-railbtn:hover { background: rgba(0,0,0,.06); color: #37352f; }
 .md4-railbtn.on { background: rgba(35,131,226,.13); color: #2383e2; }
-.md4-panel { height: 100%; width: 100%; overflow-y: auto; padding: 12px; gap: 12px; flex-wrap: nowrap; }
+.md4-panel { height: 100%; width: 100%; overflow-y: auto; padding: 12px 12px 14px; gap: 12px; flex-wrap: nowrap; }
 .md4-panel-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; }
 /* 메모 패널 — 머리 한 줄 아래를 위지윅 편집기(Milkdown Crepe)가 꽉 채운다. 편집기 안 빈 곳을 눌러도
    글쓰기로 들어가게 .milkdown·.ProseMirror를 상자 높이까지 늘린다. 블록 핸들(⋮⋮ +)은 숨긴다 — 좁은
