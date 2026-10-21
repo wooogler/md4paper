@@ -2105,6 +2105,10 @@ _CHROME_CSS = """
 .md4-notetab:hover .md4-notetab-x { opacity: .6; }
 .md4-notetab-x:hover { opacity: 1 !important; background: rgba(55,53,47,.12); }
 .md4-notetab-add { flex: 0 0 auto; }
+/* 이름 바꾸는 중 — 탭 자리에 같은 크기의 입력 칸 */
+.md4-notetab.editing { background: #fff; box-shadow: 0 0 0 1.5px #2383e2; padding: 0 6px; cursor: text; }
+.md4-notetab-in .q-field__control, .md4-notetab-in .q-field__marginal { height: 24px; min-height: 24px; }
+.md4-notetab-in .q-field__native { padding: 0; min-height: 24px; font-size: 13.5px; font-weight: 500; color: #37352f; }
 .md4-notetab.shown { box-shadow: inset 0 0 0 1px rgba(55,53,47,.14); color: #37352f; }
 /* 메모 칸 — 하나면 꽉 채우고, 나뉘면 위아래(q-splitter). 탭을 끄는 동안만 위·아래 놓을 자리가 덮인다. */
 .md4-notestack { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
@@ -4952,34 +4956,41 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             mount(i)
             note_tabs.refresh()
             note_heads.refresh()
-            rename_dialog(name)  # 만들자마자 이름부터 — '메모 2'로 두고 싶으면 그대로 Enter
+            start_rename(name)  # 만들자마자 이름부터 — '메모 2'로 두고 싶으면 그대로 Enter
 
-        def rename_dialog(name: str) -> None:
-            # 대화상자는 탭 줄 밖의 고정 자리에 — 탭 줄을 다시 그리면(새 탭 추가 직후) 그 안의 슬롯이 사라진다
-            with dlg_host, ui.dialog() as dlg, ui.card().classes("gap-2").style("min-width:280px"):
-                ui.label("메모 탭 이름").classes("text-sm font-medium")
-                inp = ui.input(value=name).props("dense outlined autofocus").classes("w-full")
-                inp.on("focus", js_handler="(e) => e.target.select()")  # 바로 치면 새 이름으로 바뀌게
+        def start_rename(name: str) -> None:
+            """탭 이름 그 자리에서 바꾸기 — 탭 글자가 입력 칸으로 바뀐다(Enter·바깥 클릭 = 적용, Esc = 취소)."""
+            notes_state["renaming"] = name
+            note_tabs.refresh()
 
-                def apply() -> None:
-                    notes_flush()
-                    new = notes_io.rename(ctrl.wd, name, inp.value or "")
-                    for q in panes:
-                        if q["tab"] == name:
-                            q["tab"] = new
-                    for k, v in notes_state["ids"].items():  # 늦게 오는 이벤트도 새 이름의 탭으로
-                        if v == name:
-                            notes_state["ids"][k] = new
-                    remember()
-                    dlg.close()
-                    note_tabs.refresh()
-                    note_heads.refresh()
+        def finish_rename(name: str, value: str | None) -> None:
+            if notes_state.get("renaming") != name:
+                return  # Enter 뒤에 오는 blur 등 — 이미 끝났다
+            notes_state["renaming"] = None
+            new = name
+            if value is not None and value.strip() and value.strip() != name:
+                notes_flush()
+                new = notes_io.rename(ctrl.wd, name, value)
+                for q in panes:
+                    if q["tab"] == name:
+                        q["tab"] = new
+                for k, v in notes_state["ids"].items():  # 늦게 오는 이벤트도 새 이름의 탭으로
+                    if v == name:
+                        notes_state["ids"][k] = new
+                remember()
+            note_tabs.refresh()
+            if new != name:
+                note_heads.refresh()
 
-                inp.on("keydown.enter", apply)
-                with ui.row().classes("justify-end gap-2 w-full"):
-                    ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
-                    ui.button("바꾸기", on_click=apply).props("unelevated dense no-caps color=primary")
-            dlg.open()
+        async def on_tab_click(e, name: str) -> None:  # noqa: ANN001 — 클릭 횟수(detail)를 받는다
+            # 더블클릭을 click 두 번으로 가린다 — 첫 클릭이 탭을 바꾸며 탭 줄을 다시 그리면 그 요소가 사라져
+            # 브라우저의 dblclick이 오지 않는다(그래서 이름 바꾸기가 먹통이었다). 클릭 횟수는 자리 기준이라
+            # 다시 그린 새 요소에서도 두 번째 클릭은 detail=2로 온다.
+            n = (e.args or {}).get("detail", 1) if isinstance(e.args, dict) else 1
+            if isinstance(n, int) and n >= 2:
+                start_rename(name)
+            else:
+                await show(name)
 
         async def remove_tab(name: str) -> None:
             def do() -> None:
@@ -5032,13 +5043,23 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         cls += " on" if i == notes_state["focus"] else " shown"
                     tab = ui.element("div").classes(cls)
                     tab._props.update({"draggable": "true", "data-tab": name})  # 이름에 공백이 있어도 그대로
+                    if notes_state.get("renaming") == name:  # 이름 바꾸는 중 — 탭 자리에 입력 칸
+                        tab.classes(add="editing")
+                        tab._props["draggable"] = "false"
+                        with tab:
+                            inp = ui.input(value=name).props("dense borderless autofocus") \
+                                .classes("md4-notetab-in").style(f"width:{max(4, len(name) + 2)}ch")
+                            inp.on("focus", js_handler="(e) => e.target.select()")
+                            inp.on("keydown.enter", lambda _, n=name, w=inp: finish_rename(n, w.value))
+                            inp.on("keydown.esc", lambda _, n=name: finish_rename(n, None))
+                            inp.on("blur", lambda _, n=name, w=inp: finish_rename(n, w.value))
+                        continue
                     with tab:
                         ui.label(name).classes("md4-notetab-t")
                         if len(names) > 1:
                             x = ui.icon("close", size="12px").classes("md4-notetab-x")
                             x.on("click.stop", lambda _, n=name: remove_tab(n))
-                    tab.on("click", lambda _, n=name: show(n))
-                    tab.on("dblclick", lambda _, n=name: rename_dialog(n))
+                    tab.on("click", lambda e, n=name: on_tab_click(e, n), ["detail"])
                     tab.on("dragstart", js_handler=_drag_start)
                     tab.on("dragend", js_handler=_drag_end)
                     tab.tooltip("더블클릭하면 이름 바꾸기 · 메모 칸 아래쪽으로 끌어 놓으면 위아래로 나눠 보기")
