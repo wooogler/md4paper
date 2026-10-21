@@ -2807,12 +2807,62 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_css(figure_crop.CSS)  # 확대 뷰어 ✂ → 그림 영역 다시 지정 (위 영역 지정 화면을 같이 쓴다)
     spa.add_body_html(figure_crop.HTML)
 
+    # 캔버스를 다시 지으면(그리드를 통째로) 스크롤이 맨 위로 간다. 그림·수식 하나 고쳤을 뿐인데 읽던 자리를
+    # 잃으면 안 되므로, 다시 짓기 전에 화면 맨 위에 걸친 행과 그 행의 위치를 재 두고, 새 그리드가 붙으면
+    # 같은 행을 같은 자리로 되돌린다. 그림이 늦게 실려 높이가 바뀌므로 잠깐 몇 번 더 맞춘다(사용자가
+    # 직접 스크롤하면 거기서 멈춘다).
+    _KEEP_JS = """
+    (function(){
+      var g = document.querySelector('.sbs-grid') || document.querySelector('.vpane');
+      if (!g) return null;
+      g.dataset.md4old = '1';
+      var top = g.getBoundingClientRect().top, cells = g.querySelectorAll('.sbs-cell[data-row]');
+      for (var i = 0; i < cells.length; i++){
+        var r = cells[i].getBoundingClientRect();
+        if (r.bottom > top + 1) return {row: cells[i].getAttribute('data-row'), off: r.top - top,
+                                         ratio: g.scrollTop / Math.max(1, g.scrollHeight - g.clientHeight)};
+      }
+      return {row: null, off: 0, ratio: g.scrollTop / Math.max(1, g.scrollHeight - g.clientHeight)};
+    })()
+    """
+    _RESTORE_JS = """
+    (function(p){
+      var stop = false, n = 0, t0 = Date.now();
+      function quit(){ stop = true; }
+      ['wheel', 'touchmove', 'keydown', 'mousedown'].forEach(function(ev){
+        window.addEventListener(ev, quit, {once: true, capture: true}); });
+      (function step(){
+        if (stop || Date.now() - t0 > 3000) return;
+        var g = [].filter.call(document.querySelectorAll('.sbs-grid, .vpane'),
+                               function(x){ return !x.dataset.md4old; })[0];
+        var c = g && p.row !== null ? g.querySelector('.sbs-cell[data-row="' + p.row + '"]') : null;
+        if (g && c){
+          var d = c.getBoundingClientRect().top - g.getBoundingClientRect().top - p.off;
+          if (Math.abs(d) > 1){ g.scrollTop += d; g.dispatchEvent(new Event('scroll')); }
+        } else if (g && p.row === null){
+          g.scrollTop = p.ratio * (g.scrollHeight - g.clientHeight);
+        }
+        setTimeout(step, ++n < 8 ? 60 : 250);   // 처음엔 촘촘히, 그다음엔 그림이 실리는 동안 띄엄띄엄
+      })();
+    })(%s)
+    """
+
+    async def refresh_canvas_keeping_place() -> None:
+        """캔버스를 다시 그리되 보던 자리(화면 맨 위의 행)를 지킨다 — 그림·수식 고치기 뒤에."""
+        try:
+            pos = await ui.run_javascript(_KEEP_JS, timeout=2.0)
+        except Exception:  # noqa: BLE001 — 못 재면 그냥 다시 그린다
+            pos = None
+        refresh_canvas()
+        if isinstance(pos, dict):
+            ui.run_javascript(_RESTORE_JS % json.dumps(pos))
+
     async def on_figure_recropped(e) -> None:  # noqa: ANN001 — 그림 파일은 이미 바뀌었다(서버 라우트)
         a = e.args or {}
         if not a.get("ok"):
             ui.notify(f"그림을 바꾸지 못했습니다: {a.get('error', '')}", type="warning")
             return
-        refresh_canvas()  # 표시 폭 힌트(#mdw=)를 새 그림 크기로
+        await refresh_canvas_keeping_place()  # 표시 폭 힌트(#mdw=)를 새 그림 크기로 — 읽던 자리는 그대로
         ui.notify("원래 그림으로 되돌렸습니다" if a.get("what") == "restore" else "그림을 고른 영역으로 바꿨습니다",
                   type="positive")
 
@@ -2832,7 +2882,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             return
         await run.io_bound(library.auto_export, ctrl.wd)
         ui.run_javascript("window.__md4FxClose && window.__md4FxClose()")
-        refresh_canvas()
+        await refresh_canvas_keeping_place()
         msg = "수식을 바꿨습니다"
         if ctrl.ko_markdown():
             msg += " · 번역문도 같은 자리를 바꿨습니다" if res["ko"] else " · 번역은 다시 번역해야 반영됩니다"
