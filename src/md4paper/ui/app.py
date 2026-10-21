@@ -5298,6 +5298,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
 # 홈 드롭존 — 실제 q-uploader를 투명하게 위에 겹쳐(드롭·클릭 캐치) 아래 dashed 힌트를 보여준다.
 _HOME_CSS = """
+/* 홈 = 창 하나 — 머리(제목·프로젝트 줄)는 제 높이, 아래 두 열(splitter)은 남은 높이를 채우고 각 열 안에서만
+   스크롤한다. 창 전체는 스크롤되지 않는다. */
+.nicegui-content:has(> .nicegui-sub-pages > .md4-home) { height: calc(100vh - 44px); padding: 14px 16px 0; gap: 0; }
+.nicegui-content:has(> .nicegui-sub-pages > .md4-home) > :not(.nicegui-sub-pages) { display: none; }
+.nicegui-sub-pages:has(> .md4-home) { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 4px; }
+.md4-home { flex: 1 1 0; min-height: 0; }
 .md4-dropwrap { position: relative; width: 100%; }
 .md4-upload { position: absolute; inset: 0; z-index: 2; opacity: 0; cursor: pointer; }
 .md4-upload, .md4-upload > .q-uploader { width: 100%; height: 100%; min-height: 156px; max-height: none; }
@@ -6612,7 +6618,9 @@ def build_home(state: dict) -> None:
         # 프로젝트 전환 줄 — 왼쪽(올리기)과 오른쪽(목록) 둘 다에 걸리는 선택이라 양쪽 위에 둔다.
         project_bar()
 
-    with ui.splitter(value=42).classes("w-full").style("height: calc(100vh - 202px)") as sp:
+    # 높이는 남은 자리를 flex로 채운다(_HOME_CSS의 .md4-home) — 위의 프로젝트 줄이 칩이 많아 두 줄이 되면
+    # 고정 계산(100vh − 202px)은 창보다 길어져 창 전체가 따로 스크롤되고 제목이 헤더 밑으로 숨었다.
+    with ui.splitter(value=42).classes("w-full md4-home") as sp:
         # ---- 왼쪽: 업로드 · 설정 · 진행상황 ----
         with sp.before, ui.column().classes("p-4 gap-3 w-full md4-scroll").style("height:100%; overflow-y:auto"):
             _kstat = config.key_status()
