@@ -74,3 +74,15 @@ def test_combined_export_keeps_old_shape_for_one_tab_and_sections_for_many(tmp_p
     monkeypatch.setattr(library, "notes_dir", lambda project=None: tmp_path / "EN")
     out = library.export_notes(wd)
     assert out.read_text(encoding="utf-8") == text
+
+
+def test_view_is_remembered_per_paper_without_touching_tabs(tmp_path):
+    wd = _wd(tmp_path)
+    notes.save_view(wd, {"panes": ["메모"], "focus": 0, "ratio": 50})
+    assert not (wd.root / "notes").exists()          # 메모를 안 쓰는 논문엔 폴더를 만들지 않는다
+    q = notes.add(wd, "질문")
+    notes.save_view(wd, {"panes": [q], "focus": 0, "ratio": 50})
+    assert notes.load_view(wd)["panes"] == ["질문"]
+    notes.add(wd, "아이디어")                          # 탭 목록을 고쳐도 보던 자리는 남는다
+    assert notes.load_view(wd)["panes"] == ["질문"]
+    assert notes.tab_names(wd) == ["메모", "질문", "아이디어"]

@@ -4833,7 +4833,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         tab_mem = state.setdefault("notes_tab_by_root", {})
         lay_mem = state.setdefault("notes_layout_by_root", {})
         names = ctrl.note_tabs()
-        lay = lay_mem.get(root_key) or {}
+        lay = lay_mem.get(root_key) or notes_io.load_view(ctrl.wd)  # 이 창에서 본 것 > 논문 폴더에 남긴 것
         tabs0 = [t for t in (lay.get("panes") or [tab_mem.get(root_key)]) if t in names]
         tabs0 = list(dict.fromkeys(tabs0))[:2] or [names[0]]
         notes_state["panes"] = [{"tab": t, "el_id": None, "box": None} for t in tabs0]
@@ -4845,6 +4845,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             f = notes_state["focus"]
             lay_mem[root_key] = {"panes": [q["tab"] for q in panes], "focus": f, "ratio": notes_state["ratio"]}
             tab_mem[root_key] = panes[f]["tab"]
+            try:  # 앱을 다시 띄워도 이 논문은 이 탭(칸 배치)으로 열리게 — notes/_tabs.json의 view
+                notes_io.save_view(ctrl.wd, lay_mem[root_key])
+            except OSError:
+                pass
 
         async def capture() -> None:
             """지금 편집기들의 내용을 브라우저에서 바로 받아 저장한다 — 편집기를 갈아 끼우기 전에.

@@ -48,9 +48,22 @@ def _load(wd: WorkDir) -> list[dict]:
     return tabs or [{"name": DEFAULT_NAME, "file": _MAIN_FILE}]
 
 
-def _save(wd: WorkDir, tabs: list[dict]) -> None:
+def _raw(wd: WorkDir) -> dict:
+    try:
+        data = json.loads(_index(wd).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save(wd: WorkDir, tabs: list[dict], view: dict | None = None) -> None:
+    """목록 파일 쓰기 — 보던 자리(view)는 따로 넘기지 않으면 있던 것을 그대로 둔다."""
+    data = {"tabs": tabs}
+    old_view = _raw(wd).get("view") if view is None else view
+    if isinstance(old_view, dict) and old_view:
+        data["view"] = old_view
     _dir(wd).mkdir(parents=True, exist_ok=True)
-    _write_atomic(_index(wd), json.dumps({"tabs": tabs}, ensure_ascii=False, indent=2) + "\n")
+    _write_atomic(_index(wd), json.dumps(data, ensure_ascii=False, indent=2) + "\n")
 
 
 def _write_atomic(path: Path, text: str) -> None:
@@ -94,6 +107,25 @@ def _new_file(wd: WorkDir, tabs: list[dict], name: str, skip: dict | None = None
 
 
 # ---------------------------------------------------------------- 공개 API
+
+def load_view(wd: WorkDir) -> dict:
+    """마지막으로 보던 메모 칸 배치 — {"panes": [탭 이름…], "focus": 칸 번호, "ratio": 나눈 비율}. 없으면 {}."""
+    v = _raw(wd).get("view")
+    return v if isinstance(v, dict) else {}
+
+
+def save_view(wd: WorkDir, view: dict) -> None:
+    """보던 메모 칸 배치를 논문 폴더에 — 앱을 다시 띄워도 그 탭으로 열리게. 탭이 하나뿐이고 기본 배치면
+    (목록 파일이 아직 없을 때) 아무것도 만들지 않는다 — 메모를 안 쓰는 논문에 notes/ 폴더가 생기지 않게."""
+    tabs = _load(wd)
+    default = view.get("panes") in (None, [], [tabs[0]["name"]]) and not view.get("focus") \
+        and float(view.get("ratio") or 50) == 50
+    if default and not _index(wd).exists():
+        return
+    if load_view(wd) == view:
+        return
+    _save(wd, tabs, view)
+
 
 def tab_names(wd: WorkDir) -> list[str]:
     return [t["name"] for t in _load(wd)]
