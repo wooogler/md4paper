@@ -2097,7 +2097,9 @@ _CHROME_CSS = """
 .md4-chip.todo:hover { background: #f3f8ff; }
 .md4-chip.warn { background: #f59e0b; color: #fff; }
 /* 본문 = 레일 + (작업 패널 | 캔버스). 높이는 헤더(44px)와 페이지 여백(16px×2)을 뺀 나머지. */
-.md4-body { height: calc(100vh - 76px); align-items: stretch; }
+/* 높이 = 창 − 헤더(44) − 페이지 여백(16×2) − 아래 빈 자식(대화상자 자리 등)과의 간격(16). 이보다 크면
+   창 전체가 16px 스크롤돼, 안쪽 스크롤(메모·본문)과 함께 스크롤이 두 겹이 된다. */
+.md4-body { height: calc(100vh - 92px); align-items: stretch; }
 .md4-rail { flex: 0 0 54px; width: 54px; height: 100%; background: #f4f3f1; border-right: 1px solid #e6e4e0;
   padding: 6px 0; align-items: center; flex-wrap: nowrap; }
 .md4-railbtn { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 46px;
@@ -2114,7 +2116,7 @@ _CHROME_CSS = """
    글꼴·크기·간격은 Notion 기준(16px · 1.5, 시스템 산세리프, 촘촘한 블록 리듬)으로 맞춘다. Crepe가 변수로
    받는 것(--crepe-font-*, --crepe-base-font-size, 글자·코드 색)은 변수로, 나머지는 Crepe 셀렉터 앞에
    .md4-notes-ed를 붙여 구체도로 덮는다 — Crepe CSS는 나중에 <link>로 붙어 순서로는 이기지 못한다. */
-.md4-notes { flex: 1 1 auto; min-height: 0; flex-wrap: nowrap; }
+.md4-notes { flex: 1 1 0; min-height: 0; flex-wrap: nowrap; overflow: hidden; }  /* 패널을 넘지 않고 안에서만 스크롤 */
 .md4-notes .md4-notes-status { font-size: 11px; color: #9a968e; }
 /* 메모 탭 — 패널 제목 아래 작은 글자 줄. 고른 탭만 옅은 바탕에 진하게, 넘치면 가로로 스크롤. */
 .md4-notetabs { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex-shrink: 0; margin-top: -4px; }
