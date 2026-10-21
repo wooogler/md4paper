@@ -690,3 +690,46 @@ def test_notes_editor_js_embeds_content_safely():
     assert '"c7"' in js and "new W.MilkdownCrepe" in js and "emitEvent('md4-notes'" in js
     assert '메모 \\"따옴표\\" </script>\\n줄' in js  # JSON 문자열로 실린다 (run_javascript라 태그 탈출 없음)
     assert f"{CREPE_URL}/crepe.min.js?v=" in js and f"{CREPE_URL}/crepe.min.css?v=" in js
+
+
+def test_notes_pick_compares_with_editor_baseline_not_file():
+    """capture()·자동 저장이 쓸지 정하는 규칙 — 편집기를 얹을 때의 기준과 견준다."""
+    from md4paper.ui.app import notes_pick
+
+    mem = {"raw": "- 하나\n- 둘\n", "saved": None, "stamp": "x"}
+    base = "* 하나\n* 둘\n"                       # Crepe가 얹으며 다시 쓴 모양
+    ok = {"ready": True, "base": base, "empty": False}
+    assert notes_pick(base, mem, ok) is None       # 고치지 않은 편집기 → 쓰지 않는다(옛 내용 되쓰기 없음)
+    assert notes_pick("- 하나\n- 둘", mem, ok) is None
+    assert notes_pick(base + "* 셋\n", mem, ok) == base + "* 셋\n"
+    assert notes_pick("", mem, {"ready": False}) is None           # create() 전
+    assert notes_pick("", mem, ok) is None                          # 화면엔 글자가 있는데 빈 문자열 — 헛값
+    assert notes_pick("", mem, dict(ok, empty=True)) == ""          # 정말 다 지웠다
+    assert notes_pick("", mem) == ""                                # 이벤트(실제 편집)로 온 빈 문서
+    assert notes_pick(None, mem, ok) is None
+    # 한 번 쓴 뒤에는 그 내용이 기준 — 원래대로 되돌린 것도 쓴다
+    mem["saved"] = base + "* 셋\n"
+    assert notes_pick(base + "* 셋\n", mem, ok) is None
+    assert notes_pick(base, mem, ok) == base
+
+
+def test_notes_editor_js_marks_ready_and_baseline():
+    from md4paper.ui.app import NOTES_CAPTURE_JS, notes_editor_js
+
+    js = notes_editor_js("c7", "메모")
+    assert "crepe.create().then(" in js and "__md4ready=true" in js and "__md4base=crepe.getMarkdown()" in js
+    assert "if(!el.__md4ready" in js                     # 준비 전 갱신은 보내지 않는다
+    assert "ready:false" in NOTES_CAPTURE_JS and "empty:" in NOTES_CAPTURE_JS
+    assert (NOTES_CAPTURE_JS % '["c7"]').endswith('(["c7"])')
+
+
+def test_save_notes_conflict_and_trash(ctrl):
+    from md4paper import notes
+
+    ctrl.save_notes("다른 창이 쓴 긴 메모 " * 20)
+    _, st = notes.read_stamped(ctrl.wd, "메모")
+    ctrl.wd.notes_md.write_text("외부 편집\n", encoding="utf-8")
+    import pytest
+    with pytest.raises(notes.Conflict):
+        ctrl.save_notes("#", expect=st)
+    assert ctrl.notes() == "외부 편집\n"

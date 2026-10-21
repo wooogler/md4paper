@@ -86,3 +86,72 @@ def test_view_is_remembered_per_paper_without_touching_tabs(tmp_path):
     notes.add(wd, "아이디어")                          # 탭 목록을 고쳐도 보던 자리는 남는다
     assert notes.load_view(wd)["panes"] == ["질문"]
     assert notes.tab_names(wd) == ["메모", "질문", "아이디어"]
+
+
+# ---------------------------------------------------------------- 조용히 잃지 않기
+
+def _trash(wd):
+    d = wd.root / "notes" / ".trash"
+    return sorted(d.glob("*.md")) if d.exists() else []
+
+
+def test_write_refuses_when_file_changed_since_stamp(tmp_path):
+    wd = _wd(tmp_path)
+    notes.write(wd, "메모", "처음 내용\n")
+    text, st = notes.read_stamped(wd, "메모")
+    assert text == "처음 내용\n" and st == notes.stamp(wd, "메모")
+    wd.notes_md.write_text("다른 창에서 고친 4.7KB 메모\n", encoding="utf-8")   # 바깥에서 바뀜
+    import pytest
+    with pytest.raises(notes.Conflict):
+        notes.write(wd, "메모", "#", expect=st)
+    assert wd.notes_md.read_text(encoding="utf-8") == "다른 창에서 고친 4.7KB 메모\n"  # 덮지 않았다
+    # 지문이 맞으면 쓰고 새 지문을 돌려준다 — 다음 쓰기는 그 지문으로
+    st2 = notes.stamp(wd, "메모")
+    st3 = notes.write(wd, "메모", "이어 쓴 내용\n", expect=st2)
+    assert st3 == notes.stamp(wd, "메모") and notes.write(wd, "메모", "또\n", expect=st3)
+
+
+def test_stamp_of_missing_file_is_none_and_guards_creation(tmp_path):
+    wd = _wd(tmp_path)
+    assert notes.read_stamped(wd, "메모") == ("", None)
+    notes.write(wd, "메모", "새 메모", expect=None)              # 없던 파일 — 여전히 없으면 쓴다
+    import pytest
+    with pytest.raises(notes.Conflict):
+        notes.write(wd, "메모", "다른 편집기", expect=None)      # 그 사이 누가 만들었다
+
+
+def test_emptying_or_big_shrink_keeps_old_copy_in_trash(tmp_path):
+    wd = _wd(tmp_path)
+    long = "긴 메모 한 줄\n" * 50
+    notes.write(wd, "메모", long)
+    notes.write(wd, "메모", long + "조금 더\n")                   # 늘리기 — 남기지 않는다
+    assert _trash(wd) == []
+    notes.write(wd, "메모", "#")                                   # 20% 미만으로 줄었다
+    [t] = _trash(wd)
+    assert t.read_text(encoding="utf-8") == long + "조금 더\n"
+    notes.write(wd, "메모", "")                                    # 비우기 — 파일은 지우되 직전 것을 남긴다
+    assert not wd.notes_md.exists()
+    assert [f.read_text(encoding="utf-8") for f in _trash(wd)].count("#") == 1
+    assert notes.tab_names(wd) == ["메모"]                         # .trash는 탭이 아니다
+    assert notes.combined(wd) == ""
+
+
+def test_keep_old_and_keep_and_remove_go_to_trash(tmp_path):
+    wd = _wd(tmp_path)
+    notes.write(wd, "메모", "바깥 내용")
+    notes.write(wd, "메모", "내 내용으로 덮기", keep_old=True)
+    assert [f.read_text(encoding="utf-8") for f in _trash(wd)] == ["바깥 내용"]
+    notes.keep(wd, "메모", "버리는 편집기 내용")
+    q = notes.add(wd, "질문")
+    notes.write(wd, q, "지울 탭의 내용")
+    notes.remove(wd, q)
+    got = {f.read_text(encoding="utf-8") for f in _trash(wd)}
+    assert got == {"바깥 내용", "버리는 편집기 내용", "지울 탭의 내용"}
+
+
+def test_trash_is_capped(tmp_path, monkeypatch):
+    wd = _wd(tmp_path)
+    monkeypatch.setattr(notes, "_TRASH_KEEP", 3)
+    for i in range(6):
+        notes.keep(wd, "메모", f"판 {i}")
+    assert len(_trash(wd)) == 3

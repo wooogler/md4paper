@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from md4paper import config, formula_fix, library, projects
+from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
     annotations, chat_panel, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, mdrender, reanchor,
@@ -1734,7 +1735,11 @@ def notes_editor_js(el_id: str, md: str) -> str:
     기다린다. DOM에서 사라진 옛 편집기는 새로 얹을 때 치운다. 바뀐 마크다운은 리스너가 이미 0.2초
     모아 주므로 그대로 보내고, 0.8초 모아 쓰기·저장 상태는 파이썬(notes_typed)이 맡는다 — 패널을
     떠나거나 내보낼 때 기다리던 글자까지 바로 쓰려면 마지막 내용이 서버에 있어야 해서다.
-    편집기 쪽으로 되쓰는 경로는 없다(한국어 조합 중 글자를 건드리지 않게)."""
+    편집기 쪽으로 되쓰는 경로는 없다(한국어 조합 중 글자를 건드리지 않게).
+
+    create()는 비동기라 끝나기 전 getMarkdown()은 빈 문자열일 수 있다 — 끝나면 el.__md4ready를 세우고
+    그때의 마크다운을 el.__md4base(기준)로 둔다. Crepe는 얹으며 글머리·빈 줄 모양을 다시 쓰므로 원문이
+    아니라 이것과 견줘야 '고치지 않은 편집기'를 알아본다. 고치기 전(dirty 아님)엔 기준과 같은 내용을 보내지 않는다."""
     ver = _crepe_version()
     return (
         "(function(id, md){var W=window;"
@@ -1758,9 +1763,10 @@ def notes_editor_js(el_id: str, md: str) -> str:
         "el.__md4crepe=crepe;all[id]=crepe;"
         # 표가 든 문서는 만들자마자 표 정리 트랜잭션이 돌아 내용이 같은 채로 한 번 불린다 → 같으면 건너뜀
         "crepe.on(function(api){api.markdownUpdated(function(ctx, m, prev){"
-        "if(m===prev||m===el.__md4sent)return;el.__md4sent=m;"
+        "if(!el.__md4ready||m===prev||m===el.__md4sent)return;"
+        "if(!el.__md4dirty&&m===el.__md4base)return;el.__md4dirty=true;el.__md4sent=m;"
         "if(typeof emitEvent==='function')emitEvent('md4-notes',{id:id, md:m});});});"
-        "crepe.create();}"
+        "crepe.create().then(function(){el.__md4base=crepe.getMarkdown();el.__md4ready=true;});}"
         "W.__md4CrepeLoad.then(mount, function(){var el=document.getElementById(id);"
         "if(el)el.textContent='메모 편집기를 불러오지 못했습니다.';});"
         f"}})({json.dumps(el_id)}, {json.dumps(md, ensure_ascii=False)});"
@@ -1776,6 +1782,40 @@ def notes_event_text(args: object, el_id: str) -> str | None:
         return None
     md = args.get("md")
     return md if isinstance(md, str) else None
+
+
+# capture(): 편집기마다 {ready, md, base, empty}를 브라우저에서 바로 받는다 — create() 전이면 {ready:false}.
+# empty는 화면(ProseMirror)에 글자가 하나도 없는지 — getMarkdown()의 빈 문자열이 진짜인지 맞춰 보는 증인.
+NOTES_CAPTURE_JS = (
+    "(function(ids){var C=window.__md4Crepes||{},o={};ids.forEach(function(id){try{"
+    "var c=C[id],el=document.getElementById(id);if(!c||!el)return;"
+    "if(!el.__md4ready){o[id]={ready:false};return;}"
+    "var pm=el.querySelector('.ProseMirror');"
+    "o[id]={ready:true,md:c.getMarkdown(),base:el.__md4base,empty:!pm||!pm.textContent.trim()};"
+    "}catch(e){}});return o;})(%s)")
+
+
+def notes_pick(md: object, mem: dict, js: dict | None = None) -> str | None:
+    """편집기 하나가 준 마크다운 중 실제로 파일에 쓸 것 — 쓸 게 없으면 None.
+
+    mem은 그 편집기를 얹을 때의 기록: raw(그때 파일 내용), saved(그 뒤 이 편집기가 쓴 마지막 내용, 없으면 None).
+    파일과 견주지 않는다 — 다른 곳에서 파일이 바뀐 뒤 옛 내용이 떠 있는 편집기가 그것을 되써 덮지 않게.
+    js는 capture()가 받은 {ready, base, empty}(이벤트로 온 것이면 None): 준비 전 편집기는 건너뛰고, 고친
+    적 없는 편집기(base와 같음)도 건너뛰고, 화면엔 글자가 있는데 빈 문자열이 오면 헛값으로 보고 건너뛴다."""
+    if not isinstance(md, str):
+        return None
+    if js is not None and js.get("ready") is not True:
+        return None
+    ref = mem.get("saved")
+    if ref is None:
+        ref = mem.get("raw") or ""
+        if md.strip() == ref.strip() or (js is not None and md == js.get("base")):
+            return None
+    elif md == ref:
+        return None
+    if not md.strip() and ref.strip() and js is not None and not js.get("empty"):
+        return None
+    return md
 
 
 _HEADING_LINE_RE = re.compile(r"^#{1,6}\s")
@@ -4221,9 +4261,35 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 타자가 0.8초쯤 멈추면 원자적으로 저장한다(remember_width와 같은 모아 쓰기). 패널을 떠나거나
     # 내보내기 직전에는 기다리지 않고 바로 쓴다 — 마지막 글자가 빠진 채 내려받히지 않게.
     # 메모 칸은 위아래로 둘까지 나눌 수 있다(탭을 끌어 아래 절반에 놓으면) — panes가 칸마다 보이는 탭.
-    # pending은 탭 이름 → 아직 안 쓴 내용: 두 칸에서 번갈아 쳐도 각자 제 탭 파일로 간다.
+    # pending은 탭 이름 → (아직 안 쓴 내용, 보낸 편집기 id, capture가 받은 js 또는 None): 두 칸에서 번갈아
+    # 쳐도 각자 제 탭 파일로 간다. mem은 편집기 id → 얹을 때의 기록(raw·saved·stamp, notes_pick 참고) —
+    # 쓰기 전에 파일 지문이 stamp와 다르면(그 사이 바깥에서 바뀜) 덮지 않고 conflicts에 두고 묻는다.
     notes_state: dict = {"timer": None, "pending": {}, "status": None, "panes": [], "focus": 0,
-                         "ids": {}}  # ids: 편집기 컨테이너 id → 그 편집기가 맡은 탭 이름
+                         "ids": {},  # ids: 편집기 컨테이너 id → 그 편집기가 맡은 탭 이름
+                         "mem": {}, "conflicts": {}, "on_conflict": None}
+
+    def notes_write(tab: str, text: str, el_id: str | None, js: dict | None = None) -> bool:
+        """편집기 하나의 내용을 그 탭 파일에 — 고친 게 있을 때만, 바깥에서 바뀌지 않았을 때만. 실패면 False."""
+        mem = notes_state["mem"].get(el_id)
+        if mem is not None and (mem.get("dead") or notes_pick(text, mem, js) is None):
+            return True  # dead: '새로 불러오기'로 버린 편집기 — 늦게 오는 글자도 버린다(.trash에 있다)
+        try:
+            st = ctrl.save_notes(text, tab, expect=mem["stamp"] if mem is not None else notes_io.ANY)
+        except notes_io.Conflict:
+            notes_state["conflicts"][tab] = (text, el_id)
+            notes_set_status("다른 곳에서 바뀜 — 저장 안 함")
+            cb = notes_state["on_conflict"]
+            if cb is not None:
+                cb(tab)
+            else:
+                ui.notify(f"‘{tab}’ 메모가 다른 곳에서 바뀌어 저장하지 않았습니다.", type="warning")
+            return False
+        except OSError as e:
+            notes_set_status(f"저장 실패: {e}")
+            return False
+        if mem is not None:
+            mem["saved"], mem["stamp"] = text, st
+        return True
 
     def notes_flush() -> None:
         t = notes_state["timer"]
@@ -4233,21 +4299,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         pending, notes_state["pending"] = notes_state["pending"], {}
         if not pending:
             return
-        for tab, text in pending.items():
-            try:
-                ctrl.save_notes(text, tab)
-            except OSError as e:
-                notes_set_status(f"저장 실패: {e}")
-                return
-        notes_set_status("저장됨")
+        ok = True
+        for tab, (text, el_id, js) in pending.items():
+            ok = notes_write(tab, text, el_id, js) and ok
+        if ok:
+            notes_set_status("저장됨")
 
     def notes_set_status(text: str) -> None:
         lbl = notes_state["status"]
         if lbl is not None:
             lbl.set_text(text)
 
-    def notes_typed(tab: str, text: str) -> None:
-        notes_state["pending"][tab] = text  # 친 칸의 탭에 — 칸·탭을 바꿔도 섞이지 않게
+    def notes_typed(tab: str, text: str, el_id: str | None = None) -> None:
+        notes_state["pending"][tab] = (text, el_id, None)  # 친 칸의 탭에 — 칸·탭을 바꿔도 섞이지 않게
         notes_set_status("저장 중…")
         t = notes_state["timer"]
         if t is not None:
@@ -4859,8 +4923,6 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         마크다운을 받아 그 칸의 탭 파일에 쓰기만 한다. 탭을 끌어 메모 칸의 아래(위) 절반에 놓으면 칸이
         위아래로 나뉘어 두 메모를 함께 보며 쓴다 — 칸은 둘까지, 같은 탭은 한 칸에만. 탭을 누르면 마지막에
         만진 칸에 열린다. 칸 배치(어느 탭이 어디, 나눈 비율)와 보던 탭은 논문별로 기억한다."""
-        from md4paper import notes as notes_io
-
         tab_mem = state.setdefault("notes_tab_by_root", {})
         lay_mem = state.setdefault("notes_layout_by_root", {})
         names = ctrl.note_tabs()
@@ -4885,19 +4947,17 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             """지금 편집기들의 내용을 브라우저에서 바로 받아 저장한다 — 편집기를 갈아 끼우기 전에.
 
             편집기는 바뀐 내용을 0.2초 모아 보내는데, 그 사이에 편집기를 치우면(탭 전환) 마지막 글자가
-            영영 오지 않는다. 그래서 치우기 전에 getMarkdown()으로 직접 묻는다."""
+            영영 오지 않는다. 그래서 치우기 전에 getMarkdown()으로 직접 묻는다. 무엇을 쓸지는 notes_pick이
+            정한다 — 파일이 아니라 편집기를 얹을 때의 기준과 견줘, 고친 것만(준비 전·헛 빈 문자열은 건너뜀)."""
             ids = [q["el_id"] for q in panes if q["el_id"]]
             try:
-                got = await ui.run_javascript(
-                    "(function(ids){var C=window.__md4Crepes||{},o={};ids.forEach(function(id){"
-                    "try{if(C[id])o[id]=C[id].getMarkdown();}catch(e){}});return o;})(%s)" % json.dumps(ids),
-                    timeout=2.0)
+                got = await ui.run_javascript(NOTES_CAPTURE_JS % json.dumps(ids), timeout=2.0)
             except Exception:  # noqa: BLE001 — 응답이 없으면 이벤트로 온 것까지만
                 got = None
             for q in panes:
-                md = (got or {}).get(q["el_id"]) if isinstance(got, dict) else None
-                if isinstance(md, str) and md.strip() != ctrl.notes(q["tab"]).strip():
-                    notes_state["pending"][q["tab"]] = md
+                r = got.get(q["el_id"]) if isinstance(got, dict) else None
+                if isinstance(r, dict) and r.get("ready") is True and isinstance(r.get("md"), str):
+                    notes_state["pending"][q["tab"]] = (r["md"], q["el_id"], r)
             notes_flush()
 
         def mount(i: int) -> None:
@@ -4908,7 +4968,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ed = ui.element("div").classes("md4-notes-ed w-full")
             q["el_id"] = f"c{ed.id}"
             notes_state["ids"][q["el_id"]] = q["tab"]
-            ui.run_javascript(notes_editor_js(q["el_id"], ctrl.notes(q["tab"])))
+            text, st = notes_io.read_stamped(ctrl.wd, q["tab"])
+            notes_state["mem"][q["el_id"]] = {"raw": text, "saved": None, "stamp": st}
+            ui.run_javascript(notes_editor_js(q["el_id"], text))
 
         def where(name: str) -> int | None:
             return next((i for i, q in enumerate(panes) if q["tab"] == name), None)
@@ -5045,7 +5107,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 return
             with dlg_host, ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:360px"):
                 ui.label(f"‘{name}’ 메모를 지울까요?").classes("text-base font-medium")
-                ui.label("이 탭의 내용이 함께 지워지고 되돌릴 수 없습니다.").classes("text-sm text-gray-600")
+                ui.label("이 탭의 내용이 함께 지워집니다 — 지운 내용은 논문 폴더의 notes/.trash/에 한 벌 남습니다.") \
+                    .classes("text-sm text-gray-600")
                 with ui.row().classes("justify-end gap-2 w-full"):
                     ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
                     ui.button("지우기", on_click=lambda: (dlg.close(), do())) \
@@ -5161,12 +5224,77 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             if md is None:
                 return
             if any(q["el_id"] == el_id for q in panes):
-                notes_typed(tab, md)
+                notes_typed(tab, md, el_id)
             else:
+                notes_write(tab, md, el_id)
+
+        asking: set[str] = set()
+
+        def on_conflict(tab: str) -> None:
+            """편집기를 연 뒤 다른 곳(다른 창·외부 편집·복구)에서 메모 파일이 바뀌었다 — 덮지 않고 묻는다.
+            어느 쪽을 골라도 버려지는 쪽은 notes/.trash/에 한 벌 남는다."""
+            if tab in asking:
+                return  # 묻는 중에 더 친 글자는 conflicts에 최신으로 쌓인다
+            asking.add(tab)
+            kept = notes_state["conflicts"][tab][0]
+            notes_io.keep(ctrl.wd, tab, kept)  # 묻는 사이 창을 닫아도 이 창의 글은 남게
+
+            def latest() -> tuple[str, str | None] | None:
+                got = notes_state["conflicts"].pop(tab, None)
+                p = notes_state["pending"].get(tab)
+                if got is not None and p is not None and p[1] == got[1]:
+                    notes_state["pending"].pop(tab)
+                    got = (p[0], got[1])
+                return got
+
+            def remount(skip: str | None) -> None:
+                for i, q in enumerate(panes):
+                    if q["tab"] == tab and q["el_id"] != skip:
+                        mount(i)
+
+            def reload() -> None:
+                dlg.close()
+                asking.discard(tab)
+                got = latest()
+                if got is not None and got[0] != kept:
+                    notes_io.keep(ctrl.wd, tab, got[0])
+                ui.notify("이 창에서 쓴 내용은 논문 폴더의 notes/.trash/에 남겼습니다.", type="info")
+                for el_id, t in notes_state["ids"].items():
+                    if t == tab and el_id in notes_state["mem"]:
+                        notes_state["mem"][el_id]["dead"] = True
+                remount(None)
+                notes_set_status("저장됨")
+
+            def overwrite() -> None:
+                dlg.close()
+                asking.discard(tab)
+                got = latest()
+                if got is None:
+                    return
+                text, el_id = got
                 try:
-                    ctrl.save_notes(md, tab)
-                except OSError as ex:
-                    notes_set_status(f"저장 실패: {ex}")
+                    st = ctrl.save_notes(text, tab, keep_old=True)
+                except OSError as e:
+                    notes_set_status(f"저장 실패: {e}")
+                    return
+                mem = notes_state["mem"].get(el_id)
+                if mem is not None:
+                    mem["saved"], mem["stamp"] = text, st
+                remount(el_id)  # 다른 편집기에 옛 내용이 떠 있으면 새로
+                notes_set_status("저장됨")
+
+            with dlg_host, ui.dialog().props("persistent") as dlg, \
+                    ui.card().classes("gap-2").style("max-width:400px"):
+                ui.label(f"‘{tab}’ 메모가 다른 곳에서 바뀌었습니다").classes("text-base font-medium")
+                ui.label("이 편집기를 연 뒤 다른 창이나 프로그램이 이 메모 파일을 고쳤습니다. 이 창에서 쓴 "
+                         "내용은 아직 저장하지 않았습니다. 어느 쪽을 골라도 버려지는 쪽은 notes/.trash/에 "
+                         "한 벌 남습니다.").classes("text-sm text-gray-600")
+                with ui.row().classes("justify-end gap-2 w-full"):
+                    ui.button("새로 불러오기", on_click=reload).props("flat dense no-caps")
+                    ui.button("내 내용으로 덮기", on_click=overwrite).props("unelevated dense no-caps color=primary")
+            dlg.open()
+
+        notes_state["on_conflict"] = on_conflict
 
         with ui.row().classes("w-full items-center no-wrap gap-2 shrink-0"):
             ui.label("메모").classes("md4-panel-title")

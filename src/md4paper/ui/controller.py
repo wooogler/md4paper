@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry, GlossaryList, Manifest
 from md4paper.review import manifest as manifest_io
 from md4paper.workdir import WorkDir
@@ -559,11 +560,13 @@ class UIController:
 
         return notes.read(self.wd, tab or notes.tab_names(self.wd)[0])
 
-    def save_notes(self, text: str, tab: str | None = None) -> None:
-        """메모 패널의 자동 저장 — 원자적으로 쓰고, 비우면 파일을 지운다(빈 껍데기를 남기지 않게)."""
-        from md4paper import notes
-
-        notes.write(self.wd, tab or notes.tab_names(self.wd)[0], text)
+    def save_notes(self, text: str, tab: str | None = None, expect: object = notes_io.ANY,
+                   keep_old: bool = False) -> str | None:
+        """메모 패널의 자동 저장 — 원자적으로 쓰고, 비우면 파일을 지운다(빈 껍데기를 남기지 않게).
+        expect는 편집기를 얹을 때 받은 지문(notes.stamp) — 그 뒤 바깥에서 바뀌었으면 notes.Conflict.
+        지우거나 크게 줄일 때는 직전 내용이 notes/.trash/에 남는다. 새 지문을 돌려준다."""
+        return notes_io.write(self.wd, tab or notes_io.tab_names(self.wd)[0], text,
+                              expect=expect, keep_old=keep_old)
 
     def note_tabs(self) -> list[str]:
         from md4paper import notes
