@@ -2105,6 +2105,30 @@ _CHROME_CSS = """
 .md4-notetab:hover .md4-notetab-x { opacity: .6; }
 .md4-notetab-x:hover { opacity: 1 !important; background: rgba(55,53,47,.12); }
 .md4-notetab-add { flex: 0 0 auto; }
+.md4-notetab.shown { box-shadow: inset 0 0 0 1px rgba(55,53,47,.14); color: #37352f; }
+/* 메모 칸 — 하나면 꽉 채우고, 나뉘면 위아래(q-splitter). 탭을 끄는 동안만 위·아래 놓을 자리가 덮인다. */
+.md4-notestack { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.md4-notesplit { flex: 1 1 auto; min-height: 0; }
+.md4-notesplit > .q-splitter__panel { display: flex; flex-direction: column; min-height: 0; }
+.md4-notesplit > .q-splitter__separator { background: transparent; height: 9px !important; }
+.md4-notesplit > .q-splitter__separator::after { content: ""; position: absolute; left: 0; right: 0; top: 4px;
+  height: 1px; background: #e6e4e0; }
+.md4-notesplit > .q-splitter__separator:hover::after { background: #2383e2; height: 2px; }
+.md4-notepane { flex: 1 1 auto; min-height: 0; height: 100%; }
+.md4-notepane-head { flex: 0 0 auto; min-height: 20px; padding: 0 4px; }
+.md4-notepane-t { font-size: 12px; color: #9a968e; }
+.md4-notepane-t.on { color: #37352f; font-weight: 600; }
+.md4-notepane-x { color: #9a968e; cursor: pointer; border-radius: 3px; padding: 1px; }
+.md4-notepane-x:hover { color: #37352f; background: rgba(55,53,47,.1); }
+.md4-notepane-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.md4-notedrop { display: none; position: absolute; left: 0; right: 0; z-index: 5; align-items: center;
+  justify-content: center; font-size: 13px; color: #2383e2; background: rgba(35,131,226,.06);
+  border: 1.5px dashed rgba(35,131,226,.45); border-radius: 8px; }
+.md4-notedrop-top { top: 0; height: calc(50% - 3px); }
+.md4-notedrop-bottom { bottom: 0; height: calc(50% - 3px); }
+.md4-tabdrag .md4-notedrop { display: flex; }
+.md4-notedrop.hot { background: rgba(35,131,226,.16); border-color: #2383e2; }
+.md4-notedrop * { pointer-events: none; }
 .md4-notes-ed { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
   border-radius: 6px; background: #fbfaf9; }
 .md4-notes-ed .milkdown { min-height: 100%; display: flex; flex-direction: column;
@@ -4115,7 +4139,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 메모 패널 — 논문 전체에 대한 자유 메모(paper.md4/notes.md). 상태는 파일뿐이고 UI는 모델을 갖지 않는다.
     # 타자가 0.8초쯤 멈추면 원자적으로 저장한다(remember_width와 같은 모아 쓰기). 패널을 떠나거나
     # 내보내기 직전에는 기다리지 않고 바로 쓴다 — 마지막 글자가 빠진 채 내려받히지 않게.
-    notes_state: dict = {"timer": None, "pending": None, "status": None, "el_id": None, "tab": None,
+    # 메모 칸은 위아래로 둘까지 나눌 수 있다(탭을 끌어 아래 절반에 놓으면) — panes가 칸마다 보이는 탭.
+    # pending은 탭 이름 → 아직 안 쓴 내용: 두 칸에서 번갈아 쳐도 각자 제 탭 파일로 간다.
+    notes_state: dict = {"timer": None, "pending": {}, "status": None, "panes": [], "focus": 0,
                          "ids": {}}  # ids: 편집기 컨테이너 id → 그 편집기가 맡은 탭 이름
 
     def notes_flush() -> None:
@@ -4123,16 +4149,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if t is not None:
             t.cancel()
             notes_state["timer"] = None
-        pending = notes_state["pending"]
-        if pending is None:
+        pending, notes_state["pending"] = notes_state["pending"], {}
+        if not pending:
             return
-        notes_state["pending"] = None
-        tab, text = pending
-        try:
-            ctrl.save_notes(text, tab)
-        except OSError as e:
-            notes_set_status(f"저장 실패: {e}")
-            return
+        for tab, text in pending.items():
+            try:
+                ctrl.save_notes(text, tab)
+            except OSError as e:
+                notes_set_status(f"저장 실패: {e}")
+                return
         notes_set_status("저장됨")
 
     def notes_set_status(text: str) -> None:
@@ -4140,8 +4165,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if lbl is not None:
             lbl.set_text(text)
 
-    def notes_typed(text: str) -> None:
-        notes_state["pending"] = (notes_state["tab"], text)  # 쓰던 탭에 — 탭을 바꿔도 섞이지 않게
+    def notes_typed(tab: str, text: str) -> None:
+        notes_state["pending"][tab] = text  # 친 칸의 탭에 — 칸·탭을 바꿔도 섞이지 않게
         notes_set_status("저장 중…")
         t = notes_state["timer"]
         if t is not None:
@@ -4747,48 +4772,132 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         tick()
 
     def notes_panel() -> None:
-        """메모 패널 속 — 머리(제목 · 저장 상태) + 탭 줄 + 위지윅 편집기(Milkdown Crepe).
+        """메모 패널 속 — 머리(제목 · 저장 상태) + 탭 줄 + 위지윅 편집기(Milkdown Crepe) 한두 칸.
 
         탭 하나가 마크다운 파일 하나다(§md4paper/notes.py). 편집기는 브라우저에만 있고 파이썬은 바뀐
-        마크다운을 받아 지금 탭의 파일에 쓰기만 한다. 탭을 바꾸면 기다리던 저장을 먼저 끝내고 편집기를
-        그 탭 내용으로 새로 얹는다. 보던 탭은 논문별로 기억한다."""
+        마크다운을 받아 그 칸의 탭 파일에 쓰기만 한다. 탭을 끌어 메모 칸의 아래(위) 절반에 놓으면 칸이
+        위아래로 나뉘어 두 메모를 함께 보며 쓴다 — 칸은 둘까지, 같은 탭은 한 칸에만. 탭을 누르면 마지막에
+        만진 칸에 열린다. 칸 배치(어느 탭이 어디, 나눈 비율)와 보던 탭은 논문별로 기억한다."""
         from md4paper import notes as notes_io
 
         tab_mem = state.setdefault("notes_tab_by_root", {})
+        lay_mem = state.setdefault("notes_layout_by_root", {})
         names = ctrl.note_tabs()
-        notes_state["tab"] = tab_mem.get(root_key) if tab_mem.get(root_key) in names else names[0]
+        lay = lay_mem.get(root_key) or {}
+        tabs0 = [t for t in (lay.get("panes") or [tab_mem.get(root_key)]) if t in names]
+        tabs0 = list(dict.fromkeys(tabs0))[:2] or [names[0]]
+        notes_state["panes"] = [{"tab": t, "el_id": None, "box": None} for t in tabs0]
+        notes_state["focus"] = min(int(lay.get("focus") or 0), len(tabs0) - 1)
+        notes_state["ratio"] = float(lay.get("ratio") or 50)
+        panes = notes_state["panes"]
+
+        def remember() -> None:
+            f = notes_state["focus"]
+            lay_mem[root_key] = {"panes": [q["tab"] for q in panes], "focus": f, "ratio": notes_state["ratio"]}
+            tab_mem[root_key] = panes[f]["tab"]
 
         async def capture() -> None:
-            """지금 편집기의 내용을 브라우저에서 바로 받아 저장한다 — 편집기를 갈아 끼우기 전에.
+            """지금 편집기들의 내용을 브라우저에서 바로 받아 저장한다 — 편집기를 갈아 끼우기 전에.
 
             편집기는 바뀐 내용을 0.2초 모아 보내는데, 그 사이에 편집기를 치우면(탭 전환) 마지막 글자가
             영영 오지 않는다. 그래서 치우기 전에 getMarkdown()으로 직접 묻는다."""
-            el_id, tab = notes_state["el_id"], notes_state["tab"]
+            ids = [q["el_id"] for q in panes if q["el_id"]]
             try:
-                md = await ui.run_javascript(
-                    "(function(id){var c=(window.__md4Crepes||{})[id];"
-                    "try{return c?c.getMarkdown():null;}catch(e){return null;}})(%s)" % json.dumps(el_id),
+                got = await ui.run_javascript(
+                    "(function(ids){var C=window.__md4Crepes||{},o={};ids.forEach(function(id){"
+                    "try{if(C[id])o[id]=C[id].getMarkdown();}catch(e){}});return o;})(%s)" % json.dumps(ids),
                     timeout=2.0)
             except Exception:  # noqa: BLE001 — 응답이 없으면 이벤트로 온 것까지만
-                md = None
-            if isinstance(md, str) and md.strip() != ctrl.notes(tab).strip():
-                notes_state["pending"] = (tab, md)
+                got = None
+            for q in panes:
+                md = (got or {}).get(q["el_id"]) if isinstance(got, dict) else None
+                if isinstance(md, str) and md.strip() != ctrl.notes(q["tab"]).strip():
+                    notes_state["pending"][q["tab"]] = md
             notes_flush()
 
-        async def switch(name: str) -> None:
-            if name == notes_state["tab"]:
+        def mount(i: int) -> None:
+            """i번째 칸에 편집기를 새로 얹는다 (그 칸만 — 다른 칸은 쓰던 커서 그대로)."""
+            q = panes[i]
+            q["box"].clear()
+            with q["box"]:
+                ed = ui.element("div").classes("md4-notes-ed w-full")
+            q["el_id"] = f"c{ed.id}"
+            notes_state["ids"][q["el_id"]] = q["tab"]
+            ui.run_javascript(notes_editor_js(q["el_id"], ctrl.notes(q["tab"])))
+
+        def where(name: str) -> int | None:
+            return next((i for i, q in enumerate(panes) if q["tab"] == name), None)
+
+        async def show(name: str, i: int | None = None) -> None:
+            """탭을 i번째 칸에 (없으면 마지막에 만진 칸). 이미 다른 칸에 있으면 그 칸으로 가거나(누르기),
+            두 칸의 탭을 맞바꾼다(끌어 놓기)."""
+            at = where(name)
+            if i is None:
+                if at is not None:
+                    notes_state["focus"] = at
+                    remember()
+                    note_tabs.refresh()
+                    return
+                i = notes_state["focus"]
+            if at == i:
                 return
             await capture()
-            notes_state["tab"] = tab_mem[root_key] = name
+            if at is not None:          # 다른 칸에 떠 있던 탭 → 두 칸을 맞바꾼다
+                panes[at]["tab"], panes[i]["tab"] = panes[i]["tab"], name
+                mount(at)
+            else:
+                panes[i]["tab"] = name
+            notes_state["focus"] = i
+            remember()
+            mount(i)
             note_tabs.refresh()
-            note_editor.refresh()
+            note_heads.refresh()
+
+        async def drop(name: str, zone: str) -> None:
+            """탭을 메모 칸에 끌어 놓았다 — zone 'top'/'bottom'. 한 칸일 때 아래에 놓으면 칸이 나뉜다."""
+            names = ctrl.note_tabs()
+            if name not in names:
+                return
+            if len(panes) == 1:
+                if zone == "top":
+                    await show(name, 0)
+                    return
+                if panes[0]["tab"] == name:   # 보던 탭을 아래로 → 위 칸에는 다른 탭을
+                    others = [n for n in names if n != name]
+                    if not others:
+                        ui.notify("탭이 하나뿐이라 나눌 수 없습니다 — + 로 탭을 하나 더 만드세요.", type="info")
+                        return
+                    await capture()
+                    panes[0]["tab"] = others[0]
+                else:
+                    await capture()
+                panes.append({"tab": name, "el_id": None, "box": None})
+                notes_state["focus"] = 1
+                remember()
+                note_tabs.refresh()
+                note_layout.refresh()
+                return
+            await show(name, 0 if zone == "top" else 1)
+
+        async def close_pane(i: int) -> None:
+            if len(panes) < 2:
+                return
+            await capture()
+            panes.pop(i)
+            notes_state["focus"] = 0
+            remember()
+            note_tabs.refresh()
+            note_layout.refresh()
 
         async def add_tab() -> None:
             await capture()
             name = notes_io.add(ctrl.wd)
-            notes_state["tab"] = tab_mem[root_key] = name
+            i = notes_state["focus"]
+            panes[i]["tab"] = name
+            remember()
+            mount(i)
             note_tabs.refresh()
-            note_editor.refresh()
+            note_heads.refresh()
             rename_dialog(name)  # 만들자마자 이름부터 — '메모 2'로 두고 싶으면 그대로 Enter
 
         def rename_dialog(name: str) -> None:
@@ -4801,13 +4910,16 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 def apply() -> None:
                     notes_flush()
                     new = notes_io.rename(ctrl.wd, name, inp.value or "")
-                    if notes_state["tab"] == name:
-                        notes_state["tab"] = tab_mem[root_key] = new
+                    for q in panes:
+                        if q["tab"] == name:
+                            q["tab"] = new
                     for k, v in notes_state["ids"].items():  # 늦게 오는 이벤트도 새 이름의 탭으로
                         if v == name:
                             notes_state["ids"][k] = new
+                    remember()
                     dlg.close()
                     note_tabs.refresh()
+                    note_heads.refresh()
 
                 inp.on("keydown.enter", apply)
                 with ui.row().classes("justify-end gap-2 w-full"):
@@ -4819,12 +4931,22 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             def do() -> None:
                 notes_flush()
                 left = notes_io.remove(ctrl.wd, name)
-                if notes_state["tab"] == name or notes_state["tab"] not in left:
-                    notes_state["tab"] = tab_mem[root_key] = left[0]
-                    note_editor.refresh()
+                at = where(name)
+                if at is not None:
+                    if len(panes) > 1:      # 나뉜 칸에 떠 있던 탭 → 그 칸을 닫는다
+                        panes.pop(at)
+                        notes_state["focus"] = 0
+                        remember()
+                        note_tabs.refresh()
+                        note_layout.refresh()
+                        return
+                    panes[0]["tab"] = left[0]
+                    remember()
+                    mount(0)
+                    note_heads.refresh()
                 note_tabs.refresh()
 
-            if notes_state["tab"] == name:
+            if where(name) is not None:
                 await capture()  # 지금 쓰던 글자까지 따져 보고 묻는다
             if not ctrl.notes(name).strip():
                 do()
@@ -4838,30 +4960,95 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         .props("unelevated dense no-caps color=negative")
             dlg.open()
 
+        # 끌기: 탭의 dragstart가 패널에 md4-tabdrag를 붙이면 메모 칸 위에 '위 / 아래' 놓을 자리가 뜬다.
+        _drag_start = ("(e) => { e.dataTransfer.setData('text/x-md4tab', e.currentTarget.dataset.tab);"
+                       " e.dataTransfer.effectAllowed = 'move';"
+                       " e.currentTarget.closest('.md4-notes').classList.add('md4-tabdrag'); }")
+        _drag_end = "(e) => { document.querySelectorAll('.md4-tabdrag').forEach(x => x.classList.remove('md4-tabdrag')); }"
+
         @ui.refreshable
         def note_tabs() -> None:
             names = ctrl.note_tabs()
+            shown = {q["tab"]: i for i, q in enumerate(panes)}
             with ui.row().classes("w-full items-center no-wrap gap-1 md4-notetabs"):
                 for name in names:
-                    on = name == notes_state["tab"]
-                    tab = ui.element("div").classes("md4-notetab" + (" on" if on else ""))
+                    i = shown.get(name)
+                    cls = "md4-notetab"
+                    if i is not None:
+                        cls += " on" if i == notes_state["focus"] else " shown"
+                    tab = ui.element("div").classes(cls)
+                    tab._props.update({"draggable": "true", "data-tab": name})  # 이름에 공백이 있어도 그대로
                     with tab:
                         ui.label(name).classes("md4-notetab-t")
                         if len(names) > 1:
                             x = ui.icon("close", size="12px").classes("md4-notetab-x")
                             x.on("click.stop", lambda _, n=name: remove_tab(n))
-                    tab.on("click", lambda _, n=name: switch(n))
+                    tab.on("click", lambda _, n=name: show(n))
                     tab.on("dblclick", lambda _, n=name: rename_dialog(n))
-                    tab.tooltip("더블클릭하면 이름 바꾸기")
+                    tab.on("dragstart", js_handler=_drag_start)
+                    tab.on("dragend", js_handler=_drag_end)
+                    tab.tooltip("더블클릭하면 이름 바꾸기 · 메모 칸 아래쪽으로 끌어 놓으면 위아래로 나눠 보기")
                 ui.button(icon="add", on_click=add_tab).props("flat dense round size=xs color=grey-7") \
                     .classes("md4-notetab-add").tooltip("메모 탭 추가")
 
         @ui.refreshable
-        def note_editor() -> None:
-            box = ui.element("div").classes("md4-notes-ed w-full")
-            notes_state["el_id"] = f"c{box.id}"
-            notes_state["ids"][notes_state["el_id"]] = notes_state["tab"]
-            ui.run_javascript(notes_editor_js(notes_state["el_id"], ctrl.notes(notes_state["tab"])))
+        def note_heads() -> None:
+            """나뉜 칸마다 위에 붙는 작은 이름표 — 어느 칸이 어느 탭인지, ×로 그 칸 닫기."""
+            for i, q in enumerate(panes):
+                head = q.get("head")
+                if head is None:
+                    continue
+                head.clear()
+                with head:
+                    ui.label(q["tab"]).classes("md4-notepane-t" + (" on" if i == notes_state["focus"] else ""))
+                    ui.space()
+                    ui.icon("close", size="13px").classes("md4-notepane-x") \
+                        .on("click", lambda _, k=i: close_pane(k))
+
+        def focus_pane(i: int) -> None:
+            if notes_state["focus"] != i and i < len(panes):
+                notes_state["focus"] = i
+                remember()
+                note_tabs.refresh()
+                note_heads.refresh()
+
+        def drop_zone(zone: str, label: str) -> None:
+            z = ui.element("div").classes(f"md4-notedrop md4-notedrop-{zone}")
+            with z:
+                ui.label(label)
+            z.on("dragover", js_handler="(e) => { e.preventDefault(); e.currentTarget.classList.add('hot'); }")
+            z.on("dragleave", js_handler="(e) => e.currentTarget.classList.remove('hot')")
+            z.on("drop", js_handler="(e) => { e.preventDefault(); e.currentTarget.classList.remove('hot');"
+                                     " document.querySelectorAll('.md4-tabdrag').forEach(x => x.classList.remove('md4-tabdrag'));"
+                                     " emit(e.dataTransfer.getData('text/x-md4tab')); }",
+                 handler=lambda e, zn=zone: drop(e.args, zn) if isinstance(e.args, str) else None)
+
+        def pane_box(i: int, split: bool) -> None:
+            with ui.column().classes("w-full gap-1 md4-notepane no-wrap") as col:
+                panes[i]["head"] = ui.row().classes("w-full items-center no-wrap md4-notepane-head") if split else None
+                panes[i]["box"] = ui.element("div").classes("md4-notepane-body w-full")
+            col.on("mousedown", lambda _, k=i: focus_pane(k))
+            mount(i)
+
+        def on_ratio(e) -> None:  # noqa: ANN001
+            notes_state["ratio"] = float(e.value)
+            remember()
+
+        @ui.refreshable
+        def note_layout() -> None:
+            with ui.element("div").classes("md4-notestack w-full"):
+                if len(panes) == 1:
+                    pane_box(0, False)
+                else:
+                    with ui.splitter(horizontal=True, value=notes_state["ratio"], limits=(15, 85),
+                                     on_change=on_ratio).classes("md4-notesplit w-full") as sp:
+                        with sp.before:
+                            pane_box(0, True)
+                        with sp.after:
+                            pane_box(1, True)
+                    note_heads()
+                drop_zone("top", "위 칸에 열기")
+                drop_zone("bottom", "아래 칸에 열기" if len(panes) > 1 else "아래로 나눠 열기")
 
         def on_notes(e) -> None:  # noqa: ANN001 — GenericEventArguments
             # 편집기는 바뀐 내용을 0.2초 모아 보내므로, 치자마자 탭을 바꾸면 옛 편집기의 마지막 글자가
@@ -4871,8 +5058,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             md = notes_event_text(e.args, el_id) if tab is not None else None
             if md is None:
                 return
-            if el_id == notes_state["el_id"]:
-                notes_typed(md)
+            if any(q["el_id"] == el_id for q in panes):
+                notes_typed(tab, md)
             else:
                 try:
                     ctrl.save_notes(md, tab)
@@ -4884,7 +5071,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             notes_state["status"] = ui.label("저장됨").classes("md4-notes-status")
             dlg_host = ui.element("div").style("display:none")  # 탭 이름 바꾸기·지우기 대화상자 자리
         note_tabs()
-        note_editor()
+        note_layout()
         ui.on("md4-notes", on_notes)
 
     # ===== 본문: 레일 + (작업 패널 | 캔버스) =====
