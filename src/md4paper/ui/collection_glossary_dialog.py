@@ -306,7 +306,7 @@ def open_collection_glossary(state: dict, pid: str, *, on_change: Callable[[], N
             head()
             ui.space()
             ui.button(icon="close", on_click=dlg.close).props("flat dense round")
-        ui.label("소속 논문 모두에 논문 용어집보다 우선 적용됩니다. 고치면 그 용어가 나오는 섹션이 '원문 바뀜'이 "
+        ui.label("이 컬렉션이 주 컬렉션인 논문 모두에 논문 용어집보다 우선 적용됩니다(여러 컬렉션에 속한 논문은 첫 소속만). 고치면 그 용어가 나오는 섹션이 '원문 바뀜'이 "
                  "되어 다음 번역 때 다시 번역됩니다.").classes("text-xs text-gray-600 shrink-0")
         with ui.tabs().props("dense no-caps align=left").classes("w-full shrink-0") as tabs:
             ui.tab("gloss", "용어집", icon="menu_book")

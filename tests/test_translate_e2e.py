@@ -439,8 +439,8 @@ def test_collection_term_stales_only_units_that_use_it(long_paper):
     assert stale_section_ids(wd, m) == {_sid(wd, "Encoder Part")}
 
 
-def _plant_v2_cache(wd) -> None:
-    """지금 v3 캐시를 옛 v2 모양으로 — 논문 용어집으로 만든 v2 키 + 평문 해시 항목."""
+def _plain_chunks(wd) -> dict[str, str]:
+    """지금 v3 캐시의 항목을 옛(v2·v1) 모양 — 평문 `hash_text(원문)` 해시 — 으로."""
     import json
 
     from md4paper.review import manifest as manifest_io
@@ -448,7 +448,6 @@ def _plant_v2_cache(wd) -> None:
     from md4paper.workdir import hash_text
 
     m = manifest_io.load(wd)
-    paper = glossary.load(wd)
     stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
     eff = glossary.effective(wd)[0]
     plain: dict[str, str] = {}
@@ -457,8 +456,42 @@ def _plant_v2_cache(wd) -> None:
             hit = stored["chunks"].get(apply.unit_hash(text, eff))
             if hit is not None:
                 plain[hash_text(text)] = hit
-    _v3, v2 = apply._cache_keys(m.korean_style, paper, "gpt-5.6-luna", m)
-    wd.cache_json.write_text(json.dumps({"key": v2, "chunks": plain}, ensure_ascii=False), encoding="utf-8")
+    return plain
+
+
+def _plant_v2_cache(wd) -> None:
+    """지금 v3 캐시를 옛 v2 모양으로 — 논문 용어집으로 만든 v2 키 + 평문 해시 항목."""
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    m = manifest_io.load(wd)
+    _v3, v2 = apply._cache_keys(m.korean_style, glossary.load(wd), "gpt-5.6-luna", m)
+    wd.cache_json.write_text(json.dumps({"key": v2, "chunks": _plain_chunks(wd)}, ensure_ascii=False),
+                             encoding="utf-8")
+
+
+def _plant_v1_cache(wd, model: str = "gpt-5.6-luna") -> None:
+    """지금 v3 캐시를 더 옛 v1 모양으로 — v2 이전 코드처럼 키 = 시스템 프롬프트 전체 + 꼬리의 해시.
+
+    apply의 키 함수를 거치지 않고 옛 코드(`main`의 run_translate)와 같은 식으로 직접 만든다 —
+    apply가 v1 키를 다시 만드는 쪽이 옛 코드와 어긋나면 이 테스트들이 잡는다.
+    """
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, context, engine, glossary
+    from md4paper.workdir import hash_text
+
+    m = manifest_io.load(wd)
+    title, abstract = context.extract_context(wd, m)
+    outline = apply._build_outline(json.loads(wd.sections_map.read_text(encoding="utf-8"))["sections"])
+    prompt = engine.build_system_prompt(m.korean_style, glossary.load(wd), title, abstract, outline)
+    tail = f"{model}|headers={m.translate_headers}|refs={m.translate_references}"
+    wd.cache_json.write_text(
+        json.dumps({"key": hash_text(f"{prompt}|{tail}"), "chunks": _plain_chunks(wd)}, ensure_ascii=False),
+        encoding="utf-8")
 
 
 def test_v2_cache_is_read_and_upgraded_when_paper_glossary_unchanged(long_paper):
@@ -506,7 +539,11 @@ def test_v2_cache_rejects_only_units_whose_terms_the_collection_overrides(long_p
 
 
 def test_v2_cache_with_edited_paper_glossary_is_not_reused(long_paper):
-    """옛 키가 지금 논문 용어집과 안 맞으면(그 뒤 논문 용어집을 고침) 예전처럼 전부 다시 번역 — 낡음은 빈 집합."""
+    """옛 키가 지금 논문 용어집과 안 맞으면(그 뒤 논문 용어집을 고침) 예전처럼 전부 다시 번역 — 낡음은 빈 집합.
+
+    `glossary.save`는 저장 전에 캐시를 v3로 옮기므로, 여기서는 그 길을 거치지 않은 편집(파일을 직접
+    고침)을 `glossary.dump`로 흉내 낸다.
+    """
     from md4paper.review import manifest as manifest_io
     from md4paper.translate import apply, glossary
 
@@ -514,7 +551,8 @@ def test_v2_cache_with_edited_paper_glossary_is_not_reused(long_paper):
     calls, fake = _counting()
     pipeline.run_translate(wd, fake)
     _plant_v2_cache(wd)
-    glossary.save(GlossaryList(entries=[*glossary.load(wd).entries, _entry("plain", "평범")]), wd)
+    glossary.dump(GlossaryList(entries=[*glossary.load(wd).entries, _entry("plain", "평범")]),
+                  wd.glossary_yaml)
     assert apply.stale_section_ids(wd, manifest_io.load(wd)) == set()
     before = calls["n"]
     pipeline.run_translate(wd, fake)
@@ -536,9 +574,11 @@ def test_retranslate_units_counts_full_retranslation_when_cache_is_unusable(long
              if u["translatable"] and u["sids"]]
     assert len(every) == 3
 
-    # (b) 옛 v2 캐시 + 그 뒤 논문 용어집 변경 → 키 불일치(status.json에 지난 모델 기록이 있다)
+    # (b) 옛 v2 캐시 + 그 뒤 논문 용어집 변경(save를 거치지 않아 이행 없음) → 키 불일치
+    #     (status.json에 지난 모델 기록이 있다)
     _plant_v2_cache(wd)
-    glossary.save(GlossaryList(entries=[*glossary.load(wd).entries, _entry("plain", "평범")]), wd)
+    glossary.dump(GlossaryList(entries=[*glossary.load(wd).entries, _entry("plain", "평범")]),
+                  wd.glossary_yaml)
     assert apply.stale_units(wd, m) == []  # '원문 바뀜'은 그대로 — 원문이 바뀐 게 아니다
     units, full = apply.retranslate_units(wd, m)
     assert full and [u["sids"] for u in units] == [u["sids"] for u in every]
@@ -556,6 +596,217 @@ def test_retranslate_units_counts_full_retranslation_when_cache_is_unusable(long
     # (d) ko.md가 없으면 '번역 없음' — 캐시가 없어도 재번역으로 세지 않는다
     wd.ko_md.unlink()
     assert apply.retranslate_units(wd, m) == ([], False)
+
+
+def test_v1_cache_is_read_and_upgraded_when_paper_glossary_unchanged(long_paper):
+    """시스템 프롬프트 해시 키(v1) 캐시 — 논문 용어집이 그대로면 전부 적중하고 저장 뒤 v3가 된다."""
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply
+
+    wd, _pid = long_paper
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _plant_v1_cache(wd)
+    m = manifest_io.load(wd)
+    assert apply.stale_section_ids(wd, m) == set()
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+    before = calls["n"]
+    summary = pipeline.run_translate(wd, fake)
+    assert calls["n"] == before and summary["cached"] == summary["chunks"] == 3
+    stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
+    assert stored["scheme"] == 3
+    assert apply.stale_section_ids(wd, m) == set()
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+
+def test_v1_cache_rejects_only_units_whose_terms_the_collection_overrides(long_paper):
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, pid = long_paper
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _plant_v1_cache(wd)
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("encoder", "부호기")]))
+    m = manifest_io.load(wd)
+    assert apply.stale_section_ids(wd, m) == {_sid(wd, "Encoder Part")}
+    units, full = apply.retranslate_units(wd, m)
+    assert not full and [u["sids"][-1] for u in units] == [_sid(wd, "Encoder Part")]
+
+    before = calls["n"]
+    summary = pipeline.run_translate(wd, fake)
+    assert calls["n"] == before + 1 and summary["cached"] == 2
+    assert apply.stale_section_ids(wd, m) == set()
+
+
+def test_stored_v1_cache_is_checked_against_the_recorded_model(long_paper):
+    """모델 기록이 있으면 v1 키도 그 모델로 맞춰 본다 — 맞으면 옛 모드, 다른 모델의 캐시면 못 씀(full)."""
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply
+
+    wd, _pid = long_paper
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    assert wd.load_status()["translate"]["model"] == "gpt-5.6-luna"
+    m = manifest_io.load(wd)
+
+    _plant_v1_cache(wd)
+    cache = apply._stored_cache(wd, m, None)
+    assert cache is not None and cache.legacy is not None
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+    _plant_v1_cache(wd, model="gpt-6-luna")  # 기록(5.6-luna)과 다른 모델로 만든 옛 캐시
+    assert apply._stored_cache(wd, m, None) is None
+    units, full = apply.retranslate_units(wd, m)
+    assert full and len(units) == 3
+
+
+@pytest.mark.parametrize("plant", [_plant_v1_cache, _plant_v2_cache])
+def test_saving_paper_glossary_migrates_old_cache_first(long_paper, plant):
+    """논문 용어집을 고쳐 저장하면 먼저 캐시가 v3로 옮겨져, 고친 용어가 나오는 유닛만 다시 번역된다."""
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, _pid = long_paper
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    plant(wd)
+    m = manifest_io.load(wd)
+    # 'inputs'는 Encoder Part에만 나온다
+    glossary.save(GlossaryList(entries=[*glossary.load(wd).entries, _entry("inputs", "입력")]), wd)
+    stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
+    assert stored["scheme"] == 3
+    assert stored["key"] == apply._cache_keys(m.korean_style, glossary.load(wd), "gpt-5.6-luna", m)[0]
+    units, full = apply.retranslate_units(wd, m)
+    assert not full and [u["sids"][-1] for u in units] == [_sid(wd, "Encoder Part")]
+
+    before = calls["n"]
+    summary = pipeline.run_translate(wd, fake)
+    assert calls["n"] == before + 1 and summary["cached"] == 2
+    assert apply.migrate_cache(wd) is False  # 이미 v3 — 할 일 없음
+
+
+def test_migrate_cache_without_model_record_uses_default_model(long_paper):
+    """모델 기록도 input_hash도 없는 옛 번역은 뷰어 기본값과 같은 규칙(전역 기본 모델·manifest 문체)으로."""
+    import json
+
+    from md4paper import config
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, _pid = long_paper
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    model = config.resolve_model(config.resolve_provider())
+    _plant_v1_cache(wd, model=model)
+    status = wd.load_status()
+    status["translate"] = {k: v for k, v in status["translate"].items()
+                           if k not in ("model", "provider", "input_hash")}
+    wd.save_status(status)
+    m = manifest_io.load(wd)
+    assert pipeline.recover_translate_model(wd) is None
+    assert apply.migrate_cache(wd) is True
+    stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
+    assert stored["key"] == apply._cache_keys(m.korean_style, glossary.load(wd), model, m)[0]
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+    wd.cache_json.unlink()
+    assert apply.migrate_cache(wd) is False  # 캐시 없음
+
+
+def _forget_model_record(wd) -> None:
+    """모델 기록 전의 번역처럼 — status.json translate에서 provider·model만 지우고 input_hash는 남긴다."""
+    status = wd.load_status()
+    status["translate"] = {k: v for k, v in status["translate"].items() if k not in ("model", "provider")}
+    wd.save_status(status)
+
+
+def test_model_is_recovered_from_input_hash_without_record(long_paper):
+    """모델 기록이 없어도 input_hash(`문체:모델`)로 되찾아 옛 키를 맞춰 본다 — 판정·이행·기본 모델이 같은 모델로."""
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+    from md4paper.ui import translate_job
+    from md4paper.ui.controller import UIController
+
+    wd, pid = long_paper
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _forget_model_record(wd)
+    m = manifest_io.load(wd)
+    assert pipeline.last_translate_model(wd) is None  # 명시 기록은 그대로 '없음'
+    assert pipeline.recover_translate_model(wd, m) == ("openai", "gpt-5.6-luna")
+    assert pipeline.recover_translate(wd) == ("openai", "gpt-5.6-luna", m.korean_style)
+    assert translate_job.default_model(wd) == "openai/gpt-5.6-luna"
+    assert UIController(wd).translate_model() == "openai/gpt-5.6-luna"
+
+    _plant_v1_cache(wd)  # 5.6-luna로 만든 v1 — 되찾은 모델과 맞는다
+    cache = apply._stored_cache(wd, m, None)
+    assert cache is not None and cache.legacy is not None
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+    _plant_v1_cache(wd, model="gpt-6-luna")  # 되찾은 모델과 다른 모델의 캐시 → 못 씀
+    assert apply._stored_cache(wd, m, None) is None
+    units, full = apply.retranslate_units(wd, m)
+    assert full and len(units) == 3
+    assert apply.migrate_cache(wd) is False
+
+    _plant_v1_cache(wd)
+    assert apply.migrate_cache(wd) is True
+    stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
+    assert stored["key"] == apply._cache_keys(m.korean_style, glossary.load(wd), "gpt-5.6-luna", m)[0]
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("recurrence", "순환")]))
+    assert [r["model"] for r in glossary.impact(pid, wd.root.parent)] == ["gpt-5.6-luna"]
+
+
+def test_recover_translate_model_misses_unknown_combinations(long_paper):
+    wd, _pid = long_paper
+    assert pipeline.recover_translate_model(wd) is None  # 번역 기록 없음
+    status = wd.load_status()
+    status["translate"] = {"input_hash": "0000000000000000", "done": True, "style": "해라체"}
+    wd.save_status(status)
+    assert pipeline.recover_translate_model(wd) is None  # 목록 밖 모델·custom 문체 — 못 찾는다
+
+
+def test_non_primary_member_is_left_out_of_impact(long_paper):
+    """둘째 자리로만 속한 컬렉션의 용어집은 적용되지 않으니, 그 컬렉션의 영향 미리보기에도 안 든다."""
+    from md4paper import projects, workdir
+    from md4paper.translate import glossary
+
+    wd, pid = long_paper
+    ws = wd.root.parent
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    first = projects.create("Primary")["id"]
+    workdir.set_projects(wd.root, [first, pid])
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("recurrence", "순환")]))
+    assert glossary.members(pid, ws) == [] and glossary.impact(pid, ws) == []
+    glossary.save_collection(first, GlossaryList(entries=[_entry("recurrence", "순환")]))
+    assert [r["root"] for r in glossary.impact(first, ws)] == [wd.root]
+
+
+def test_relevant_lines_match_at_word_start_and_are_sorted():
+    from md4paper.translate.apply import relevant_lines, unit_hash
+
+    edge = GlossaryList(entries=[_entry("edge", "엣지")])
+    assert relevant_lines(edge, "Prior knowledge matters.") == ""  # knowledge 안의 edge는 아니다
+    assert relevant_lines(edge, "An edge-case.") != ""
+    ai = GlossaryList(entries=[_entry("AI", "인공지능")])
+    assert relevant_lines(ai, "As she said.") == "" and relevant_lines(ai, "(AI) tools") != ""
+    model = GlossaryList(entries=[_entry("model", "모델")])
+    assert relevant_lines(model, "Two language models.") != ""  # 뒤 경계는 안 본다 — 복수형도 잡힘
+
+    text = "The encoder and the decoder of the model."
+    a = GlossaryList(entries=[_entry("encoder", "인코더"), _entry("decoder", "디코더"), _entry("model", "모델")])
+    b = GlossaryList(entries=list(reversed(a.entries)))
+    assert relevant_lines(a, text) == relevant_lines(b, text)
+    assert unit_hash(text, a) == unit_hash(text, b)
 
 
 def test_unit_hash_is_plain_without_relevant_terms():

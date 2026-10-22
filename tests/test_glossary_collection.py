@@ -114,7 +114,7 @@ def test_collection_entries_by_paper_and_projects_delete_cleans_file(tmp_path):
     other = projects.create("다른")["id"]
     a = _paper(tmp_path, "a", [_e("encoder", "인코더")], pids=[pid])
     _paper(tmp_path, "b", None, pids=[pid])  # 용어집 없음 → 건너뜀
-    c = _paper(tmp_path, "c", [_e("encoder", "부호기")], pids=[other, pid])  # 주 컬렉션이 아니어도 소속
+    c = _paper(tmp_path, "c", [_e("encoder", "부호기")], pids=[pid, other])  # 주 컬렉션이 이것
     _paper(tmp_path, "d", [_e("encoder", "엔코더")], pids=[other])
     got = glossary.collection_entries_by_paper(pid, tmp_path / "ws")
     assert set(got) == {a.root, c.root}
@@ -124,3 +124,19 @@ def test_collection_entries_by_paper_and_projects_delete_cleans_file(tmp_path):
     assert projects.delete(pid, tmp_path / "ws")
     assert not glossary.collection_path(pid).exists()
     assert projects.delete("p-없는-것") is False  # 파일이 없어도 조용히
+
+
+def test_members_counts_only_papers_whose_primary_collection_it_is(tmp_path):
+    """둘째 자리로만 속한 논문은 그 컬렉션의 members·충돌에 안 든다 — 번역엔 주 컬렉션 용어집만 적용된다."""
+    first = projects.create("첫째")["id"]
+    second = projects.create("둘째")["id"]
+    a = _paper(tmp_path, "a", [_e("encoder", "인코더")], pids=[second])
+    both = _paper(tmp_path, "b", [_e("encoder", "부호기")], pids=[first, second])  # 주 = 첫째
+    ws = tmp_path / "ws"
+    assert [r["root"] for r in glossary.members(second, ws)] == [a.root]
+    assert set(glossary.collection_entries_by_paper(second, ws)) == {a.root}
+    assert glossary.conflicts(glossary.collection_entries_by_paper(second, ws)) == []  # 부호기는 안 셈
+    assert [r["root"] for r in glossary.members(first, ws)] == [both.root]
+    # 둘째 컬렉션 용어집은 그 논문에 적용되지 않는다 — 그래서 members에서도 뺀다
+    glossary.save_collection(second, GlossaryList(entries=[_e("encoder", "엔코더")]))
+    assert glossary.effective(both)[0].entries[0].korean == "부호기"

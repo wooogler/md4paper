@@ -709,7 +709,7 @@ class UIController:
         """번역 모델 드롭다운의 기본값 'provider/model' — 이 논문을 마지막에 번역한 모델, 없으면 전역 기본."""
         from md4paper import config, pipeline
 
-        last = pipeline.last_translate_model(self.wd)
+        last = pipeline.last_translate_model(self.wd) or pipeline.recover_translate_model(self.wd, self.manifest)
         if last is not None:
             return "/".join(last)
         provider = config.resolve_provider()

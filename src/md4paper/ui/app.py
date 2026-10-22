@@ -4182,9 +4182,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     ui.space()
                     ui.button("컬렉션 용어집 열기…", icon="open_in_new", on_click=open_collection_dialog) \
                         .props("flat dense no-caps color=primary").classes("shrink-0") \
-                        .tooltip("소속 논문 모두에 적용되는 용어집 — 논문들이 어긋나게 쓴 번역어를 여기서 통일합니다")
+                        .tooltip("주 컬렉션이 이 컬렉션인 논문 모두에 적용되는 용어집 — 논문들이 어긋나게 쓴 번역어를 여기서 통일합니다")
                 if not entries:
-                    ui.label("소속 논문들의 용어집에서 어긋난 번역어를 골라 통일하면 이 논문 번역에도 적용됩니다.") \
+                    ui.label("이 컬렉션 논문들의 용어집에서 어긋난 번역어를 골라 통일하면 이 논문 번역에도 적용됩니다.") \
                         .classes("text-xs text-gray-500")
                     return
                 with ui.column().classes("w-full gap-0 md4-scroll").style("max-height:28vh; overflow-y:auto"):

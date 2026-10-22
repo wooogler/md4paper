@@ -86,7 +86,7 @@ def _full_note(full: int) -> str:
 
 async def glossary_conflicts(ctx: RunContext[Deps], collection: str, offset: int = 0,
                              limit: int = CONFLICT_LIMIT_DEFAULT, shared: bool = False) -> str:
-    """컬렉션 소속 논문들의 용어집을 모아, 논문마다 번역어·policy가 **어긋난 용어**를 돌려준다.
+    """주 컬렉션이 이 컬렉션인 논문들의 용어집을 모아, 논문마다 번역어·policy가 **어긋난 용어**를 돌려준다.
 
     컬렉션 용어 통일의 첫 단계다. 용어는 대소문자·공백 차이를 무시하고 묶는다. 각 줄은
     `- 용어: 번역어A(policy) ×3편 [token, …] | 번역어B(policy) ×1편 [token]` — 변이는 쓴 논문 수

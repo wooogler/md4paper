@@ -100,6 +100,18 @@ def load_path(path: Path) -> GlossaryList:
 
 
 def save(gloss: GlossaryList, wd: WorkDir) -> None:
+    """논문 용어집 저장 — 쓰기 전에 그 논문의 번역 캐시를 v3로 옮겨 둔다(`apply.migrate_cache`).
+
+    옛(v2·v1) 캐시 키는 논문 용어집을 품고 있어, 고친 뒤에는 안 맞아 그 논문이 통째로 다시 번역된다.
+    여기서 옮기면 뷰어 자동 저장·용어 추출·CLI 편집·용어집 재생성이 모두 저장 전에 이행된다. 이행이
+    실패해도 용어집 저장은 해야 하므로 예외는 삼킨다(그때는 예전처럼 다음 번역이 전부 다시 돈다).
+    """
+    try:
+        from md4paper.translate import apply  # 순환 import 피하기 (apply → glossary)
+
+        apply.migrate_cache(wd)
+    except Exception:  # noqa: BLE001 — 캐시 이행은 덤이다; 용어집 저장을 막으면 안 된다
+        pass
     dump(gloss, wd.glossary_yaml)
 
 
@@ -301,20 +313,29 @@ def shared(by_paper: Mapping[Hashable, list[GlossaryEntry]], min_papers: int = 2
 
 
 def members(pid: str, workspace: Path) -> list[dict]:
-    """작업 폴더에서 이 컬렉션에 속한 논문 행(recent_workdirs 행; 숨긴 논문은 빼고)."""
+    """작업 폴더에서 **주 컬렉션이 이 컬렉션인** 논문 행(recent_workdirs 행; 숨긴 논문은 빼고).
+
+    둘째 이후 자리로만 속한 논문은 뺀다: 번역에는 주 컬렉션의 용어집만 적용되므로(`effective`), 그런
+    논문을 충돌·영향·통일 대상에 넣으면 이 컬렉션 용어집으로 통일해도 실제로는 적용되지 않는다. 충돌
+    집계(`collection_entries_by_paper`)·영향 미리보기(`impact`)와 그 위의 CLI·에이전트 tool이 모두
+    이것을 쓴다.
+    """
     from md4paper import projects
     from md4paper.workdir import recent_workdirs
 
-    return [row for row in recent_workdirs(Path(workspace), limit=100_000)
-            if pid in projects.normalize_many(row["projects"])]
+    def primary(row: dict) -> str:
+        ids = projects.normalize_many(row["projects"])
+        return ids[0] if ids else ""
+
+    return [row for row in recent_workdirs(Path(workspace), limit=100_000) if primary(row) == pid]
 
 
 def collection_entries_by_paper(pid: str, workspace: Path) -> dict[Path, list[GlossaryEntry]]:
-    """이 컬렉션 소속 논문들의 논문 용어집 — {논문 root(Path): 항목들}. 용어집이 없는 논문은 건너뛴다.
+    """주 컬렉션이 이 컬렉션인 논문들의 논문 용어집 — {논문 root(Path): 항목들}. 용어집 없는 논문은 뺀다.
 
     키는 token이 아니라 root Path다: token 규칙(경로 sha1 앞 12자리)은 ui 쪽(`app.wd_token`,
     `agent.tools.token_of`)에 있고 이 모듈이 ui를 import하면 안 된다 — 호출자가 token으로 바꾼다.
-    소속은 어느 위치든(주 컬렉션이 아니어도) 센다. 숨긴 논문은 목록에서처럼 뺀다.
+    다중 소속이면 주 컬렉션(소속 첫 항목)이 이 컬렉션일 때만 센다(`members`). 숨긴 논문은 목록에서처럼 뺀다.
     """
     out: dict[Path, list[GlossaryEntry]] = {}
     for row in members(pid, workspace):
@@ -331,15 +352,15 @@ _OUT_RATIO = 1.3        # 한국어 출력 토큰 ≈ 입력 × 1.3 (대략)
 def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | None = None) -> list[dict]:
     """컬렉션 용어집이 바뀌면 어느 논문의 어느 섹션이 다시 번역되고 대략 얼마가 드는지 (LLM 호출 없음).
 
-    소속 논문 중 번역(ko.md)이 있는 것마다 `apply.retranslate_units`(effective 용어집 반영)로 다시 번역될
-    유닛을 찾아 그 원문 글자 수 → 토큰(입력 ≈ 글자/3.5, 출력 ≈ 입력×1.3) → `PRICING`으로 비용을 어림한다.
+    주 컬렉션이 이 컬렉션인 논문(`members`) 중 번역(ko.md)이 있는 것마다 `apply.retranslate_units`
+    (effective 용어집 반영)로 다시 번역될 유닛을 찾아 그 원문 글자 수 → 토큰(입력 ≈ 글자/3.5, 출력 ≈ 입력×1.3) → `PRICING`으로 비용을 어림한다.
     시스템 프롬프트·재시도·프로바이더 캐시는 셈하지 않는다 — 승인 카드·대화상자가 '대략'을 보여 주는 용도.
     원문이 바뀐 섹션도 같은 판정에 걸리므로 함께 잡힌다(다음 번역에서 어차피 같이 다시 돈다). 보관된
     번역(캐시)을 통째로 못 쓰는 논문(캐시 파일 없음, 지난 번역 뒤 논문 용어집·모델·문체가 바뀐 옛 캐시)은
     `full=True` — stale은 번역 대상 섹션 전부, chars는 그 유닛 전체(다음 실행이 처음부터 다시 번역한다).
 
-    모델: `model_for(wd)`를 주면 그것, 아니면 그 논문을 마지막으로 번역한 모델(`last_translate_model`),
-    기록이 없으면 전역 기본. 반환 항목: {root, title, stale(섹션 id, 문서 순), units, chars, model,
+    모델: `model_for(wd)`를 주면 그것, 아니면 그 논문을 마지막으로 번역한 모델(`last_translate_model`,
+    기록이 없으면 input_hash로 되찾은 `recover_translate_model`), 그것도 없으면 전역 기본. 반환 항목: {root, title, stale(섹션 id, 문서 순), units, chars, model,
     est_cost_usd, full}. 다시 번역될 게 없는 논문은 뺀다.
     """
     from md4paper import config, pipeline
@@ -367,7 +388,7 @@ def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | N
         if model_for is not None:
             model = model_for(wd)
         else:
-            last = pipeline.last_translate_model(wd)
+            last = pipeline.last_translate_model(wd) or pipeline.recover_translate_model(wd, manifest)
             model = last[1] if last else config.resolve_model(config.resolve_provider())
         inp = int(chars / _CHARS_PER_TOKEN)
         cost = cost_usd(model, Usage(input_tokens=inp, output_tokens=int(inp * _OUT_RATIO)))

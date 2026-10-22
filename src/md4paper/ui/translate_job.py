@@ -73,10 +73,11 @@ def start(wd: WorkDir, provider, *, title: str = "", style: str | None = None) -
 
 
 def default_model(wd: WorkDir) -> str:
-    """'provider/model' — 이 논문을 마지막에 번역한 모델, 없으면 전역 기본 (뷰어 드롭다운 기본값과 같다)."""
+    """'provider/model' — 이 논문을 마지막에 번역한 모델(기록이 없으면 input_hash로 되찾은 것), 그것도
+    없으면 전역 기본 (뷰어 드롭다운 기본값과 같다)."""
     from md4paper import pipeline
 
-    last = pipeline.last_translate_model(wd)
+    last = pipeline.last_translate_model(wd) or pipeline.recover_translate_model(wd)
     if last is not None:
         return "/".join(last)
     prov = config.resolve_provider()

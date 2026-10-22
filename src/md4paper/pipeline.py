@@ -218,6 +218,55 @@ def last_translate_model(wd) -> tuple[str, str] | None:
     return entry["provider"], entry["model"]
 
 
+def _provider_of(model: str) -> str:
+    """모델 id → 제공사 이름. MODEL_TIERS에 있으면 그 제공사, 아니면 이름 접두로(구세대 모델)."""
+    from md4paper import config
+
+    for prov, tiers in config.MODEL_TIERS.items():
+        if model in tiers:
+            return prov
+    for prefix, prov in (("gpt", "openai"), ("claude", "anthropic"), ("gemini", "gemini")):
+        if model.startswith(prefix):
+            return prov
+    return ""
+
+
+def recover_translate(wd, manifest=None) -> tuple[str, str, str] | None:
+    """모델 기록 전의 번역에서 (프로바이더, 모델, 문체)를 되찾는다 — status.json의 `translate.input_hash`로.
+
+    `run_translate`는 예전부터 `hash_text(f"{문체}:{모델}")`를 input_hash로 남겼다(모델 이름을 따로
+    적기 시작한 건 나중이다). 알려진 모델(PRICING ∪ MODEL_TIERS ∪ DEFAULT_MODELS) × 문체 후보(기록된
+    문체, manifest 문체, 문체 모듈의 이름들)를 해시해 맞는 조합을 찾는다. custom 문체나 목록 밖 모델이면
+    못 찾는다(None). 명시 기록이 있으면 그쪽이 우선이다 — 호출자는 `last_translate_model`을 먼저 본다.
+    """
+    from md4paper import config
+    from md4paper.llm.base import PRICING
+    from md4paper.translate import style as style_mod
+
+    entry = wd.load_status().get("translate")
+    if not isinstance(entry, dict) or not entry.get("input_hash"):
+        return None
+    if manifest is None:
+        try:
+            manifest = manifest_io.load(wd)
+        except (OSError, ValueError):
+            manifest = None
+    styles = [entry.get("style"), getattr(manifest, "korean_style", None), *style_mod.names()]
+    models = [*config.DEFAULT_MODELS.values(),
+              *(m for tiers in config.MODEL_TIERS.values() for m in tiers), *PRICING]
+    for st in dict.fromkeys(x for x in styles if x):
+        for model in dict.fromkeys(models):
+            if hash_text(f"{st}:{model}") == entry["input_hash"]:
+                return _provider_of(model), model, st
+    return None
+
+
+def recover_translate_model(wd, manifest=None) -> tuple[str, str] | None:
+    """`recover_translate`의 (프로바이더, 모델) — `last_translate_model`이 None일 때의 다음 순서."""
+    got = recover_translate(wd, manifest)
+    return (got[0], got[1]) if got else None
+
+
 def convert(
     source: Path,
     wd: WorkDir,

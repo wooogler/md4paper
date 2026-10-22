@@ -30,7 +30,16 @@ def _is_dense_section(title: str) -> bool:
 
 
 def extract_context(wd: WorkDir, manifest: Manifest) -> tuple[str, str]:
-    """(제목, 초록 텍스트) 반환 + translate/context.md 기록.
+    """(제목, 초록 텍스트) 반환 + translate/context.md 기록."""
+    title, abstract = title_abstract(wd, manifest)
+    wd.translate.mkdir(parents=True, exist_ok=True)
+    wd.context_md.write_text(f"# {title}\n\n## Abstract\n\n{abstract}\n", encoding="utf-8")
+    return title, abstract
+
+
+def title_abstract(wd: WorkDir, manifest: Manifest) -> tuple[str, str]:
+    """(제목, 초록 텍스트) — 파일을 쓰지 않는 쪽. 번역 캐시의 옛 키(시스템 프롬프트 해시)를 다시 만드는
+    판정(뷰어 표시·영향 미리보기)이 논문 폴더를 건드리지 않게 따로 둔다.
 
     초록이 없으면 첫 본문 섹션 요약 대신 첫 몇 문단을 컨텍스트로 쓴다(LLM 호출 없이).
     """
@@ -48,10 +57,7 @@ def extract_context(wd: WorkDir, manifest: Manifest) -> tuple[str, str]:
         body = "\n".join(lines).strip()
         abstract = body[:1000]
 
-    title = manifest.title
-    wd.translate.mkdir(parents=True, exist_ok=True)
-    wd.context_md.write_text(f"# {title}\n\n## Abstract\n\n{abstract}\n", encoding="utf-8")
-    return title, abstract
+    return manifest.title, abstract
 
 
 def extract_glossary_source(wd: WorkDir, manifest: Manifest) -> str:

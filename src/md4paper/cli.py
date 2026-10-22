@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import os
 import subprocess
@@ -466,7 +467,7 @@ def _parse_set(spec: str):  # noqa: ANN202 — GlossaryEntry
 @project_group.command("glossary")
 @click.argument("name_or_id")
 @click.option("--conflicts", "show_conflicts", is_flag=True,
-              help="소속 논문 용어집에서 번역어·처리 방식이 어긋난 용어 (변이·편수)")
+              help="주 컬렉션이 이 컬렉션인 논문들의 용어집에서 어긋난 용어 (변이·편수)")
 @click.option("--shared", "show_shared", is_flag=True, help="어긋나지 않고 2편 이상이 같이 쓰는 용어 (올릴 후보)")
 @click.option("--impact", "show_impact", is_flag=True,
               help="다음 번역 때 다시 번역될 논문·섹션·대략 비용")
@@ -475,7 +476,7 @@ def _parse_set(spec: str):  # noqa: ANN202 — GlossaryEntry
               help="항목 넣기(여러 번 가능) — 같은 용어가 있으면 그 자리에서 바꾼다")
 def project_glossary(name_or_id: str, show_conflicts: bool, show_shared: bool, show_impact: bool,
                      edit: bool, sets: tuple[str, ...]) -> None:
-    """컬렉션 용어집 — 소속 논문 모두에 논문 용어집보다 우선 적용되는 용어 목록.
+    """컬렉션 용어집 — 주 컬렉션이 이 컬렉션인 논문 모두에 논문 용어집보다 우선 적용되는 용어 목록.
 
     \b
     옵션 없이 부르면 지금 용어집을 보여 준다. 고치면 그 용어가 나오는 섹션만 '원문 바뀜'이 되어
@@ -543,7 +544,7 @@ def project_glossary(name_or_id: str, show_conflicts: bool, show_shared: bool, s
 
     if not (sets or edit or show_conflicts or show_shared or show_impact):
         entries = glossary.load_collection(pid).entries
-        click.echo(f"{label} 용어집 ({len(entries)}개) — 소속 논문 번역에 논문 용어집보다 우선")
+        click.echo(f"{label} 용어집 ({len(entries)}개) — 주 컬렉션이 이것인 논문 번역에 논문 용어집보다 우선")
         for e in entries:
             click.echo(f"  {e.term} → {e.korean} ({e.policy})")
         if not entries:
@@ -1230,6 +1231,12 @@ def translate(
             click.echo("용어집을 검토·수정하세요 (저장 후 번역 진행).")
             edited = click.edit(wd.glossary_yaml.read_text(encoding="utf-8"), extension=".yaml")
             if edited is not None:
+                # 사용자가 쓴 YAML을 그대로 남기려고 save를 거치지 않으니, 옛 캐시 이행만 따로 먼저 —
+                # 고친 논문 용어집으로는 옛(v2·v1) 키가 안 맞아 통째로 다시 번역된다(glossary.save와 같은 이유)
+                with contextlib.suppress(Exception):
+                    from md4paper.translate import apply
+
+                    apply.migrate_cache(wd)
                 wd.glossary_yaml.write_text(edited, encoding="utf-8")
         summary = pipeline.run_translate(wd, prov, korean_style=korean_style)
     except Exception as e:  # noqa: BLE001

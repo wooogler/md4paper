@@ -12,6 +12,11 @@ _STYLES = {
 }
 
 
+def names() -> tuple[str, ...]:
+    """이름 있는 문체들 (custom 제외) — 옛 번역 기록에서 문체를 되찾을 때 후보로 쓴다."""
+    return tuple(_STYLES)
+
+
 def style_instruction(korean_style: str) -> str:
     """korean_style 값 → 문체 지시문."""
     ks = (korean_style or "해라체").strip()
