@@ -24,6 +24,9 @@ import json
 PANEL_ID = "md4-agent"           # body 직속 서랍 id — spa.add_body_html이 같은 id를 다시 넣지 않는다
 PANEL_Z = 9000                   # 메모 서랍(#md-anno-panel)과 같은 층 — 둘은 번갈아 열린다
 NAV_EVENT = "md4-agent-nav"      # JS → 서버: SPA 화면 이동 요청 (JS는 ui.sub_pages 이동을 직접 못 한다)
+NOTES_REFRESH_EVENT = "md4-notes-refresh"   # JS → 서버: 에이전트가 메모 파일을 고쳤다 — 뷰어 메모 패널
+                                            # (app.py notes_panel)이 파일을 다시 읽어 편집기를 맞춘다
+ANNO_RELOAD_API = "__mdAnnoReload"          # 뷰어 하이라이트 스크립트(app.py)가 내놓는 다시 칠하기 함수
 
 # '읽던 자리로' 되돌리기 알약 — 아래 CSS/HTML/JS 문자열과 이 상수가 한 짝이다(테스트가 대조한다).
 JUMP_BACK_ID = "md-jump-back"    # body 직속 오버레이 id — 서랍 밖이라 서랍을 닫아도 남는다
@@ -44,8 +47,6 @@ AG_OVERLAY_BELOW = 760           # 남는 본문 폭이 이보다 좁으면 밀�
 AG_NARROW_BELOW = 1100           # 밀기 모드에서 남는 폭이 이보다 좁으면 홈 미리보기 열을 접는다(ag-narrow).
                                  # home.py의 @media(max-width:1100px)와 같은 경계 — 그 미디어 쿼리는
                                  # 뷰포트만 봐서 서랍이 민 폭을 모른다
-AG_TIGHT_BELOW = 700             # 더 좁으면 홈 사이드바까지 접는다(ag-tight). 지금 값으로는 그 전에
-                                 # 오버레이로 넘어가 닿지 않지만, 오버레이 경계를 낮출 때를 위한 다음 칸
 AG_SLIM_BELOW = 380              # 서랍 자체가 이보다 좁으면 머리줄에서 비용을 숨기고 모델 칸을 줄인다
 
 CSS = """
@@ -66,10 +67,9 @@ body.ag-open .md4-body { padding-right: var(--ag-w); }
    두고 서랍만 위에 띄우므로 뷰어·홈의 열이 짓눌리지 않는다. 떠 있다는 걸 그림자로 분명히 한다. */
 body.ag-open.ag-overlay .md4-body { padding-right: 0; }
 body.ag-open.ag-overlay #md4-agent { box-shadow: -12px 0 36px rgba(0,0,0,.22); }
-/* 밀기 모드인데 홈 세 열이 다 안 들어갈 때 — 미리보기 열부터, 더 좁으면 사이드바까지 접는다.
+/* 밀기 모드인데 홈 세 열이 다 안 들어갈 때 — 미리보기 열을 접는다(더 좁으면 이미 덮기로 넘어간다).
    home.py의 @media(max-width:1100px)는 뷰포트만 보므로 서랍이 민 폭은 여기서 반영한다. */
 body.ag-open.ag-narrow .md4-hprev { display: none; }
-body.ag-open.ag-tight .md4-hside { display: none; }
 /* 서랍 자체가 좁을 때 — 머리줄(세션·모델·비용·새 세션·닫기)이 한 줄에 버티게 덜 중요한 것부터 뺀다 */
 #md4-agent.ag-slim .ag-cost { display: none; }
 #md4-agent.ag-slim .ag-model { max-width: 84px; }
@@ -97,6 +97,7 @@ body.ag-open.ag-tight .md4-hside { display: none; }
 .ag-model:hover { background: #e6e4e0; }
 .ag-model:disabled { cursor: default; opacity: .7; }
 .ag-cost { font-size: 10.5px; color: #97948d; font-variant-numeric: tabular-nums; }
+.ag-cost.over { color: #b3261e; }     /* 세션 비용이 상한을 넘었다 — 다음 질문은 한 번 더 묻는다 */
 .ag-btn { border: none; background: none; font-size: 11.5px; color: #8a8780; cursor: pointer;
   padding: 3px 6px; border-radius: 7px; }
 .ag-btn:hover { background: #f0efec; }
@@ -163,15 +164,43 @@ a.chat-cite-note:hover { background: #f7cf60; }
 .ag-meta { font-size: 10.5px; color: #97948d; margin: 3px 0 4px; }
 .ag-err { border: 1px solid rgba(179,38,30,.35); background: rgba(179,38,30,.08); color: #b3261e;
   border-radius: 10px; padding: 8px 10px; font-size: 11.5px; line-height: 1.6; margin: 4px 0 8px; }
-/* 승인 카드 — 쓰기 tool이 실행 전에 묻는다 */
+/* 승인 카드 — 쓰기 tool이 실행 전에 묻는다. 답을 보내면 결과(승인됨/거절됨/건너뜀)로 잠긴다(.done) */
 .ag-appr { border: 1px solid #e8c66a; background: #fffaf0; border-radius: 10px; padding: 8px 10px;
   font-size: 11.5px; line-height: 1.55; margin: 4px 0 8px; }
+.ag-appr.done { border-color: #e6e4e0; background: #f9f8f6; color: #6b6862; }
 .ag-appr-h { font-weight: 600; margin-bottom: 4px; }
-.ag-appr-c { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
-.ag-appr-c span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.ag-appr-c button { border: 1px solid #e0ded9; background: #fff; border-radius: 7px; font: inherit;
+.ag-appr-c { padding: 3px 0; }
+.ag-appr-c + .ag-appr-c { border-top: 1px dashed #ecdcae; }
+.ag-appr.done .ag-appr-c + .ag-appr-c { border-top-color: #ecebe8; }
+.ag-appr-r { display: flex; align-items: center; gap: 6px; }
+.ag-appr-i { flex: 0 0 auto; font-size: 15px; color: #a07b10; }
+.ag-appr.done .ag-appr-i { color: #97948d; }
+.ag-appr-d { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ag-appr button { border: 1px solid #e0ded9; background: #fff; border-radius: 7px; font: inherit;
+  font-size: 11px; padding: 2px 8px; cursor: pointer; color: inherit; flex: 0 0 auto; }
+.ag-appr button:disabled { cursor: default; opacity: .55; }
+.ag-appr button.on { border-color: #2383e2; background: #eef4fd; color: #1668c4; }
+.ag-appr button.ag-appr-tg { border: none; background: none; padding: 0 2px; color: #97948d;
+  font-size: 10.5px; }
+.ag-appr button.ag-appr-tg:hover { color: #6b6862; }
+.ag-appr-args { display: none; margin: 4px 0 2px 21px; padding: 5px 7px; border-radius: 6px;
+  background: rgba(0,0,0,.04); font-size: 10.5px; white-space: pre-wrap; overflow-wrap: anywhere;
+  max-height: 180px; overflow-y: auto; }
+.ag-appr-c.open .ag-appr-args { display: block; }
+.ag-appr-s { flex: 0 0 auto; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 9px; }
+.ag-appr-s.ok { background: #e3f1e3; color: #2f6f2f; }
+.ag-appr-s.no { background: #f6e0de; color: #9c2a20; }
+.ag-appr-s.skip { background: #ecebe8; color: #6b6862; }
+.ag-appr-all { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; padding-top: 6px;
+  border-top: 1px solid #ecdcae; }
+/* 비용 상한 경고 — 턴 시작 전에 서버가 막았다. '그래도 계속'은 같은 요청을 override로 다시 보낸다 */
+.ag-cap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border: 1px solid #e8c66a;
+  background: #fffaf0; border-radius: 10px; padding: 7px 10px; font-size: 11.5px; line-height: 1.55;
+  margin: 4px 0 8px; }
+.ag-cap-t { flex: 1 1 180px; min-width: 0; }
+.ag-cap button { border: 1px solid #e0ded9; background: #fff; border-radius: 7px; font: inherit;
   font-size: 11px; padding: 2px 8px; cursor: pointer; color: inherit; }
-.ag-appr-c button.on { border-color: #2383e2; background: #eef4fd; color: #1668c4; }
+.ag-cap button.ag-cap-go { border-color: #2383e2; background: #eef4fd; color: #1668c4; }
 
 .ag-foot { border-top: 1px solid #ecebe8; padding: 8px 9px; }
 .ag-sel { display: none; align-items: center; gap: 5px; font-size: 10.5px; color: #8a8780;
@@ -248,9 +277,20 @@ a.chat-cite-note:hover { background: #f7cf60; }
   .ag-input, .ag-rename input { background: #262626; border-color: #3a3a3a; }
   .ag-input:disabled { background: #232323; color: #7d7d7d; }
   .ag-turn.ag-user + .ag-turn.ag-user, .ag-turn.ag-bot + .ag-turn.ag-user { border-color: #2c2c2c; }
-  .ag-appr { background: #2b2618; border-color: #6b5a24; }
-  .ag-appr-c button { background: #262626; border-color: #3a3a3a; }
-  .ag-appr-c button.on { background: #24303d; border-color: #5a96e6; color: #8fbcf0; }
+  .ag-appr, .ag-cap { background: #2b2618; border-color: #6b5a24; }
+  .ag-appr.done { background: #242424; border-color: #3a3a3a; color: #a0a0a0; }
+  .ag-appr-c + .ag-appr-c, .ag-appr-all { border-color: #4a3f1c; }
+  .ag-appr.done .ag-appr-c + .ag-appr-c { border-top-color: #333; }
+  .ag-appr-i { color: #d9b44a; }
+  .ag-appr button, .ag-cap button { background: #262626; border-color: #3a3a3a; }
+  .ag-appr button.on, .ag-cap button.ag-cap-go { background: #24303d; border-color: #5a96e6;
+    color: #8fbcf0; }
+  .ag-appr button.ag-appr-tg { background: none; color: #8f8f8f; }
+  .ag-appr-args { background: rgba(255,255,255,.06); }
+  .ag-appr-s.ok { background: #1f3322; color: #8fd18f; }
+  .ag-appr-s.no { background: #3a2220; color: #f0a39b; }
+  .ag-appr-s.skip { background: #2c2c2c; color: #a0a0a0; }
+  .ag-cost.over { color: #f0a39b; }
   a.chat-cite.ag-far { background: #1f1f1f; color: #5a96e6; border-color: #5a96e6; }
   :root { --mjb-ring: #a9a69f; }
   #md-jump-back { background: #262626; border-color: #3a3a3a; color: #d4d4d4;
@@ -326,7 +366,11 @@ JS = r"""
   var sid = null, sess = null, sessList = [], turns = [], pending = null;
   var live = null, busy = false, errMsg = null, loaded = false, menuMode = '';
   var toolsByTurn = {};      // 턴 id → 그 답을 만들며 부른 tool 줄 (이 창이 떠 있는 동안만)
-  var decisions = {};        // 승인 카드 — tool_call id → true/false
+  var decisions = {};        // 승인 카드 — tool_call id → true/false (모든 호출에 답이 모이면 보낸다)
+  var apprByTurn = {};       // 턴 id → 그 턴 뒤에서 끝난 승인 카드들 [{calls, decisions, skipped}] (잠김)
+  var capRetry = null;       // 비용 상한으로 막힌 요청 {body, msg} — '그래도 계속'이 override를 더해 다시 보낸다
+  var PH_IDLE = input.placeholder;
+  var PH_WAIT = '승인을 기다리는 중 — 그냥 보내면 건너뜁니다';
   var models = [], modelInfo = {ready: true, reason: '', provider: '', model: ''};
 
   function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : s;
@@ -826,8 +870,9 @@ JS = r"""
     return (d.getMonth() + 1) + '/' + d.getDate();
   }
   function setSession(d){
+    if (d.id !== sid){ apprByTurn = {}; capRetry = null; }
     sess = d; sid = d.id; lsSet(LS_SESSION, sid);
-    turns = d.turns || []; pending = d.pending || null; decisions = {};
+    turns = d.turns || []; pending = d.pending || null; decisions = {};   // 다시 열면 대기 카드도 되살아난다
     live = null; errMsg = null;
     render();
   }
@@ -948,7 +993,12 @@ JS = r"""
   var TOOL_KO = {search_paper: '논문 검색', read_rows: '행 읽기', outline: '목차 보기',
     list_note_tabs: '메모 탭 목록', read_notes: '메모 읽기', read_highlights: '하이라이트 읽기',
     list_papers: '논문 목록', list_projects: '컬렉션 목록', get_bibtex: 'BibTeX',
-    goto_row: '행으로 이동', open_paper: '논문 열기'};
+    goto_row: '행으로 이동', open_paper: '논문 열기',
+    write_note: '메모 쓰기', add_highlight: '하이라이트 추가',
+    set_project_membership: '컬렉션 소속 바꾸기', remember: '기억하기'};
+  // 승인 카드의 아이콘 — Material Icons 글꼴(NiceGUI가 싣는다)의 이름
+  var TOOL_ICON = {write_note: 'edit_note', add_highlight: 'border_color',
+    set_project_membership: 'bookmark_add', remember: 'psychology'};
   function argsText(args){
     if (!args || typeof args !== 'object') return args ? String(args) : '';
     return Object.keys(args).map(function(k){
@@ -1012,6 +1062,7 @@ JS = r"""
       var q = document.createElement('div');
       q.className = 'ag-q'; q.textContent = t.text || '';
       wrap.appendChild(q);
+      apprDone(wrap, t.id);
       return wrap;
     }
     wrap.className = 'ag-turn ag-bot';
@@ -1037,36 +1088,109 @@ JS = r"""
       meta.className = 'ag-meta'; meta.innerHTML = bits.join(' · ');
       wrap.appendChild(meta);
     }
+    apprDone(wrap, t.id);
     return wrap;
   }
-  function approvalNode(){
+  function apprDone(wrap, id){            // 이 턴 뒤에서 답한 승인 카드들 — 결과로 잠겨 있다
+    (apprByTurn[id] || []).forEach(function(rec){ wrap.appendChild(approvalNode(rec, false)); });
+  }
+  // 승인 카드 — open이면 지금 답을 기다리는 카드(단추가 산다), 아니면 결과(승인됨/거절됨/건너뜀)로 잠긴 카드.
+  // 호출마다 [승인]/[거절], 여럿이면 맨 아래 [모두 승인]/[모두 거절]. 서버는 대기 호출 전부에 대한 답을
+  // 한 번에 받으므로(일부 거절은 가능) 모든 호출에 답이 모이는 순간 보낸다 — 하나뿐이면 누르는 즉시.
+  function apprText(c){
+    return c.description || ((TOOL_KO[c.name] || c.name) + (c.args ? ' — ' + argsText(c.args) : ''));
+  }
+  function apprArgs(args){
+    try { return JSON.stringify(args, null, 2); } catch (e) { return String(args); }
+  }
+  function decide(m){
+    if (busy || !pending) return;
+    Object.keys(m).forEach(function(k){ decisions[k] = m[k]; });
+    var calls = pending.calls || [];
+    if (!calls.every(function(x){ return x.id in decisions; })) return render();
+    var ap = {}; calls.forEach(function(x){ ap[x.id] = !!decisions[x.id]; });
+    send('', ap);
+  }
+  function approvalNode(rec, open){
+    var calls = rec.calls || [];
     var box = document.createElement('div');
-    box.className = 'ag-appr';
+    box.className = 'ag-appr' + (open ? '' : ' done');
     var h = document.createElement('div');
-    h.className = 'ag-appr-h'; h.textContent = '실행해도 될까요?';
+    h.className = 'ag-appr-h';
+    h.textContent = open ? ('실행해도 될까요?' + (calls.length > 1 ? ' (' + calls.length + '건)' : ''))
+      : (rec.skipped ? '건너뜀 — 새 메시지를 보내 실행하지 않았습니다' : '승인 결과');
     box.appendChild(h);
-    (pending.calls || []).forEach(function(c){
+    calls.forEach(function(c){
       var row = document.createElement('div'); row.className = 'ag-appr-c';
-      var s = document.createElement('span');
-      s.textContent = c.description || ((TOOL_KO[c.name] || c.name) + (c.args ? ' — ' + argsText(c.args) : ''));
-      row.appendChild(s);
-      [['승인', true], ['거부', false]].forEach(function(o){
-        var b = document.createElement('button');
-        b.type = 'button'; b.textContent = o[0];
-        if (decisions[c.id] === o[1]) b.className = 'on';
-        b.disabled = busy;
-        b.addEventListener('click', function(){
-          decisions[c.id] = o[1];
-          var all = (pending.calls || []).every(function(x){ return x.id in decisions; });
-          if (all){                 // 모든 대기 작업에 답이 모이면 그대로 이어서 돌린다
-            var ap = {}; (pending.calls || []).forEach(function(x){ ap[x.id] = decisions[x.id]; });
-            send('', ap);
-          } else render();
+      var top = document.createElement('div'); top.className = 'ag-appr-r';
+      var ic = document.createElement('i');
+      ic.className = 'material-icons ag-appr-i'; ic.setAttribute('aria-hidden', 'true');
+      ic.textContent = TOOL_ICON[c.name] || 'build';
+      top.appendChild(ic);
+      var d = document.createElement('span'); d.className = 'ag-appr-d'; d.textContent = apprText(c);
+      d.title = c.name;
+      top.appendChild(d);
+      var hasArgs = c.args && typeof c.args === 'object' && Object.keys(c.args).length;
+      if (hasArgs){                          // 무엇을 넘기는지 — 접어 두고 필요할 때만 펼친다
+        var tg = document.createElement('button');
+        tg.type = 'button'; tg.className = 'ag-appr-tg'; tg.textContent = '자세히';
+        tg.title = '넘길 인자 펼치기/접기';
+        tg.addEventListener('click', function(){ row.classList.toggle('open'); });
+        top.appendChild(tg);
+      }
+      if (open){
+        [['승인', true, 'ag-appr-ok'], ['거절', false, 'ag-appr-no']].forEach(function(o){
+          var b = document.createElement('button');
+          b.type = 'button'; b.textContent = o[0];
+          b.className = o[2] + (decisions[c.id] === o[1] ? ' on' : '');
+          b.disabled = busy;
+          b.addEventListener('click', function(){ var m = {}; m[c.id] = o[1]; decide(m); });
+          top.appendChild(b);
         });
-        row.appendChild(b);
-      });
+      } else {
+        var st = document.createElement('span');
+        var ok = !!(rec.decisions || {})[c.id];
+        st.className = 'ag-appr-s ' + (rec.skipped ? 'skip' : (ok ? 'ok' : 'no'));
+        st.textContent = rec.skipped ? '건너뜀' : (ok ? '승인됨' : '거절됨');
+        top.appendChild(st);
+      }
+      row.appendChild(top);
+      if (hasArgs){
+        var pre = document.createElement('pre'); pre.className = 'ag-appr-args';
+        pre.textContent = apprArgs(c.args);
+        row.appendChild(pre);
+      }
       box.appendChild(row);
     });
+    if (open && calls.length > 1){
+      var all = document.createElement('div'); all.className = 'ag-appr-all';
+      [['모두 승인', true], ['모두 거절', false]].forEach(function(o){
+        var b = document.createElement('button');
+        b.type = 'button'; b.textContent = o[0]; b.disabled = busy;
+        b.className = o[1] ? 'ag-appr-allok' : 'ag-appr-allno';
+        b.addEventListener('click', function(){
+          var m = {}; calls.forEach(function(x){ m[x.id] = o[1]; }); decide(m);
+        });
+        all.appendChild(b);
+      });
+      box.appendChild(all);
+    }
+    return box;
+  }
+  // 비용 상한 경고 — 턴을 시작하기 전에 서버가 막았다(400 code=cost_cap)
+  function capNode(){
+    var box = document.createElement('div'); box.className = 'ag-cap';
+    var t = document.createElement('span'); t.className = 'ag-cap-t';
+    t.textContent = capRetry.msg || '이 세션의 비용 상한을 넘었습니다.';
+    var go = document.createElement('button');
+    go.type = 'button'; go.className = 'ag-cap-go'; go.textContent = '그래도 계속';
+    go.title = '이번 요청만 상한을 넘겨 보냅니다';
+    go.disabled = busy;
+    go.addEventListener('click', function(){ var r = capRetry; if (r) send(null, null, r.body); });
+    var no = document.createElement('button');
+    no.type = 'button'; no.className = 'ag-cap-x'; no.textContent = '그만두기';
+    no.addEventListener('click', function(){ capRetry = null; render(); });
+    box.appendChild(t); box.appendChild(go); box.appendChild(no);
     return box;
   }
   var liveText = null, liveTools = null;
@@ -1105,7 +1229,10 @@ JS = r"""
     sessT.textContent = (sess && sess.title) || '새 세션';
     sessBtn.disabled = busy; newBtn.disabled = busy;
     var c = sess && sess.usage ? Number(sess.usage.cost_usd || 0) : 0;
-    costEl.textContent = '$' + c.toFixed(4);
+    var cap = sess && sess.cost_cap ? Number(sess.cost_cap) : 0;     // 세션 비용 상한(USD) — 있으면 함께
+    costEl.textContent = '$' + c.toFixed(4) + (cap ? ' / $' + cap.toFixed(2) : '');
+    costEl.classList.toggle('over', !!cap && c >= cap);
+    costEl.title = '이 세션에서 쓴 비용 (누적)' + (cap ? ' / 세션 상한 — 넘으면 다음 질문 전에 묻습니다' : '');
   }
   function render(){
     renderHead();
@@ -1132,13 +1259,16 @@ JS = r"""
     turns.forEach(function(t){ list.appendChild(turnNode(t)); });
     if (live) list.appendChild(liveNode());
     else { liveText = null; liveTools = null; }
-    if (pending && !live) list.appendChild(approvalNode());
+    if (pending) list.appendChild(approvalNode(pending, true));   // 진행 중 말풍선 아래에
+    if (capRetry) list.appendChild(capNode());
     if (errMsg){
       var er = document.createElement('div');
       er.className = 'ag-err'; er.textContent = errMsg;
       list.appendChild(er);
     }
-    input.disabled = busy || !modelInfo.ready || !!pending;
+    // 승인 대기 중에도 입력창은 연다 — 그냥 보내면 서버가 대기 호출을 모두 거절하고 이어 간다(건너뜀)
+    input.disabled = busy || !modelInfo.ready;
+    input.placeholder = pending ? PH_WAIT : PH_IDLE;
     sendBtn.disabled = input.disabled;
     list.scrollTop = list.scrollHeight;
   }
@@ -1174,6 +1304,27 @@ JS = r"""
     } else if (a.kind === 'open_paper'){
       if (a.token && a.token === paper && onReview()) return;   // 이미 그 논문
       nav(a.url);
+    } else if (a.kind === 'refresh'){
+      refreshView(a.what, a.token);
+    }
+  }
+  // 쓰기 tool이 파일을 고친 뒤 — 지금 화면이 그것을 보여 주고 있으면 다시 그린다.
+  // 메모·하이라이트는 지금 뷰어의 논문일 때만(다른 논문이면 열 때 새로 읽으므로 할 일이 없다).
+  function refreshView(what, tok){
+    if (what === 'library'){
+      // 홈의 목록·컬렉션 칩은 서버가 짓는다 — 같은 홈 주소로 다시 가게 해 본문만 새로 짓는다
+      if (!onReview()) nav('/home');
+      return;
+    }
+    if (!tok || tok !== paper || !onReview()) return;
+    if (what === 'notes'){
+      // 메모 패널(app.py notes_panel)이 파일을 다시 읽는다 — 고치던 탭이면 기존 '바깥에서 바뀜' 안내를 탄다
+      if (typeof emitEvent === 'function') emitEvent('md4-notes-refresh', {token: tok});
+    } else if (what === 'highlights'){
+      fetch('/annotations/' + encodeURIComponent(tok)).then(function(r){ return r.json(); })
+        .then(function(j){
+          if (tok === paper && window.__mdAnnoReload) window.__mdAnnoReload(tok, j.items || []);
+        }).catch(function(){});
     }
   }
   function onEvent(name, d){
@@ -1196,21 +1347,40 @@ JS = r"""
       doAction(d);
     } else if (name === 'approval_needed'){
       pending = d; decisions = {};
+      render();                              // 진행 중 말풍선 아래에 카드 (done까지는 단추가 잠겨 있다)
     } else if (name === 'done'){
       live.done = d;
     } else if (name === 'error'){
       live.err = d.message || '답을 만들지 못했습니다.';
     }
   }
-  function send(text, approvals){
+  function lastTurnId(){ return turns.length ? turns[turns.length - 1].id : null; }
+  // again: 비용 상한에 막혔던 요청 본문 — override를 더해 그대로 다시 보낸다
+  function send(text, approvals, again){
     if (busy || !sid) return;
-    var q = (text || '').trim();
-    if (!q && !approvals) return;
-    var body = {message: q, context: ctxNow()};
-    if (approvals) body.approvals = approvals;
-    if (q){ input.value = ''; autosize(); lastSel = null; paintSel(); }
+    var q, body;
+    if (again){
+      body = again; body.override = true; body.context = ctxNow();
+      q = body.message || ''; approvals = body.approvals || null;
+      if (q && input.value.trim() === q){ input.value = ''; autosize(); }
+    } else {
+      q = (text || '').trim();
+      if (!q && !approvals) return;
+      body = {message: q, context: ctxNow()};
+      if (approvals) body.approvals = approvals;
+      if (q){ input.value = ''; autosize(); lastSel = null; paintSel(); }
+    }
+    capRetry = null;
+    // 대기 중이던 승인 카드를 잠근다 — 승인/거절을 보냈거나, 그냥 새 질문을 보내 건너뛰었다.
+    // 잠긴 카드는 마지막 턴(그 승인을 부른 질문) 뒤에 남는다. 스트림 전에 거절되면 되돌린다.
+    var rec = null, key = null, was = pending;
+    if (pending){
+      rec = {calls: pending.calls || [], decisions: approvals || {}, skipped: !approvals};
+      key = lastTurnId() || '-';
+      (apprByTurn[key] = apprByTurn[key] || []).push(rec);
+      pending = null; decisions = {};
+    }
     busy = true; errMsg = null; closeMenu();
-    if (approvals) pending = null;
     live = {q: q, text: '', tools: [], err: null, done: null, started: false};
     render();
     var at = sid;
@@ -1218,17 +1388,29 @@ JS = r"""
           headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)})
       .then(function(r){
         if (!r.ok) return r.json().then(function(j){
-          throw new Error(j.error || j.detail || ('HTTP ' + r.status));
+          var er = new Error(j.error || j.detail || ('HTTP ' + r.status));
+          er.code = j.code || ''; throw er;
         }, function(){ throw new Error('HTTP ' + r.status); });
         live.started = true;
         return readSSE(r, onEvent);
       })
       .catch(function(e){
-        if (live && !live.started){            // 스트림 전 거절(키 없음·409 등) — 질문을 돌려놓는다
-          var m = errMsg = e.message || String(e);
+        if (live && !live.started){            // 스트림 전 거절(키 없음·409·비용 상한 등) — 되돌려 놓는다
+          var m = e.message || String(e);
           if (q && !input.value) input.value = q;
-          if (approvals)                       // 승인 카드를 되살린다 (서버의 대기 목록은 그대로)
-            refreshSession().then(function(){ errMsg = m; render(); });
+          if (rec){                            // 카드는 아직 답을 기다린다
+            var arr = apprByTurn[key] || [], k = arr.indexOf(rec);
+            if (k >= 0) arr.splice(k, 1);
+            pending = was;
+          }
+          if (e.code === 'cost_cap'){          // 경고 줄 + '그래도 계속' — 같은 본문을 override로 다시
+            delete body.override;
+            capRetry = {body: body, msg: m};
+          } else {
+            errMsg = m;
+            if (approvals)                     // 승인 카드를 서버 기록으로 맞춘다 (대기 목록은 그대로)
+              refreshSession().then(function(){ errMsg = m; render(); });
+          }
           live = null;
         } else if (live) live.err = live.err || ('연결이 끊겼습니다: ' + (e.message || e));
       })
@@ -1303,14 +1485,14 @@ JS = r"""
   // 폭까지 줄어들면 안 되므로 localStorage는 드래그만 쓴다.
   // 값은 파이썬 AG_* 상수와 한 짝이다(테스트가 대조한다).
   var AG_MIN = 320, AG_MAX = 760, AG_KEEP = 360;
-  var AG_OVERLAY_BELOW = 760, AG_NARROW_BELOW = 1100, AG_TIGHT_BELOW = 700, AG_SLIM_BELOW = 380;
+  var AG_OVERLAY_BELOW = 760, AG_NARROW_BELOW = 1100, AG_SLIM_BELOW = 380;
   var agWant = 400;
   function agCap(){          // 지금 뷰포트에서 서랍이 가질 수 있는 최대 폭 — 본문 몫 AG_KEEP는 남긴다
     return Math.min(AG_MAX, Math.max(AG_MIN, window.innerWidth - AG_KEEP));
   }
   // 서랍 폭과 body 모드 클래스를 한 계산에서 정한다:
   //   ag-overlay — 남는 본문 폭 < AG_OVERLAY_BELOW → 밀지 않고 덮는다(본문 padding 0)
-  //   ag-narrow / ag-tight — 밀기 모드에서 남는 폭이 모자라 홈 미리보기 열 / 사이드바를 접는다
+  //   ag-narrow — 밀기 모드에서 남는 폭이 모자라 홈 미리보기 열을 접는다
   //   (오버레이일 땐 본문이 제 폭이라 접을 까닭이 없다 — 붙이면 넓은 홈에서 미리보기만 사라진다)
   //   ag-slim(서랍에) — 서랍 자체가 좁아 머리줄을 줄인다
   function syncLayout(){
@@ -1322,7 +1504,6 @@ JS = r"""
     var cl = document.body.classList;
     cl.toggle('ag-overlay', over);
     cl.toggle('ag-narrow', on && !over && rest < AG_NARROW_BELOW);
-    cl.toggle('ag-tight', on && !over && rest < AG_TIGHT_BELOW);
     panel.classList.toggle('ag-slim', w < AG_SLIM_BELOW);
   }
   function setWidth(px){     // 드래그 — 지금 뷰포트 상한까지만 받고, 받은 값을 기억한다

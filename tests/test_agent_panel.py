@@ -142,11 +142,11 @@ def test_narrow_window_rules_exist_and_override_push():
     assert push < over
     assert "body.ag-open.ag-overlay #md4-agent { box-shadow:" in CSS
     assert "body.ag-open.ag-narrow .md4-hprev { display: none; }" in CSS
-    assert "body.ag-open.ag-tight .md4-hside { display: none; }" in CSS
+    assert "ag-tight" not in CSS and "AG_TIGHT" not in JS   # 닿지 않던 사이드바 접기 규칙은 지웠다
     assert "#md4-agent.ag-slim .ag-cost { display: none; }" in CSS
     dark = CSS.split("@media (prefers-color-scheme: dark)")[1]
     assert "ag-overlay #md4-agent" in dark
-    for cls in ("ag-overlay", "ag-narrow", "ag-tight"):
+    for cls in ("ag-overlay", "ag-narrow"):
         assert f"cl.toggle('{cls}'" in JS
     assert "panel.classList.toggle('ag-slim'" in JS
 
@@ -157,11 +157,12 @@ def test_narrow_window_constants_are_single_sourced():
     assert (f"var AG_MIN = {ap.AG_MIN_PX}, AG_MAX = {ap.AG_MAX_PX}, "
             f"AG_KEEP = {ap.AG_KEEP_PX};") in JS
     assert (f"var AG_OVERLAY_BELOW = {ap.AG_OVERLAY_BELOW}, AG_NARROW_BELOW = {ap.AG_NARROW_BELOW}, "
-            f"AG_TIGHT_BELOW = {ap.AG_TIGHT_BELOW}, AG_SLIM_BELOW = {ap.AG_SLIM_BELOW};") in JS
+            f"AG_SLIM_BELOW = {ap.AG_SLIM_BELOW};") in JS
     # 숫자는 그 한 줄에만 — 다른 곳에 경계값을 날것으로 다시 쓰지 않는다
     lay = _js_block(JS, "function syncLayout(")
     assert "AG_OVERLAY_BELOW" in lay and str(ap.AG_OVERLAY_BELOW) not in lay
-    assert ap.AG_TIGHT_BELOW < ap.AG_NARROW_BELOW and ap.AG_MIN_PX <= ap.AG_MAX_PX
+    assert ap.AG_OVERLAY_BELOW < ap.AG_NARROW_BELOW and ap.AG_MIN_PX <= ap.AG_MAX_PX
+    assert not hasattr(ap, "AG_TIGHT_BELOW")
 
 
 def test_width_clamps_to_viewport_on_open_resize_and_drag():
@@ -307,3 +308,129 @@ def test_escape_yields_to_other_overlays_then_pin_then_drawer():
     seg = JS[JS.index("document.addEventListener('keydown'"):]
     assert "#md-img-zoom.open" in seg and "#md-anno-pop.open" in seg and "#md4-find.on" in seg
     assert seg.index("jbDismiss()") < seg.index("panel.classList.remove('open')")
+
+
+# --- 승인 카드 (쓰기 tool) ---------------------------------------------------
+
+
+def test_approval_card_markup_and_buttons():
+    """호출마다 아이콘·설명·[승인]/[거절]·접힌 인자, 여럿이면 [모두 승인]/[모두 거절]. 답하면 결과로 잠긴다."""
+    node = _js_block(JS, "function approvalNode(")
+    assert "c.description ||" in _js_block(JS, "function apprText(")   # 없으면 이름+인자 요약
+    for s in ("'ag-appr' + (open ? '' : ' done')", "material-icons ag-appr-i", "'ag-appr-d'",
+              "['승인', true, 'ag-appr-ok'], ['거절', false, 'ag-appr-no']", "'ag-appr-args'",
+              "row.classList.toggle('open')", "calls.length > 1", "['모두 승인', true], ['모두 거절', false]",
+              "'승인됨'", "'거절됨'", "'건너뜀'"):
+        assert s in node, s
+    assert ".ag-appr-args { display: none;" in CSS and ".ag-appr-c.open .ag-appr-args { display: block; }" in CSS
+    for cls in (".ag-appr.done", ".ag-appr-s.ok", ".ag-appr-s.no", ".ag-appr-s.skip", ".ag-appr-all"):
+        assert cls + " {" in CSS, cls
+    dark = CSS.split("@media (prefers-color-scheme: dark)")[1]
+    for cls in (".ag-appr.done", ".ag-appr-s.ok", ".ag-appr-args", ".ag-cap"):
+        assert cls in dark, cls
+    # 쓰기 tool 넷은 사람 말 이름과 아이콘이 있다
+    for name in ("write_note", "add_highlight", "set_project_membership", "remember"):
+        assert f"{name}: '" in JS.split("var TOOL_KO = {", 1)[1].split("};", 1)[0]
+        assert f"{name}: '" in JS.split("var TOOL_ICON = {", 1)[1].split("};", 1)[0]
+
+
+def test_approvals_are_posted_once_every_call_has_an_answer():
+    """서버는 대기 호출 전부의 답을 한 번에 받는다 — 다 모이면 같은 turns 주소로 approvals를 보낸다."""
+    dec = _js_block(JS, "function decide(")
+    assert "calls.every(function(x){ return x.id in decisions; })" in dec
+    assert "send('', ap)" in dec
+    snd = _js_block(JS, "function send(")
+    assert "body = {message: q, context: ctxNow()};" in snd
+    assert "if (approvals) body.approvals = approvals;" in snd
+    assert "'/agent/sessions/' + encodeURIComponent(at) + '/turns'" in snd
+
+
+def test_pending_card_locks_into_history_and_send_skips_it():
+    """보내면 카드는 마지막 턴 뒤에 잠긴 기록으로 남고(그냥 새 질문 = 건너뜀), 스트림 전 거절이면 되살린다."""
+    snd = _js_block(JS, "function send(")
+    assert "skipped: !approvals" in snd and "apprByTurn[key]" in snd
+    assert snd.index("pending = null; decisions = {};") < snd.index("fetch(")
+    assert "pending = was;" in snd                       # 409·키 없음·비용 상한 → 카드는 아직 기다린다
+    assert "apprDone(wrap, t.id);" in _js_block(JS, "function turnNode(")
+
+
+def test_pending_keeps_input_open_with_wait_placeholder():
+    rend = _js_block(JS, "function render(")
+    assert "input.disabled = busy || !modelInfo.ready;" in rend      # 대기 중에도 그냥 보낼 수 있다
+    assert "input.placeholder = pending ? PH_WAIT : PH_IDLE;" in rend
+    assert "var PH_WAIT = '승인을 기다리는 중 — 그냥 보내면 건너뜁니다';" in JS
+    # 진행 중 말풍선 아래에, 그리고 세션을 다시 열면 서버의 pending으로 카드가 되살아난다
+    assert rend.index("liveNode()") < rend.index("approvalNode(pending, true)")
+    assert "pending = d.pending || null;" in _js_block(JS, "function setSession(")
+    on = _js_block(JS, "function onEvent(")
+    assert on.index("name === 'approval_needed'") < on.index("render();", on.index("approval_needed"))
+
+
+def test_approval_flow_matches_backend_contract():
+    """세션 상세는 pending을 싣고, turns는 approvals 키를 받는다(백엔드와 한 이름)."""
+    import inspect
+
+    from md4paper.ui.agent import routes
+
+    src = inspect.getsource(routes)
+    assert '"pending"' in src and 'body.get("approvals")' in src
+
+
+# --- 쓰기 뒤 화면 갱신 (ui_action refresh) --------------------------------------
+
+
+def test_refresh_action_branches():
+    assert "a.kind === 'refresh'" in _js_block(JS, "function doAction(")
+    rv = _js_block(JS, "function refreshView(")
+    for what in ("library", "notes", "highlights"):
+        assert f"what === '{what}'" in rv
+    # 메모·하이라이트는 지금 뷰어의 논문일 때만 (다른 논문이면 열 때 새로 읽는다)
+    assert "if (!tok || tok !== paper || !onReview()) return;" in rv
+    assert rv.index("what === 'library'") < rv.index("tok !== paper")
+    assert "nav('/home')" in rv
+
+
+def test_refresh_hooks_match_app_names():
+    """창이 부르는 이름이 뷰어(app.py)가 내놓는 이름과 같다 — 어긋나면 갱신이 조용히 죽는다."""
+    from pathlib import Path
+
+    app_src = Path(agent_panel.__file__).with_name("app.py").read_text(encoding="utf-8")
+    rv = _js_block(JS, "function refreshView(")
+    assert f"emitEvent('{agent_panel.NOTES_REFRESH_EVENT}', {{token: tok}})" in rv
+    assert "ui.on(agent_panel.NOTES_REFRESH_EVENT, on_agent_refresh)" in app_src
+    assert f"window.{agent_panel.ANNO_RELOAD_API}(tok, j.items || [])" in rv
+    assert "'/annotations/' + encodeURIComponent(tok)" in rv
+    assert f"window.{agent_panel.ANNO_RELOAD_API} = function(tok, list){{" in app_src
+    # 다시 칠하기는 flush하지 않는다 — 화면의 옛 목록이 방금 더한 항목을 파일에서 지우지 않게
+    hook = app_src.split(f"window.{agent_panel.ANNO_RELOAD_API} = function", 1)[1].split("};", 1)[0]
+    assert "flush()" not in hook and "tok !== window.__mdAnnoTok" in hook
+
+
+def test_notes_refresh_handler_guards_and_defers_to_conflict_path():
+    """옛 화면의 핸들러가 쌓여도 지금 논문·살아 있는 편집기에만, 그리고 capture()로 기존 충돌 안내를 탄다."""
+    import inspect
+
+    from md4paper.ui import app
+
+    src = inspect.getsource(app.build)
+    body = src.split("async def on_agent_refresh(", 1)[1].split("ui.on(agent_panel.NOTES_REFRESH_EVENT", 1)[0]
+    assert 'args.get("token") != tok' in body and "box.is_deleted" in body
+    assert body.index("await capture()") < body.index("mount(i)")
+    assert 'notes_state["conflicts"]' in body and "asking" in body
+    assert "notes_io.stamp(ctrl.wd" in body and "note_tabs.refresh()" in body
+
+
+# --- 비용 상한 ---------------------------------------------------------------
+
+
+def test_cost_cap_warning_and_override_retry():
+    snd = _js_block(JS, "function send(")
+    assert "er.code = j.code || ''" in snd
+    assert "e.code === 'cost_cap'" in snd and "capRetry = {body: body, msg: m};" in snd
+    assert "body.override = true;" in snd                      # 다시 보낼 때 같은 본문 + override
+    cap = _js_block(JS, "function capNode(")
+    assert "'그래도 계속'" in cap and "send(null, null, r.body)" in cap
+    assert "if (capRetry) list.appendChild(capNode());" in _js_block(JS, "function render(")
+    head = _js_block(JS, "function renderHead(")
+    assert "sess.cost_cap" in head and "' / $' + cap.toFixed(2)" in head
+    assert ".ag-cost.over {" in CSS

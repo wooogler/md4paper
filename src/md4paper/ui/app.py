@@ -666,6 +666,18 @@ _ANNO_HTML = """
     closePop(); clearSel();
     window.__mdAnnoApply();
   };
+  // 바깥(에이전트의 add_highlight 승인)에서 같은 논문의 annotations.json이 바뀌었다 — 다시 칠한다.
+  // __mdAnnoSwitch는 쓰지 않는다: 그것은 먼저 flush()로 **화면의 옛 목록을 되저장**해 방금 더한 항목을
+  // 파일에서 지운다. 미뤄 둔 내 손질(timer)이 있으면 그것을 지키고 서버에만 있는 항목만 보탠다.
+  window.__mdAnnoReload = function(tok, list){
+    if (!tok || tok !== window.__mdAnnoTok || !Array.isArray(list)) return;
+    if (timer){
+      var have = {}; items.forEach(function(x){ have[x.id] = 1; });
+      list.forEach(function(x){ if (x && !have[x.id]) items.push(x); });
+    } else items = list;
+    window.__mdAnno = items;
+    window.__mdAnnoApply();
+  };
   window.__mdAnnoApply = function(){
     // 캔버스가 다시 지어지는 중이면(편집 끄기·번역 완료) .anno-scope가 아직 DOM에 없다.
     // 한 번만 시도하면 하이라이트가 안 그려진 채로 남는다 → 잠깐 더 두드린다.
@@ -5302,6 +5314,28 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             dlg.open()
 
         notes_state["on_conflict"] = on_conflict
+
+        async def on_agent_refresh(e) -> None:  # noqa: ANN001 — GenericEventArguments
+            """에이전트가 메모 파일을 고쳤다(write_note 승인) — 떠 있는 편집기를 파일에 다시 맞춘다.
+
+            먼저 capture()로 아직 안 보낸 글자를 내보낸다: 고치던 탭이면 지문이 달라 notes_write가 Conflict를
+            내고 기존 '다른 곳에서 바뀜' 대화상자가 묻는다(조용히 덮지 않는다). 그 밖의 칸은 파일 지문이
+            얹을 때와 다를 때만 새로 얹는다. 탭이 새로 생겼을 수 있어 탭 줄도 다시 그린다."""
+            args = e.args if isinstance(e.args, dict) else {}
+            box = panes[0].get("box") if panes else None
+            if args.get("token") != tok or box is None or box.is_deleted:
+                return  # 다른 논문, 또는 화면을 갈아 끼우며 남은 옛 핸들러 (ui.on은 창 단위로 쌓인다)
+            await capture()
+            for i, q in enumerate(panes):
+                if q["tab"] in notes_state["conflicts"] or q["tab"] in asking:
+                    continue
+                mem = notes_state["mem"].get(q["el_id"])
+                if mem is None or mem.get("stamp") != notes_io.stamp(ctrl.wd, q["tab"]):
+                    mount(i)
+            note_tabs.refresh()
+            note_heads.refresh()
+
+        ui.on(agent_panel.NOTES_REFRESH_EVENT, on_agent_refresh)
 
         with ui.row().classes("w-full items-center no-wrap gap-2 shrink-0"):
             ui.label("메모").classes("md4-panel-title")
