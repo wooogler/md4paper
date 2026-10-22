@@ -137,6 +137,8 @@ def test_members_counts_only_papers_whose_primary_collection_it_is(tmp_path):
     assert set(glossary.collection_entries_by_paper(second, ws)) == {a.root}
     assert glossary.conflicts(glossary.collection_entries_by_paper(second, ws)) == []  # 부호기는 안 셈
     assert [r["root"] for r in glossary.members(first, ws)] == [both.root]
+    assert glossary.secondary_count(second, ws) == 1 and glossary.secondary_count(first, ws) == 0
+    assert glossary.secondary_note(1) == " (비주 소속 1편 제외)" and glossary.secondary_note(0) == ""
     # 둘째 컬렉션 용어집은 그 논문에 적용되지 않는다 — 그래서 members에서도 뺀다
     glossary.save_collection(second, GlossaryList(entries=[_e("encoder", "엔코더")]))
     assert glossary.effective(both)[0].entries[0].korean == "부호기"

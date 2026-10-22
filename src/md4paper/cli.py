@@ -517,7 +517,8 @@ def project_glossary(name_or_id: str, show_conflicts: bool, show_shared: bool, s
         by_paper = glossary.collection_entries_by_paper(pid, ws)
         items = glossary.conflicts(by_paper)
         have = {glossary.term_key(e.term): e for e in glossary.load_collection(pid).entries}
-        click.echo(f"{label}: 용어집이 있는 논문 {len(by_paper)}편 · 어긋난 용어 {len(items)}개")
+        note = glossary.secondary_note(glossary.secondary_count(pid, ws))
+        click.echo(f"{label}: 용어집이 있는 논문 {len(by_paper)}편{note} · 어긋난 용어 {len(items)}개")
         for c in items:
             cur = have.get(c.key)
             mark = click.style(f"  ✓ {cur.korean} ({cur.policy})", fg="green") if cur else ""

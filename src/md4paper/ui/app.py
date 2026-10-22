@@ -4219,7 +4219,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 "변환할 때 **Abstract·Introduction 본문과 모든 섹션 제목**에서 핵심 용어를 자동으로 뽑아 만듭니다. "
                 "번역 전에 한국어 표기와 처리 방식(번역 / 음역 / 원문 유지 / 첫 등장 시 병기)을 검토·수정하세요. "
                 "고친 내용은 바로 저장됩니다.\n\n"
-                "컬렉션 용어집의 항목은 여기서 못 고칩니다 — 컬렉션 용어집에서 고치면 소속 논문 전체에 적용됩니다."
+                "컬렉션 용어집의 항목은 여기서 못 고칩니다 — 컬렉션 용어집에서 고치면 주 컬렉션이 그 컬렉션인 논문 전체에 적용됩니다."
             ).classes("text-xs text-gray-600")
             with ui.column().classes("w-full gap-1 md4-scroll").style("overflow-y:auto; min-height:0"):
                 coll_rows()

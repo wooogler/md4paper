@@ -867,3 +867,89 @@ def test_impact_marks_full_retranslation_when_cache_is_gone(long_paper):
     assert row["full"] is True and row["units"] == 3
     assert {_sid(wd, t) for t in ("Recurrent Part", "Encoder Part", "Plain Part")} <= set(row["stale"])
     assert row["chars"] > 3 * 1500  # 유닛 전체 원문
+
+
+def test_v1_legacy_key_is_golden(tmp_path, monkeypatch):
+    """고정 입력의 옛 키(v1·v2)를 리터럴로 박는다.
+
+    engine.build_system_prompt 문구를 바꾸면 깨진다 — v1 캐시를 가진 사용자가 전부 재번역되므로 바꾸지
+    말 것(바꾸려면 옛 프롬프트 문자열을 별도로 보존해 키를 만들 것). v2 키도 같은 이유로
+    engine._glossary_block(glossary_line) 형식을 고정한다. `_plant_v1_cache`는 지금 코드로 키를 만들어
+    이 변화를 못 잡으므로 이 테스트가 따로 있다.
+    """
+    import json
+
+    from md4paper.ir import Manifest
+    from md4paper.translate import apply, context
+
+    wd = WorkDir(tmp_path / "g.md4")
+    wd.out.mkdir(parents=True)
+    wd.sections_map.write_text(json.dumps({"sections": [
+        {"id": "s1", "text": "Abstract", "level": 2, "out_line": 2},
+        {"id": "s2", "text": "1 Introduction", "level": 2, "out_line": 6},
+        {"id": "s3", "text": "1.1 Background", "level": 3, "out_line": 9}]}), encoding="utf-8")
+    monkeypatch.setattr(context, "title_abstract",
+                        lambda wd, m: ("A Golden Paper", "We study golden keys for caches."))
+    m = Manifest(title="A Golden Paper", korean_style="해라체", translate_headers=True,
+                 translate_references=False)
+    gl = GlossaryList(entries=[_entry("attention", "어텐션", "transliterate"), _entry("encoder", "인코더"),
+                               _entry("Transformer", "", "keep")])
+    v2 = apply._cache_keys("해라체", gl, "gpt-6-luna", m)[1]
+    assert v2 == "3370b794e7f0afaa"
+    assert apply._legacy_keys(wd, m, "해라체", gl, "gpt-6-luna") - {v2} == {"7f6f1e33874abf43"}
+
+
+def test_stored_cache_without_any_record_checks_key_with_default_model(long_paper):
+    """모델 기록도 input_hash도 없으면 전역 기본 모델·manifest 문체로 옛 키를 맞춰 본다 — 키를 안 보고
+    '쓸 수 있음'이라 하면, 용어집을 save 밖에서 고쳤을 때 표시(몇 유닛)와 실행(전부)이 어긋난다."""
+    from md4paper import config
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, _pid = long_paper
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _plant_v1_cache(wd, model=config.resolve_model(config.resolve_provider()))
+    status = wd.load_status()
+    status.pop("translate")
+    wd.save_status(status)
+    m = manifest_io.load(wd)
+    cache = apply._stored_cache(wd, m, None)
+    assert cache is not None and cache.legacy is not None
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+    # 논문 용어집을 save 밖에서(직접 편집) 고치면 옛 키가 안 맞는다 → 못 씀, 전부 다시
+    glossary.dump(GlossaryList(entries=[*glossary.load(wd).entries, _entry("inputs", "입력")]),
+                  wd.glossary_yaml)
+    assert apply._stored_cache(wd, m, None) is None
+    units, full = apply.retranslate_units(wd, m)
+    assert full and len(units) == 3
+
+
+def test_migrate_cache_write_failure_keeps_original(long_paper, monkeypatch, caplog):
+    """이행 쓰기가 실패해도 원본 cache.json은 그대로, 임시 파일은 안 남고, 용어집 저장은 계속된다."""
+    import logging
+
+    from md4paper.translate import apply, glossary
+
+    wd, _pid = long_paper
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _plant_v1_cache(wd)
+    before = wd.cache_json.read_bytes()
+
+    def boom(src, dst):  # noqa: ANN001
+        raise OSError("디스크 가득")
+
+    monkeypatch.setattr(apply.os, "replace", boom)
+    with pytest.raises(OSError):
+        apply.migrate_cache(wd)
+    assert wd.cache_json.read_bytes() == before
+    assert not wd.cache_json.with_name(wd.cache_json.name + ".tmp").exists()
+
+    new = GlossaryList(entries=[*glossary.load(wd).entries, _entry("inputs", "입력")])
+    with caplog.at_level(logging.WARNING, logger="md4paper.translate.glossary"):
+        glossary.save(new, wd)
+    assert "캐시 이행 실패" in caplog.text
+    assert [e.term for e in glossary.load(wd).entries][-1] == "inputs"  # 저장은 됐다
+    assert wd.cache_json.read_bytes() == before

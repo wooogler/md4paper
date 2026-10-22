@@ -18,6 +18,7 @@ paper.en.md(cite 후면 최종 인용 형태 반영) → paper.ko.md. 섹션을 
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from collections import Counter
@@ -303,7 +304,12 @@ def _legacy_keys(wd: WorkDir, manifest: Manifest, korean_style: str, paper_gloss
     해시했다. 그때도 논문 용어집만 썼으므로 **논문 용어집**으로 다시 만든다. 제목·초록·개요가 들어가
     있어 재변환으로 원문이 바뀌었으면 안 맞는다(그때는 예전에도 전부 다시 번역됐다). 제목·초록은 파일을
     쓰지 않는 `context.title_abstract`로 — 뷰어 표시·영향 미리보기도 이 함수를 부른다. 섹션 지도가
-    없거나 못 읽으면 v1은 건너뛴다(v1 코드도 그런 논문은 번역하지 못했다).
+    없거나 못 읽으면 v1은 건너뛴다 — 옛 `context.extract_context`가 sections.map.json을 조건 없이 읽어
+    (FileNotFoundError) 그런 논문은 v1 코드로 번역될 수 없었으니 그런 v1 키도 없다. (개요만은 지도가 없으면
+    빈 문자열로 진행했지만, 그보다 먼저 제목·초록 단계에서 멈췄다.)
+
+    **v1 키는 지금의 `engine.build_system_prompt` 문구로 만든다** — 그 문구를 바꾸면 v1 캐시를 가진 논문이
+    전부 재번역된다. golden 테스트(`test_v1_legacy_key_is_golden`)가 이를 지킨다.
     """
     keys = {_cache_keys(korean_style, paper_gloss, model, manifest)[1]}
     try:
@@ -362,6 +368,13 @@ def _last_model_style(wd: WorkDir, manifest: Manifest) -> tuple[str, str] | None
     return (got[1], got[2]) if got else None
 
 
+def _model_style_or_default(wd: WorkDir, manifest: Manifest) -> tuple[str, str]:
+    """`_last_model_style`, 모르면 (전역 기본 모델, manifest 문체) — 뷰어 번역 모델 드롭다운 기본값과
+    같은 순서. `_stored_cache`(옛 키 대조)와 `migrate_cache`(v3 키)가 같은 값을 쓰도록 한곳에 둔다."""
+    return _last_model_style(wd, manifest) or (
+        config.resolve_model(config.resolve_provider()), manifest.korean_style)
+
+
 def _stored_cache(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None) -> _Cache | None:
     """프로바이더 없이(stale·unticked 판정) 저장된 캐시를 읽는다. 쓸 수 없는 캐시면 None.
 
@@ -369,8 +382,10 @@ def _stored_cache(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None) -
     문체)는 따지지 않는다(예전부터 이 판정은 키를 안 봤다: 모델을 바꾸면 어차피 전부 다시 번역된다).
     표식이 없는 옛 파일은 지난 번역의 문체·모델(`_last_model_style` — 명시 기록, 없으면 input_hash로
     되찾은 것)로 옛 키(v2·v1, `_legacy_keys`)를 다시 만들어 맞춰 보고, 맞으면 옛 모드, 안 맞으면
-    None(다음 실행이 캐시를 못 쓴다). 그것도 모르면 맞춰 볼 수 없으니 옛 모드로 읽는다 — 키를 안 보던
-    예전 동작과 같은 쪽으로.
+    None(다음 실행이 캐시를 못 쓴다). 그것도 모르면 `migrate_cache`와 같은 대체값(전역 기본 모델 +
+    manifest 문체, `_model_style_or_default`)으로 맞춰 본다 — 키를 안 보고 '쓸 수 있음'이라 하면,
+    용어집이 `glossary.save`를 거치지 않고 바뀌었을 때(YAML 직접 편집·설치 앱) 표시는 몇 유닛인데
+    실행은 전부 다시 번역한다. 대체값은 다음 실행(뷰어 기본 모델)이 실제로 쓸 값이기도 하다.
     """
     stored = _read_stored(wd)
     if stored is None:
@@ -380,11 +395,9 @@ def _stored_cache(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None) -
     if stored.get("scheme") == _SCHEME:
         return _Cache(chunks, eff)
     paper = _paper_glossary(wd)
-    last = _last_model_style(wd, manifest)
-    if last is not None:
-        model, style = last
-        if stored.get("key") not in _legacy_keys(wd, manifest, style, paper, model):
-            return None
+    model, style = _model_style_or_default(wd, manifest)
+    if stored.get("key") not in _legacy_keys(wd, manifest, style, paper, model):
+        return None
     return _Cache(chunks, eff, legacy=paper)
 
 
@@ -396,9 +409,10 @@ def migrate_cache(wd: WorkDir, manifest: Manifest | None = None) -> bool:
     맡는다)로 옮겨 두면 고친 용어가 나오는 유닛만 낡는다. 쓸 수 있는지는 `_stored_cache`와 같은 판정
     (cache.json이 없거나 이미 v3거나 못 쓰는 옛 캐시면 아무것도 안 하고 False).
 
-    v3 키의 모델·문체는 지난 번역 기록(`_last_model_style` — 명시 기록, 없으면 input_hash로 되찾은 것),
-    그것도 없으면 전역 기본 모델과 manifest의 문체 — 뷰어 번역 모델 드롭다운의 기본값
-    (`Controller.translate_model`)과 같은 순서라 다음 실행이 그대로 키를 맞춘다. 항목은 `run_translate`의 저장처럼 지금 문서의 해시 집합으로 거른다.
+    v3 키의 모델·문체는 `_model_style_or_default`(명시 기록 → input_hash로 되찾은 것 → 전역 기본 모델과
+    manifest 문체) — 뷰어 번역 모델 드롭다운의 기본값(`Controller.translate_model`)과 같은 순서라 다음
+    실행이 그대로 키를 맞춘다. 항목은 `run_translate`의 저장처럼 지금 문서의 해시 집합으로 거른다.
+    쓰기는 임시 파일 + `os.replace`(중간에 실패해도 원본 cache.json이 그대로 남게; 임시 파일은 지운다).
     """
     if not (wd.cache_json.exists() and wd.en_md.exists()):
         return False
@@ -410,17 +424,22 @@ def migrate_cache(wd: WorkDir, manifest: Manifest | None = None) -> bool:
     cache = _stored_cache(wd, manifest, None)
     if cache is None or cache.legacy is None:
         return False
-    model, style = _last_model_style(wd, manifest) or (
-        config.resolve_model(config.resolve_provider()), manifest.korean_style)
+    model, style = _model_style_or_default(wd, manifest)
     units = _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines())
     up = cache.upgraded(units)
     current: set[str] = set().union(*(unit_hashes(u, up.gloss) for u in units)) if units else set()
     v3_key, _v2 = _cache_keys(style, cache.legacy, model, manifest)
     chunks = {h: t for h, t in up.chunks.items() if h in current}
-    wd.cache_json.write_text(
-        json.dumps({"key": v3_key, "scheme": _SCHEME, "chunks": chunks}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    tmp = wd.cache_json.with_name(wd.cache_json.name + ".tmp")
+    try:
+        tmp.write_text(
+            json.dumps({"key": v3_key, "scheme": _SCHEME, "chunks": chunks}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(tmp, wd.cache_json)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return True
 
 

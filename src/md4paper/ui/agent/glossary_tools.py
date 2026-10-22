@@ -111,20 +111,22 @@ async def glossary_conflicts(ctx: RunContext[Deps], collection: str, offset: int
     offset = max(0, int(offset or 0))
     limit = max(1, min(int(limit or CONFLICT_LIMIT_DEFAULT), CONFLICT_LIMIT_MAX))
 
-    def work() -> tuple[int, dict, list, list, dict]:
+    def work() -> tuple[int, int, dict, list, list, dict]:
         members = len(glossary.members(pid, ws))
+        secondary = glossary.secondary_count(pid, ws)
         by_paper = glossary.collection_entries_by_paper(pid, ws)
         decided = {glossary.term_key(e.term): e for e in glossary.load_collection(pid).entries}
-        return (members, by_paper, glossary.conflicts(by_paper),
+        return (members, secondary, by_paper, glossary.conflicts(by_paper),
                 glossary.shared(by_paper) if shared else [], decided)
 
     try:
-        members, by_paper, found, common, decided = await asyncio.to_thread(work)
+        members, secondary, by_paper, found, common, decided = await asyncio.to_thread(work)
     except Exception as e:  # noqa: BLE001 — 깨진 용어집 하나 때문에 run이 끊기면 안 된다
         return f"컬렉션 '{name}'의 용어집을 읽지 못했습니다: {e}"
     if not members:
-        return f"컬렉션 '{name}'에 논문이 없습니다."
-    head = (f"컬렉션 '{name}' — 논문 {members}편(용어집 있는 {len(by_paper)}편), "
+        return f"컬렉션 '{name}'에 논문이 없습니다{glossary.secondary_note(secondary)}."
+    head = (f"컬렉션 '{name}' — 논문 {members}편(용어집 있는 {len(by_paper)}편)"
+            f"{glossary.secondary_note(secondary)}, "
             f"어긋난 용어 {len(found)}개, 컬렉션 용어집 항목 {len(decided)}개")
     if not by_paper:
         return head + "\n\n용어집이 있는 논문이 없습니다 (번역을 한 번 돌리면 논문마다 만들어진다)."
@@ -139,7 +141,7 @@ async def glossary_conflicts(ctx: RunContext[Deps], collection: str, offset: int
         what, empty = "같은 번역어로 쓰는 용어", "둘 이상의 논문이 같은 번역어로 쓰는 용어가 없습니다."
     else:
         items = [(c.term, c) for c in found]
-        what, empty = "어긋난 용어", "어긋난 용어가 없습니다 — 소속 논문들의 번역어·policy가 모두 같습니다."
+        what, empty = "어긋난 용어", "어긋난 용어가 없습니다 — 논문들의 번역어·policy가 모두 같습니다."
     if not items:
         return head + "\n\n" + empty
     if offset >= len(items):

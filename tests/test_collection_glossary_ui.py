@@ -72,8 +72,11 @@ def test_load_overview_and_impact_summary(tmp_path):
     a = _paper(tmp_path, "a", [_e("encoder", "인코더"), _e("tutor", "튜터")], [pid])
     _paper(tmp_path, "b", [_e("Encoder", "부호기"), _e("tutor", "튜터")], [pid])
     _paper(tmp_path, "c", [_e("encoder", "엔코더")], [])  # 다른 컬렉션(미분류)은 안 센다
+    other = projects.create("다른")["id"]
+    _paper(tmp_path, "d", [_e("encoder", "엔진")], [other, pid])  # 비주 소속 — 빼고 편수만 알린다
     ov = cgd.load_overview(pid, tmp_path / "ws")
     assert ov["papers"] == 2 and [c.key for c in ov["conflicts"]] == ["encoder"]
+    assert ov["secondary"] == 1 and len(ov["conflicts"][0].variants) == 2
     assert [t[0] for t in ov["shared"]] == ["tutor"] and ov["titles"][a.root] == "a"
     assert cgd.impact_summary([]).startswith("낡은 번역 없음")
     line = cgd.impact_summary([{"stale": ["s1", "s2"], "est_cost_usd": 0.5}, {"stale": ["s9"], "est_cost_usd": 0.25}])

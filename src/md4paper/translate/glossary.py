@@ -13,6 +13,7 @@ glossary.yaml은 편집 가능한 아티팩트다: 지금은 $EDITOR, 이후 웹
 from __future__ import annotations
 
 import io
+import logging
 import re
 from collections import Counter
 from collections.abc import Callable, Hashable, Mapping
@@ -110,8 +111,8 @@ def save(gloss: GlossaryList, wd: WorkDir) -> None:
         from md4paper.translate import apply  # 순환 import 피하기 (apply → glossary)
 
         apply.migrate_cache(wd)
-    except Exception:  # noqa: BLE001 — 캐시 이행은 덤이다; 용어집 저장을 막으면 안 된다
-        pass
+    except Exception as e:  # noqa: BLE001 — 캐시 이행은 덤이다; 용어집 저장을 막으면 안 된다
+        logging.getLogger(__name__).warning("캐시 이행 실패 (%s) — 용어집은 그대로 저장한다: %s", wd.root, e)
     dump(gloss, wd.glossary_yaml)
 
 
@@ -320,14 +321,33 @@ def members(pid: str, workspace: Path) -> list[dict]:
     집계(`collection_entries_by_paper`)·영향 미리보기(`impact`)와 그 위의 CLI·에이전트 tool이 모두
     이것을 쓴다.
     """
+    return _member_rows(pid, workspace)[0]
+
+
+def secondary_count(pid: str, workspace: Path) -> int:
+    """이 컬렉션에 둘째 이후 자리로만 속한 논문 수 — `members`에서 빠진 편수(충돌 머리의 '비주 소속 N편 제외')."""
+    return len(_member_rows(pid, workspace)[1])
+
+
+def _member_rows(pid: str, workspace: Path) -> tuple[list[dict], list[dict]]:
+    """(주 컬렉션이 pid인 행, 둘째 이후 자리로만 pid에 속한 행). 숨긴 논문은 빼고."""
     from md4paper import projects
     from md4paper.workdir import recent_workdirs
 
-    def primary(row: dict) -> str:
+    primary: list[dict] = []
+    secondary: list[dict] = []
+    for row in recent_workdirs(Path(workspace), limit=100_000):
         ids = projects.normalize_many(row["projects"])
-        return ids[0] if ids else ""
+        if ids and ids[0] == pid:
+            primary.append(row)
+        elif pid in ids:
+            secondary.append(row)
+    return primary, secondary
 
-    return [row for row in recent_workdirs(Path(workspace), limit=100_000) if primary(row) == pid]
+
+def secondary_note(n: int) -> str:
+    """충돌 머리 꼬리 — 비주 소속이 있으면 " (비주 소속 N편 제외)", 없으면 빈 문자열."""
+    return f" (비주 소속 {n}편 제외)" if n else ""
 
 
 def collection_entries_by_paper(pid: str, workspace: Path) -> dict[Path, list[GlossaryEntry]]:

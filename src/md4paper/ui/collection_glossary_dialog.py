@@ -1,17 +1,17 @@
 """컬렉션 용어집 대화상자 — 홈 사이드바 ⋯ '용어집…'과 뷰어 용어집 시트의 '컬렉션 용어집 열기…'.
 
-컬렉션 용어집(`CONFIG_DIR/glossary/<id>.yaml`)은 소속 논문 모두의 번역에 논문 용어집보다 우선한다
-(`glossary.effective`). 논문마다 따로 만든 용어집이 같은 컬렉션 안에서도 어긋나므로(80편 컬렉션에서
+컬렉션 용어집(`CONFIG_DIR/glossary/<id>.yaml`)은 주 컬렉션이 이 컬렉션인 논문 모두의 번역에 논문
+용어집보다 우선한다(`glossary.effective`; 여러 컬렉션에 속한 논문은 첫 소속의 것만). 논문마다 따로 만든 용어집이 같은 컬렉션 안에서도 어긋나므로(80편 컬렉션에서
 2편 이상에 나온 용어의 절반 이상), 여기서 그 어긋남을 보고 표기를 하나로 고른다.
 
 - **용어집** 탭: 뷰어 용어집 표와 같은 행(원어·번역어·처리 방식·삭제). 고치면 바로 저장된다.
-- **충돌** 탭: 소속 논문 용어집에서 번역어·처리 방식이 어긋난 용어와 그 변이(편수). '이 표기로 통일'을
+- **충돌** 탭: 주 컬렉션이 이 컬렉션인 논문들의 용어집에서 번역어·처리 방식이 어긋난 용어와 그 변이(편수). '이 표기로 통일'을
   누르면 그 항목이 컬렉션 용어집에 들어간다. 어긋나지 않고 여러 편이 같이 쓰는 용어는 접힌 구역에 —
   올려 두면 새로 들어오는 논문도 그 번역어를 따른다.
 - **바닥**: 다음 번역 때 다시 번역될 곳(편수·섹션·대략 비용, `glossary.impact`)과 '낡은 섹션 재번역'
   (일괄 번역 확인 대화상자). 고칠 때마다 1초쯤 뒤 다시 센다.
 
-충돌·영향은 소속 논문 파일을 다 읽어야 해서 `run.io_bound`로 읽는다(80편에 1초 안팎).
+충돌·영향은 그 논문들의 파일을 다 읽어야 해서 `run.io_bound`로 읽는다(80편에 1초 안팎).
 """
 
 from __future__ import annotations
@@ -81,12 +81,14 @@ def conflict_rows(conflicts: list[glossary.Conflict], current: list[dict],
 
 
 def load_overview(pid: str, workspace: Path) -> dict:
-    """충돌 탭 데이터를 한 번에 — {conflicts, shared, titles, papers(용어집이 있는 소속 논문 수)}. 파일 읽기만."""
+    """충돌 탭 데이터를 한 번에 — {conflicts, shared, titles, papers(용어집이 있는 주 소속 논문 수),
+    secondary(둘째 이후 자리로만 속해 빠진 논문 수)}. 파일 읽기만."""
     from md4paper.workdir import paper_title
 
     by_paper = glossary.collection_entries_by_paper(pid, workspace)
     return {"conflicts": glossary.conflicts(by_paper), "shared": glossary.shared(by_paper),
-            "titles": {root: paper_title(root) for root in by_paper}, "papers": len(by_paper)}
+            "titles": {root: paper_title(root) for root in by_paper}, "papers": len(by_paper),
+            "secondary": glossary.secondary_count(pid, workspace)}
 
 
 def impact_summary(rows: list[dict]) -> str:
@@ -182,16 +184,16 @@ def open_collection_glossary(state: dict, pid: str, *, on_change: Callable[[], N
     def conflict_list() -> None:
         ov = st["overview"]
         if st["error"]:
-            ui.label(f"소속 논문 용어집을 읽지 못했습니다: {st['error']}").classes("text-sm text-negative")
+            ui.label(f"논문 용어집을 읽지 못했습니다: {st['error']}").classes("text-sm text-negative")
             return
         if ov is None:
             with ui.row().classes("items-center gap-2"):
                 ui.spinner(size="sm")
-                ui.label("소속 논문 용어집을 읽는 중…").classes("text-sm text-gray-500")
+                ui.label("논문 용어집을 읽는 중…").classes("text-sm text-gray-500")
             return
         data = conflict_rows(ov["conflicts"], rows, ov["titles"])
-        ui.label(f"용어집이 있는 소속 논문 {ov['papers']}편 · 번역어나 처리 방식이 어긋난 용어 {len(data)}개 "
-                 "(편수 많은 순)").classes("text-xs text-gray-500")
+        ui.label(f"용어집이 있는 논문 {ov['papers']}편{glossary.secondary_note(ov.get('secondary', 0))} · "
+                 f"번역어나 처리 방식이 어긋난 용어 {len(data)}개 (편수 많은 순)").classes("text-xs text-gray-500")
         if not data:
             ui.label("어긋난 용어가 없습니다.").classes("text-sm text-gray-400")
         for c in data:
