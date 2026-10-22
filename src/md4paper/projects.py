@@ -1,11 +1,12 @@
 """프로젝트 — 논문 묶음. 묶음마다 폴더 하나를 정하면 그 안이 저절로 정리된다.
+화면·CLI에서는 '컬렉션'이라 부른다(코드 식별자는 project 그대로).
 
 한 사람이 동시에 여러 주제를 읽는다: 학위 서베이, 수업 과제, 진행 중인 연구. 전역 '저장 위치'
 하나만 있으면 모든 논문이 한 폴더에 섞이고 홈 목록도 최근순 한 줄로만 쌓인다. 프로젝트는 그
 두 가지를 함께 푼다:
 
-- **분류**: 논문마다 소속 프로젝트를 적어 두고(그 논문의 status.json), 홈 목록을 프로젝트로
-  걸러 보거나 프로젝트별 구역으로 묶어 본다.
+- **분류**: 논문마다 소속 프로젝트(여러 개일 수 있다)를 적어 두고(그 논문의 status.json), 홈
+  목록을 프로젝트로 걸러 보거나 프로젝트별 구역으로 묶어 본다.
 - **저장 위치**: 프로젝트 폴더 **하나만** 고르면 종류별 자리가 그 안에 자동으로 잡힌다.
 
 ```
@@ -27,8 +28,19 @@
 ]}
 ```
 
-논문 쪽 배정은 `workdir.set_project`가 status.json에 쓴다. 프로젝트를 지워도 그 논문의 배정
-문자열은 남지만, 없는 id는 어디서나 '미분류'로 취급한다(유령 구역이 생기지 않게).
+논문 하나가 **여러 프로젝트에 속할 수 있다**(N:M) — 서베이에도, 지금 쓰는 논문의 참고 묶음에도.
+논문 쪽 소속은 `workdir.set_projects`가 status.json에 목록(`projects`)으로 쓴다. 규칙:
+
+- **주 프로젝트 = 목록의 첫 항목.** 논문 자체에 걸리는 설정(이름 규칙·자동 저장·서지 보강)은
+  주 프로젝트의 것을 따른다 — 폴더 이름은 하나뿐이고, 변환 한 번에 설정도 하나라야 결과가
+  흔들리지 않는다.
+- 저장 위치 사본은 **폴더를 가진 소속 프로젝트마다** 하나씩 생긴다(§library). 그런 프로젝트가
+  하나도 없으면 공통 저장 위치로. 사본에 걸리는 설정(내보내기 형식·BibTeX)은 그 폴더의
+  프로젝트 것(공통 폴더면 전역) — 볼트마다 노트 앱이 다를 수 있다.
+- 편수는 논문이 속한 프로젝트마다 한 번씩 센다. 미분류 = (없는 id를 거른 뒤) 소속 목록이 빈 논문.
+
+프로젝트를 지울 때 작업 폴더를 넘기면(`delete(pid, workspace)`) 논문들에서 그 id를 뗀다. 안
+넘기면 논문 쪽 문자열은 남지만, 없는 id는 어디서나 걸러 읽는다(유령 구역이 생기지 않게).
 """
 
 from __future__ import annotations
@@ -52,7 +64,7 @@ SUBDIR = {"en": "", "ko": "ko", "pdf": "pdf"}
 ALL = ""  # 모든 프로젝트 (필터 전용)
 NONE = "__none__"  # 미분류 — 프로젝트에 넣지 않은 논문
 NONE_LABEL = "미분류"
-ALL_LABEL = "모든 프로젝트"
+ALL_LABEL = "모든 컬렉션"
 
 _MAX_NAME = 60
 
@@ -76,7 +88,7 @@ def setting(pid: str | None, key: str):  # noqa: ANN201
     '안 정함'과 '거짓으로 정함'을 구별해야 하므로 없으면 None을 준다 (False와 다르다).
     """
     if key not in SETTINGS:
-        raise ValueError(f"프로젝트 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
+        raise ValueError(f"컬렉션 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
     p = get(pid or "")
     if not p:
         return None
@@ -87,7 +99,7 @@ def setting(pid: str | None, key: str):  # noqa: ANN201
 def set_setting(pid: str, key: str, value) -> bool:  # noqa: ANN001
     """프로젝트 설정 지정/해제. `value`가 None이면 해제(전역 설정을 따르게 된다)."""
     if key not in SETTINGS:
-        raise ValueError(f"프로젝트 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
+        raise ValueError(f"컬렉션 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
     data = load()
     for p in data["projects"]:
         if p["id"] != pid:
@@ -181,6 +193,15 @@ def normalize(pid: str | None) -> str:
     return pid if pid and exists(pid) else ""
 
 
+def normalize_many(pids) -> list[str]:  # noqa: ANN001 — iterable[str] | None
+    """논문에 적힌 소속 목록 → 쓸 수 있는 id들. 없는 프로젝트·특수 값·중복은 빼고 순서는 유지한다.
+
+    projects.json은 **한 번만** 읽는다 — 홈 목록을 그릴 때 논문마다 부르기 때문.
+    """
+    known = {p["id"] for p in all_projects()}
+    return [pid for pid in dict.fromkeys(str(x) for x in (pids or []) if x) if pid in known]
+
+
 def name_of(pid: str | None) -> str:
     """사람이 읽을 이름. 미분류·없어진 프로젝트는 '미분류'."""
     p = get(pid or "")
@@ -204,7 +225,7 @@ def clean_name(name: str) -> str:
 def create(name: str, root: str | None = None) -> dict:
     """프로젝트 만들기. 이름이 비면 '프로젝트 N'으로 붙여 준다. 반환: 만든 프로젝트."""
     data = load()
-    label = clean_name(name) or f"프로젝트 {len(data['projects']) + 1}"
+    label = clean_name(name) or f"컬렉션 {len(data['projects']) + 1}"
     proj = {
         "id": _new_id({p["id"] for p in data["projects"]}),
         "name": label,
@@ -234,8 +255,19 @@ def rename(pid: str, name: str) -> bool:
     return False
 
 
-def delete(pid: str) -> bool:
-    """프로젝트 삭제 — 폴더나 파일은 건드리지 않는다. 그 논문들은 미분류가 된다."""
+def delete(pid: str, workspace: Path | None = None) -> bool:
+    """프로젝트 삭제 — 폴더나 파일은 건드리지 않는다. 반환: 그런 프로젝트가 있었는지.
+
+    `workspace`(작업 폴더)를 주면 그 안의 모든 논문(숨김 포함)에서 이 id를 뗀다 — 다른 소속은
+    그대로라, 이 프로젝트에만 속했던 논문만 미분류가 된다. 안 주면 논문 쪽 문자열은 남지만
+    없는 id라 어디서나 걸러 읽힌다.
+    """
+    if workspace is not None:
+        from md4paper.workdir import recent_workdirs, remove_from_project  # 순환 import 피하기
+
+        for row in recent_workdirs(Path(workspace), limit=100_000, include_hidden=True):
+            if pid in row["projects"]:
+                remove_from_project(row["root"], pid)
     data = load()
     rest = [p for p in data["projects"] if p["id"] != pid]
     if len(rest) == len(data["projects"]):

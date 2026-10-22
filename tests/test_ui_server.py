@@ -114,19 +114,27 @@ def test_ui_home_upload_page(tmp_path):
     pipeline.convert(CORPUS / "sample_arxiv.md", WorkDir(tmp_path / "p" / "p.md4"))
     # 워크디렉토리 없이 실행 → 업로드 홈
     body = _serve_and_get(["--upload-dir", str(tmp_path)], _free_port())
-    assert "논문 PDF" in body
-    assert "끌어다" in body  # 업로드 드롭존 (docling 단일 백엔드라 변환 방식 선택 없음)
-    assert "AI 서비스" in body  # 프로바이더/키 설정 섹션
-    # 저장 위치 패널 — 영어/한국어/PDF를 각각 다른 폴더로, 이름 규칙·작업 폴더도 여기서 변경
-    assert "저장 위치" in body
-    assert "영어 마크다운" in body and "한국어 마크다운" in body and "PDF 원본" in body
-    assert "이름 규칙" in body and "기존 논문·PDF 이름 정리" in body
-    assert "작업 폴더" in body
+    # 2단 틀 — 왼쪽 컬렉션 사이드바(모든 논문·미분류·새 컬렉션·설정) | 오른쪽 목록. 뷰어와 같은 .md4-body
+    assert "md4-hside" in body and "md4-hmain" in body and "md4-body" in body
+    assert "모든 논문" in body and "미분류" in body and "새 컬렉션" in body
+    assert '"컬렉션"' in body  # 사이드바 캡 — 화면 말은 '컬렉션'(코드 식별자는 project 그대로)
+    assert '"설정"' in body  # 사이드바 바닥 ⚙ 설정 (전역 설정 대화상자는 눌렀을 때 짓는다)
+    assert "올리기" in body
+    # 설정 패널은 첫 화면에서 뺐다 — 대화상자 안의 문구가 홈 첫 렌더에 섞여 나오면 안 된다
+    assert "AI 서비스" not in body and "기존 논문·PDF 이름 정리" not in body
+    # 창 전체로 끌어 놓기 — 문서 수준 끌기 스크립트와 목록 열을 덮는 안내
+    assert "__md4FileDrag" in body and "md4-dropov" in body
+    # 목록 카드: 사이드바로 끌 수 있고, 소속 프로젝트 태그를 단다 (미분류면 '미분류' 태그)
+    assert "data-md4-root" in body and "md4-ptag" in body
+    # 오른쪽 미리보기 열(Zotero식) — 아무것도 고르지 않았으면 범위 요약 + 안내. 카드 한 번 = 선택,
+    # 두 번(dblclick)·Enter = 열기. 목록 위 선택 툴바는 없앴다(일괄 동작은 미리보기 자리로).
+    assert "md4-hprev" in body and "논문을 고르면 여기에 미리보기" in body
+    assert "dblclick" in body
     # 목록 카드의 제목 말줄임 — .nicegui-column은 자식을 컬럼 폭으로 stretch하지 않으므로
     # 제목 라벨에 truncate+min-w-0, 그 부모 행에 w-full이 없으면 긴 제목이 화면 밖으로 흘러넘친다.
     assert '"truncate","min-w-0"' in body  # 제목 라벨
     assert '"no-wrap","w-full","min-w-0"' in body  # 제목을 감싸는 행
-    # 드롭존 클릭 — 진짜 <input type=file>이 드롭존을 덮고 있어야 파일 선택창이 뜬다.
+    # '올리기' 클릭 — 진짜 <input type=file>이 단추를 덮고 있어야 파일 선택창이 뜬다.
     # 입력을 감춰 두고(display:none) 서버를 거쳐 JS로 input.click()을 부르면 사용자 제스처가 끊겨
     # 웹뷰(앱 창)가 선택창을 막는다 — 드래그&드롭만 되고 클릭은 먹통이 됐다.
     assert ".md4-upload .q-uploader__header { position: absolute; inset: 0;" in body
@@ -142,5 +150,6 @@ def test_ui_home_empty_workspace_says_where_it_is_looking(tmp_path):
     """
     body = _serve_and_get(["--upload-dir", str(tmp_path)], _free_port())
     assert "아직 변환한 논문이 없습니다" in body
+    assert "창 위로 끌어다 놓거나" in body  # 빈 목록 = 큰 올리기 안내
     assert "보고 있는 작업 폴더" in body and str(tmp_path) in body
     assert "저장 위치 → 작업 폴더" in body

@@ -126,11 +126,11 @@ def _copies(wd: WorkDir) -> list[Path]:
 
     targets = [wd.out_images]
     try:
-        project = library.project_of(wd)
-        for which in library.WHICH:
-            d = library.dir_for(which, project)
-            if d is not None:
-                targets.append(d / "images" / wd.root.stem)
+        for project in library.export_targets(wd):  # 폴더 가진 소속 프로젝트마다 사본이 있다
+            for which in library.WHICH:
+                d = library.dir_for(which, project)
+                if d is not None:
+                    targets.append(d / "images" / wd.root.stem)
     except Exception:  # noqa: BLE001 — 저장 위치를 못 읽어도 본문 그림은 바꾼다
         pass
     return list(dict.fromkeys(targets))

@@ -229,11 +229,12 @@ def apply_naming(workspace) -> dict:  # noqa: ANN001 — Path | str
             counts["unchanged"] += 1
             continue
         counts["renamed"] += 1
-        project = library.project_of(new_wd)
-        if library.configured(project):  # 저장 위치 사본도 새 이름으로 (자동 저장이 꺼져 있어도 — 명시적 정리)
+        places = library.export_targets(new_wd)  # 폴더 가진 소속 프로젝트마다 사본이 있다
+        if any(library.configured(p) for p in places):  # 저장 위치 사본도 새 이름으로 (자동 저장이 꺼져 있어도 — 명시적 정리)
             try:
                 library.export_paper(new_wd)
-                library.remove_stem(old_stem, project)  # 옛 이름 사본은 그 논문의 프로젝트 폴더에서
+                for p in places:  # 옛 이름 사본은 그 논문이 사본을 둔 폴더마다
+                    library.remove_stem(old_stem, p)
             except OSError:
                 pass  # 사본 정리 실패가 리네임 자체를 막지 않게
     return counts
