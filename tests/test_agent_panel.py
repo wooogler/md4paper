@@ -134,6 +134,53 @@ def test_open_panel_pads_shared_body_frame():
     assert "classList.toggle('ag-open'" in JS
 
 
+def test_narrow_window_rules_exist_and_override_push():
+    """좁은 창 — 덮기(ag-overlay)는 밀기 규칙 **뒤**에 와야 이긴다. 홈 열 접기·서랍 머리줄 줄이기도
+    agent_panel CSS 안에 있다(home.py는 뷰포트만 보는 미디어 쿼리라 서랍이 민 폭을 모른다)."""
+    push = CSS.index("body.ag-open .md4-body { padding-right: var(--ag-w); }")
+    over = CSS.index("body.ag-open.ag-overlay .md4-body { padding-right: 0; }")
+    assert push < over
+    assert "body.ag-open.ag-overlay #md4-agent { box-shadow:" in CSS
+    assert "body.ag-open.ag-narrow .md4-hprev { display: none; }" in CSS
+    assert "body.ag-open.ag-tight .md4-hside { display: none; }" in CSS
+    assert "#md4-agent.ag-slim .ag-cost { display: none; }" in CSS
+    dark = CSS.split("@media (prefers-color-scheme: dark)")[1]
+    assert "ag-overlay #md4-agent" in dark
+    for cls in ("ag-overlay", "ag-narrow", "ag-tight"):
+        assert f"cl.toggle('{cls}'" in JS
+    assert "panel.classList.toggle('ag-slim'" in JS
+
+
+def test_narrow_window_constants_are_single_sourced():
+    """경계값은 파이썬 상수 하나가 출처다 — JS의 var와 어긋나면 테스트가 잡는다."""
+    ap = agent_panel
+    assert (f"var AG_MIN = {ap.AG_MIN_PX}, AG_MAX = {ap.AG_MAX_PX}, "
+            f"AG_KEEP = {ap.AG_KEEP_PX};") in JS
+    assert (f"var AG_OVERLAY_BELOW = {ap.AG_OVERLAY_BELOW}, AG_NARROW_BELOW = {ap.AG_NARROW_BELOW}, "
+            f"AG_TIGHT_BELOW = {ap.AG_TIGHT_BELOW}, AG_SLIM_BELOW = {ap.AG_SLIM_BELOW};") in JS
+    # 숫자는 그 한 줄에만 — 다른 곳에 경계값을 날것으로 다시 쓰지 않는다
+    lay = _js_block(JS, "function syncLayout(")
+    assert "AG_OVERLAY_BELOW" in lay and str(ap.AG_OVERLAY_BELOW) not in lay
+    assert ap.AG_TIGHT_BELOW < ap.AG_NARROW_BELOW and ap.AG_MIN_PX <= ap.AG_MAX_PX
+
+
+def test_width_clamps_to_viewport_on_open_resize_and_drag():
+    """기억한 폭을 그대로 쓰면 좁은 창에서 서랍이 본문을 덮는다 — 열 때(syncBody)·창 크기(resize)·
+    드래그(setWidth) 모두 syncLayout을 거치고, localStorage엔 드래그 값만 쓴다."""
+    assert "syncLayout();" in _js_block(JS, "function syncBody(")
+    assert "window.addEventListener('resize', function(){ syncTop(); syncLayout(); });" in JS
+    sw = _js_block(JS, "function setWidth(")
+    assert "agCap()" in sw and "syncLayout();" in sw and "lsSet(LS_W" in sw
+    assert "lsSet(" not in _js_block(JS, "function syncLayout(")
+    assert "window.innerWidth - AG_KEEP" in _js_block(JS, "function agCap(")
+
+
+def test_jump_back_pill_avoids_overlay_drawer():
+    place = _js_block(JS, "function jbPlace(")
+    assert "classList.contains('ag-overlay')" in place
+    assert "panel.getBoundingClientRect().left" in place
+
+
 def test_panel_z_matches_memo_drawer():
     """메모 서랍과 같은 층 — 번갈아 열리는 같은 자리다."""
     z = int(re.search(r"z-index:\s*(\d+)", _rule(CSS, "#md4-agent")).group(1))

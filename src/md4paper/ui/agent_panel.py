@@ -32,11 +32,28 @@ JUMP_BACK_API = "__mdJumpBack"   # 다른 점프(목차·섹션 트리)가 나�
 JUMP_EDGE_PX = 6                 # 기준선 = 컨테이너 위끝 + 6px. app.py PDF 싱크(top+6)와 같은 정의라
                                  # "화면 맨 위가 읽던 자리"가 뷰어 전체에서 한 뜻이 된다
 
+# 좁은 창 대응 — JS syncLayout()의 `var AG_… = …` 값과 한 짝이다(테스트가 대조한다).
+# 서랍 폭은 사용자가 끈 값(localStorage)을 그대로 쓰지 않고 열 때·창 크기가 바뀔 때마다 뷰포트에 맞춘다.
+AG_MIN_PX = 320                  # 서랍 최소 폭 — 머리줄·입력창이 버티는 하한
+AG_MAX_PX = 760                  # 서랍 최대 폭 (드래그 상한)
+AG_KEEP_PX = 360                 # 서랍이 본문 몫으로 늘 남겨 두는 폭 — 창이 본문을 통째로 덮지 않게
+AG_OVERLAY_BELOW = 760           # 남는 본문 폭이 이보다 좁으면 밀지 않고 덮는다(body.ag-overlay).
+                                 # 뷰어(레일+패널+캔버스)·홈(사이드바+목록+미리보기)은 이보다 좁게
+                                 # 밀리면 열이 짓눌려 카드·본문이 세로로 깨진다 → 본문은 제 폭에 두고
+                                 # 서랍만 그 위에 띄운다
+AG_NARROW_BELOW = 1100           # 밀기 모드에서 남는 폭이 이보다 좁으면 홈 미리보기 열을 접는다(ag-narrow).
+                                 # home.py의 @media(max-width:1100px)와 같은 경계 — 그 미디어 쿼리는
+                                 # 뷰포트만 봐서 서랍이 민 폭을 모른다
+AG_TIGHT_BELOW = 700             # 더 좁으면 홈 사이드바까지 접는다(ag-tight). 지금 값으로는 그 전에
+                                 # 오버레이로 넘어가 닿지 않지만, 오버레이 경계를 낮출 때를 위한 다음 칸
+AG_SLIM_BELOW = 380              # 서랍 자체가 이보다 좁으면 머리줄에서 비용을 숨기고 모델 칸을 줄인다
+
 CSS = """
 /* 오른쪽 에이전트 컬럼 — 메모 서랍과 같은 자리·같은 시각 언어 (동시에 열리지 않는다).
    본문을 덮지 않고 **오른쪽을 차지한다**: 열리면 본문 틀(.md4-body — 홈·뷰어 공통)이 그만큼
    좁아진다(body.ag-open). 위치는 fixed — 서랍이 body에 붙어 있어야 화면을 갈아 끼워도 대화와
-   진행 중인 답이 살아남는다. 자리는 padding으로 비운다. */
+   진행 중인 답이 살아남는다. 자리는 padding으로 비운다. 좁은 창에서는 예외로 덮는다(아래 ag-overlay).
+   --ag-w는 JS(syncLayout)가 뷰포트에 맞춰 다시 쓴다 — 여기 값은 스크립트가 돌기 전 기본값이다. */
 :root { --ag-w: 400px; --ag-top: 50px; }
 /* --ag-top은 헤더를 실제로 재서 넣는다(아래 syncTop) — 헤더 높이가 고정이 아니라 상수로 두면
    서랍이 헤더 위로 올라와 탭 라벨을 가린다. */
@@ -45,6 +62,18 @@ CSS = """
   color: #37352f; }
 #md4-agent.open { display: flex; }
 body.ag-open .md4-body { padding-right: var(--ag-w); }
+/* 좁은 창 — 남는 본문 폭이 모자라면(JS syncLayout이 붙인다) 밀지 않고 덮는다. 본문은 제 폭 그대로
+   두고 서랍만 위에 띄우므로 뷰어·홈의 열이 짓눌리지 않는다. 떠 있다는 걸 그림자로 분명히 한다. */
+body.ag-open.ag-overlay .md4-body { padding-right: 0; }
+body.ag-open.ag-overlay #md4-agent { box-shadow: -12px 0 36px rgba(0,0,0,.22); }
+/* 밀기 모드인데 홈 세 열이 다 안 들어갈 때 — 미리보기 열부터, 더 좁으면 사이드바까지 접는다.
+   home.py의 @media(max-width:1100px)는 뷰포트만 보므로 서랍이 민 폭은 여기서 반영한다. */
+body.ag-open.ag-narrow .md4-hprev { display: none; }
+body.ag-open.ag-tight .md4-hside { display: none; }
+/* 서랍 자체가 좁을 때 — 머리줄(세션·모델·비용·새 세션·닫기)이 한 줄에 버티게 덜 중요한 것부터 뺀다 */
+#md4-agent.ag-slim .ag-cost { display: none; }
+#md4-agent.ag-slim .ag-model { max-width: 84px; }
+#md4-agent.ag-slim .ag-new { padding: 3px 5px; }
 /* 너비 드래그 핸들 — 목차·컬럼 핸들과 같은 감각 */
 .ag-handle { position: absolute; left: 0; top: 0; bottom: 0; width: 9px; margin-left: -4px;
   cursor: col-resize; z-index: 1; }
@@ -206,6 +235,7 @@ a.chat-cite-note:hover { background: #f7cf60; }
 
 @media (prefers-color-scheme: dark) {
   #md4-agent { background: #1f1f1f; border-color: #3a3a3a; color: #d4d4d4; }
+  body.ag-open.ag-overlay #md4-agent { box-shadow: -12px 0 36px rgba(0,0,0,.6); }
   .ag-head, .ag-foot { border-color: #2c2c2c; }
   .ag-model, .ag-a code, .ag-a pre, .ag-tool { background: #2c2c2c; color: #b8b8b8; }
   .ag-tool b { color: #d0d0d0; }
@@ -657,9 +687,14 @@ JS = r"""
     if (!g || !r || r.width < 160 || r.height < 120){ jbEl.classList.remove('on'); return null; }
     // 컨테이너 rect를 재기 때문에 서랍 폭(--ag-w)·본문 padding·목차 너비·텍스트|PDF 분할을
     // 하나도 몰라도 언제나 '지금 읽는 영역' 안에 온다. +24는 세로 스크롤바 여유.
-    var right = Math.max(12, window.innerWidth - r.right + 24);
+    // 예외 하나 — 좁은 창의 오버레이 모드(body.ag-overlay)에선 서랍이 본문 위에 떠 있어 컨테이너가
+    // 서랍 밑까지 뻗는다. 그때는 서랍 왼끝을 보이는 오른끝으로 삼아 알약이 서랍에 가리지 않게 한다.
+    var vr = r.right;
+    if (document.body.classList.contains('ag-overlay') && panel.classList.contains('open'))
+      vr = Math.min(vr, panel.getBoundingClientRect().left);
+    var right = Math.max(12, window.innerWidth - vr + 24);
     var bottom = Math.max(14, window.innerHeight - r.bottom + 18);
-    var mw = Math.max(180, Math.min(300, r.width - 28));
+    var mw = Math.max(180, Math.min(300, vr - r.left - 28));
     var key = Math.round(right) + '|' + Math.round(bottom) + '|' + Math.round(mw);
     if (key !== jbKey){                 // 값이 바뀔 때만 써서 레이아웃을 흔들지 않는다
       jbKey = key;
@@ -1243,6 +1278,7 @@ JS = r"""
     var on = panel.classList.contains('open');
     document.body.classList.toggle('ag-open', on);
     lsSet(LS_OPEN, on ? '1' : null);
+    syncLayout();
   }
   // 서랍 위끝을 헤더 아래에 맞춘다 (메모 서랍이 여는 순간 하는 것과 같은 계산).
   function syncTop(){
@@ -1257,20 +1293,45 @@ JS = r"""
     var n = 0;
     (function again(){ if (!syncTop() && ++n < 120) requestAnimationFrame(again); })();
   }
-  window.addEventListener('resize', syncTop);
+  window.addEventListener('resize', function(){ syncTop(); syncLayout(); });
   syncTop();
   if (window.MutationObserver)
     new MutationObserver(syncBody).observe(panel, {attributes: true, attributeFilter: ['class']});
 
-  // 너비 드래그 — 브라우저에 기억시킨다 (--ag-w를 서랍 너비와 본문 padding이 같이 읽는다)
-  var AG_MIN = 320, AG_MAX = 760;
-  function setWidth(px){
-    px = Math.max(AG_MIN, Math.min(AG_MAX, Math.round(px)));
-    document.documentElement.style.setProperty('--ag-w', px + 'px');
-    lsSet(LS_W, String(px));
+  // 너비 — 사용자가 끈 폭(agWant, localStorage)과 실제로 쓰는 폭(--ag-w)을 나눈다. 실제 폭은 열 때·
+  // 창 크기가 바뀔 때·끌 때마다 뷰포트에 맞춰 다시 잰다(syncLayout). 창을 잠깐 줄였다고 기억한
+  // 폭까지 줄어들면 안 되므로 localStorage는 드래그만 쓴다.
+  // 값은 파이썬 AG_* 상수와 한 짝이다(테스트가 대조한다).
+  var AG_MIN = 320, AG_MAX = 760, AG_KEEP = 360;
+  var AG_OVERLAY_BELOW = 760, AG_NARROW_BELOW = 1100, AG_TIGHT_BELOW = 700, AG_SLIM_BELOW = 380;
+  var agWant = 400;
+  function agCap(){          // 지금 뷰포트에서 서랍이 가질 수 있는 최대 폭 — 본문 몫 AG_KEEP는 남긴다
+    return Math.min(AG_MAX, Math.max(AG_MIN, window.innerWidth - AG_KEEP));
+  }
+  // 서랍 폭과 body 모드 클래스를 한 계산에서 정한다:
+  //   ag-overlay — 남는 본문 폭 < AG_OVERLAY_BELOW → 밀지 않고 덮는다(본문 padding 0)
+  //   ag-narrow / ag-tight — 밀기 모드에서 남는 폭이 모자라 홈 미리보기 열 / 사이드바를 접는다
+  //   (오버레이일 땐 본문이 제 폭이라 접을 까닭이 없다 — 붙이면 넓은 홈에서 미리보기만 사라진다)
+  //   ag-slim(서랍에) — 서랍 자체가 좁아 머리줄을 줄인다
+  function syncLayout(){
+    var vw = window.innerWidth;
+    var w = Math.min(vw, agWant, agCap());
+    document.documentElement.style.setProperty('--ag-w', w + 'px');
+    var on = panel.classList.contains('open'), rest = vw - w;
+    var over = on && rest < AG_OVERLAY_BELOW;
+    var cl = document.body.classList;
+    cl.toggle('ag-overlay', over);
+    cl.toggle('ag-narrow', on && !over && rest < AG_NARROW_BELOW);
+    cl.toggle('ag-tight', on && !over && rest < AG_TIGHT_BELOW);
+    panel.classList.toggle('ag-slim', w < AG_SLIM_BELOW);
+  }
+  function setWidth(px){     // 드래그 — 지금 뷰포트 상한까지만 받고, 받은 값을 기억한다
+    agWant = Math.max(AG_MIN, Math.min(agCap(), Math.round(px)));
+    lsSet(LS_W, String(agWant));
+    syncLayout();
   }
   var w0 = parseInt(lsGet(LS_W), 10);
-  if (w0) setWidth(w0);
+  if (w0) agWant = Math.max(AG_MIN, Math.min(AG_MAX, w0));
   var agDrag = false;
   panel.querySelector('.ag-handle').addEventListener('mousedown', function(ev){
     agDrag = true; ev.preventDefault(); document.body.style.userSelect = 'none';
