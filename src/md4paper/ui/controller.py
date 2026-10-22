@@ -14,9 +14,9 @@ from md4paper.ir import Flavor, GlossaryEntry, GlossaryList, Manifest
 from md4paper.review import manifest as manifest_io
 from md4paper.workdir import WorkDir
 
-LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, "skip", "merge-up", "drop"]
-# run-in 헤더는 italic(이탤릭 표기)도 고를 수 있다
-RUNIN_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, "italic", "skip", "merge-up", "drop"]
+# italic: 헤더가 아닌 기울임 문단 — run-in 소제목, CCS Concepts·Keywords 같은 앞부분 라벨
+LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, "italic", "skip", "merge-up", "drop"]
+RUNIN_LEVEL_OPTIONS = LEVEL_OPTIONS
 SETTING_FIELDS = (
     "citation_parts", "reference_links", "flavor", "caption_style", "runin_headings",
     "korean_style", "translate_headers", "translate_references",
@@ -67,7 +67,14 @@ class UIController:
 
     def __init__(self, wd: WorkDir) -> None:
         self.wd = wd
+        before = wd.sections_yaml.read_text(encoding="utf-8") if wd.sections_yaml.exists() else None
         self.manifest: Manifest = manifest_io.load(wd)
+        # load가 옛 매니페스트를 고쳐 썼으면(앞부분 라벨 → 기울임 등) en.md도 맞춘다 — 손으로 고친 en.md는 그대로
+        if (before is not None and wd.raw_md.exists() and not self.has_manual_edit()
+                and wd.sections_yaml.read_text(encoding="utf-8") != before):
+            from md4paper import pipeline
+
+            pipeline.run_assemble(wd)
 
     # --- 섹션 편집 ---
     def section(self, sid: str):
@@ -129,8 +136,12 @@ class UIController:
         depth = int(depth_s or 0)
         value = int(level) if str(level).isdigit() else level
         n = 0
+        from md4paper.structure import numbering
+
         for s in self.manifest.sections:
             if self.group_key(s) == (scheme, depth):
+                if isinstance(value, int) and numbering.is_front_matter_label(s.text):
+                    continue  # 'Abstract와 같은 무번호 → 제목 1'에 Keywords·CCS 라벨이 딸려 올라가지 않게
                 s.level = value
                 s.needs_review = False
                 n += 1
