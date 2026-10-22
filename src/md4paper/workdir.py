@@ -191,6 +191,16 @@ class WorkDir:
         """뷰어 챗봇 대화 기록 (읽는 사람의 것이라 파이프라인이 덮어쓰지 않는다)."""
         return self.root / "chat.json"
 
+    @property
+    def preview_json(self) -> Path:
+        """홈 미리보기 캐시 — 출력 md에서 뽑은 초록(en/ko)과 그때의 md 표지 (preview.py)."""
+        return self.root / "preview.json"
+
+    @property
+    def thumb_png(self) -> Path:
+        """홈 미리보기 대표 이미지 캐시 — 그림이 없을 때 원본 PDF 1쪽 렌더 (preview.py)."""
+        return self.root / "thumb.png"
+
     # --- 생성 ---
     def ensure(self) -> None:
         for d in (self.extract, self.structure, self.cite, self.translate, self.out, self.logs):
