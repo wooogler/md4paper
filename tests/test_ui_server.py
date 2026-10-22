@@ -114,9 +114,10 @@ def test_ui_home_upload_page(tmp_path):
     pipeline.convert(CORPUS / "sample_arxiv.md", WorkDir(tmp_path / "p" / "p.md4"))
     # 워크디렉토리 없이 실행 → 업로드 홈
     body = _serve_and_get(["--upload-dir", str(tmp_path)], _free_port())
-    # 2단 틀 — 왼쪽 프로젝트 사이드바(모든 논문·미분류·새 프로젝트·설정) | 오른쪽 목록. 뷰어와 같은 .md4-body
+    # 2단 틀 — 왼쪽 컬렉션 사이드바(모든 논문·미분류·새 컬렉션·설정) | 오른쪽 목록. 뷰어와 같은 .md4-body
     assert "md4-hside" in body and "md4-hmain" in body and "md4-body" in body
-    assert "모든 논문" in body and "미분류" in body and "새 프로젝트" in body
+    assert "모든 논문" in body and "미분류" in body and "새 컬렉션" in body
+    assert '"컬렉션"' in body  # 사이드바 캡 — 화면 말은 '컬렉션'(코드 식별자는 project 그대로)
     assert '"설정"' in body  # 사이드바 바닥 ⚙ 설정 (전역 설정 대화상자는 눌렀을 때 짓는다)
     assert "올리기" in body
     # 설정 패널은 첫 화면에서 뺐다 — 대화상자 안의 문구가 홈 첫 렌더에 섞여 나오면 안 된다

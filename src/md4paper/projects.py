@@ -1,4 +1,5 @@
 """프로젝트 — 논문 묶음. 묶음마다 폴더 하나를 정하면 그 안이 저절로 정리된다.
+화면·CLI에서는 '컬렉션'이라 부른다(코드 식별자는 project 그대로).
 
 한 사람이 동시에 여러 주제를 읽는다: 학위 서베이, 수업 과제, 진행 중인 연구. 전역 '저장 위치'
 하나만 있으면 모든 논문이 한 폴더에 섞이고 홈 목록도 최근순 한 줄로만 쌓인다. 프로젝트는 그
@@ -63,7 +64,7 @@ SUBDIR = {"en": "", "ko": "ko", "pdf": "pdf"}
 ALL = ""  # 모든 프로젝트 (필터 전용)
 NONE = "__none__"  # 미분류 — 프로젝트에 넣지 않은 논문
 NONE_LABEL = "미분류"
-ALL_LABEL = "모든 프로젝트"
+ALL_LABEL = "모든 컬렉션"
 
 _MAX_NAME = 60
 
@@ -87,7 +88,7 @@ def setting(pid: str | None, key: str):  # noqa: ANN201
     '안 정함'과 '거짓으로 정함'을 구별해야 하므로 없으면 None을 준다 (False와 다르다).
     """
     if key not in SETTINGS:
-        raise ValueError(f"프로젝트 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
+        raise ValueError(f"컬렉션 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
     p = get(pid or "")
     if not p:
         return None
@@ -98,7 +99,7 @@ def setting(pid: str | None, key: str):  # noqa: ANN201
 def set_setting(pid: str, key: str, value) -> bool:  # noqa: ANN001
     """프로젝트 설정 지정/해제. `value`가 None이면 해제(전역 설정을 따르게 된다)."""
     if key not in SETTINGS:
-        raise ValueError(f"프로젝트 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
+        raise ValueError(f"컬렉션 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
     data = load()
     for p in data["projects"]:
         if p["id"] != pid:
@@ -224,7 +225,7 @@ def clean_name(name: str) -> str:
 def create(name: str, root: str | None = None) -> dict:
     """프로젝트 만들기. 이름이 비면 '프로젝트 N'으로 붙여 준다. 반환: 만든 프로젝트."""
     data = load()
-    label = clean_name(name) or f"프로젝트 {len(data['projects']) + 1}"
+    label = clean_name(name) or f"컬렉션 {len(data['projects']) + 1}"
     proj = {
         "id": _new_id({p["id"] for p in data["projects"]}),
         "name": label,

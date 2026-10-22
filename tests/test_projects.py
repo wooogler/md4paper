@@ -49,7 +49,7 @@ def test_create_keeps_order_and_names_the_unnamed():
     first = projects.create("튜터 챗봇 서베이")
     second = projects.create("   ")  # 이름을 비워 두고 만든 경우
 
-    assert [p["name"] for p in projects.all_projects()] == ["튜터 챗봇 서베이", "프로젝트 2"]
+    assert [p["name"] for p in projects.all_projects()] == ["튜터 챗봇 서베이", "컬렉션 2"]
     assert first["id"] != second["id"]
     assert projects.get(first["id"])["name"] == "튜터 챗봇 서베이"
     assert projects.exists(first["id"]) and not projects.exists("p-없는-것")
@@ -599,9 +599,9 @@ def test_a_bad_naming_override_falls_back_instead_of_breaking_names(tmp_path):
 
 def test_settings_are_rejected_for_unknown_keys(tmp_path):
     pid = projects.create("서베이", str(tmp_path / "V"))["id"]
-    with pytest.raises(ValueError, match="프로젝트 설정이 아닙니다"):
+    with pytest.raises(ValueError, match="컬렉션 설정이 아닙니다"):
         projects.set_setting(pid, "korean_style", "해요체")
-    with pytest.raises(ValueError, match="프로젝트 설정이 아닙니다"):
+    with pytest.raises(ValueError, match="컬렉션 설정이 아닙니다"):
         projects.setting(pid, "korean_style")
 
 
@@ -613,3 +613,33 @@ def test_a_deleted_project_setting_does_not_leak_to_papers(tmp_path):
 
     assert projects.setting(pid, "export_target") is None
     assert config.resolve_export_target(pid) == config.resolve_export_target()
+
+
+# --- CLI — 화면 말은 '컬렉션', 옛 이름 `project`는 숨은 별칭 ---------------------
+
+
+def test_cli_collection_is_the_name_and_project_still_works():
+    from click.testing import CliRunner
+
+    from md4paper.cli import cli
+
+    pid = projects.create("서베이")["id"]
+    runner = CliRunner()
+
+    top = runner.invoke(cli, ["--help"])
+    assert top.exit_code == 0
+    assert "collection" in top.output and "project" not in top.output  # 별칭은 목록에 안 나온다
+
+    new = runner.invoke(cli, ["collection", "use", "서베이"])
+    assert new.exit_code == 0, new.output
+    assert "새 논문이 이 컬렉션으로 들어갑니다" in new.output
+    assert projects.active() == pid
+
+    projects.set_active(projects.ALL)
+    old = runner.invoke(cli, ["project", "use", "서베이"])  # 손에 익은 옛 명령도 같은 일을 한다
+    assert old.exit_code == 0, old.output
+    assert projects.active() == pid
+
+    missing = runner.invoke(cli, ["collection", "use", "없는것"])
+    assert missing.exit_code != 0
+    assert "맞는 컬렉션이 없습니다 — 목록: md4paper collection" in missing.output

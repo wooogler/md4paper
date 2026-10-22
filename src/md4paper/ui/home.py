@@ -404,7 +404,7 @@ def build_home(state: dict) -> None:
             refresh_views()
 
         with host, ui.dialog() as dlg, ui.card().classes("gap-2").style("width:380px"):
-            ui.label("프로젝트 이름 바꾸기").classes("font-bold")
+            ui.label("컬렉션 이름 바꾸기").classes("font-bold")
             inp = ui.input(value=name_of(pid)).props("dense outlined autofocus").classes("w-full")
             inp.on("keydown.enter", save)
             with ui.row().classes("justify-end w-full gap-2"):
@@ -414,7 +414,7 @@ def build_home(state: dict) -> None:
 
     async def pick_project_folder(pid: str) -> None:
         cur = projects.root_of(pid) or ws()
-        picked = await desktop.choose_folder(f"'{name_of(pid)}' 프로젝트 폴더 선택", str(cur))
+        picked = await desktop.choose_folder(f"'{name_of(pid)}' 컬렉션 폴더 선택", str(cur))
         if not picked:  # 취소면 조용히 원래 값 유지
             return
         projects.set_root(pid, picked)  # ko/·pdf/ 자리까지 만들어 준다
@@ -436,16 +436,16 @@ def build_home(state: dict) -> None:
             # 논문에서 떼는 일까지 한곳에서(projects.delete) — 다른 프로젝트 소속은 그대로 남는다
             await run.io_bound(projects.delete, pid, ws())
             refresh_views(rescan=True)
-            ui.notify(f"'{name}' 프로젝트를 지웠습니다" + (f" · {n}편에서 소속을 뗐습니다" if n else ""),
+            ui.notify(f"'{name}' 컬렉션을 지웠습니다" + (f" · {n}편에서 소속을 뗐습니다" if n else ""),
                       type="positive")
 
         with host, ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:420px"):
-            ui.label(f"'{name}' 프로젝트를 지울까요?").classes("font-bold")
-            ui.label(f"그 논문 {n}편에서 이 소속만 떼어 냅니다 — 다른 프로젝트 소속과 폴더·파일은 그대로 "
+            ui.label(f"'{name}' 컬렉션을 지울까요?").classes("font-bold")
+            ui.label(f"그 논문 {n}편에서 이 소속만 떼어 냅니다 — 다른 컬렉션 소속과 폴더·파일은 그대로 "
                      "둡니다.").classes("text-xs text-gray-500")
             with ui.row().classes("justify-end w-full items-center gap-2"):
                 ui.button("취소", on_click=dlg.close).props("flat")
-                ui.button("프로젝트 삭제", icon="delete", on_click=do_delete) \
+                ui.button("컬렉션 삭제", icon="delete", on_click=do_delete) \
                     .props("unelevated no-caps color=negative")
         dlg.open()
 
@@ -567,7 +567,7 @@ def build_home(state: dict) -> None:
             # 실제 삭제(delete_workdir → remove_stem_everywhere)는 공통 + **모든** 프로젝트 폴더를
             # 훑는다 — 소속을 바꿔 온 논문의 옛 사본까지 정리하기 위해서다. 미리 밝혀 둔다.
             if lib_dirs and any(projects.has_dirs(p["id"]) for p in data["projs"] if p["id"] not in targets):
-                ui.label("전에 다른 프로젝트에 넣어 뒀다면 그 폴더에 남은 사본도 함께 정리합니다.") \
+                ui.label("전에 다른 컬렉션에 넣어 뒀다면 그 폴더에 남은 사본도 함께 정리합니다.") \
                     .classes("text-xs text-gray-400 ml-8 leading-tight")
 
             def do_delete() -> None:
@@ -626,7 +626,7 @@ def build_home(state: dict) -> None:
     async def save_to_library(roots: list[Path]) -> None:
         """논문들을 각자의 자리(소속 프로젝트 폴더들 > 공통 저장 위치)로 내보내기."""
         if not settings_dialog.any_library_dirs():
-            ui.notify("저장 위치가 지정돼 있지 않습니다 — ⚙ 설정의 '저장 위치'나 프로젝트 폴더를 정하세요.",
+            ui.notify("저장 위치가 지정돼 있지 않습니다 — ⚙ 설정의 '저장 위치'나 컬렉션 폴더를 정하세요.",
                       type="warning")
             return
         if not roots:
@@ -687,7 +687,7 @@ def build_home(state: dict) -> None:
                     ui.menu_item("폴더 정하기…", on_click=lambda _, p=value: pick_project_folder(p)).props("dense")
                     ui.menu_item("설정…", on_click=lambda _, p=value: edit_project(p)).props("dense")
                     ui.separator()
-                    ui.menu_item("프로젝트 삭제", on_click=lambda _, p=value: confirm_delete_project(p)) \
+                    ui.menu_item("컬렉션 삭제", on_click=lambda _, p=value: confirm_delete_project(p)) \
                         .props("dense").classes("text-negative")
         if project:
             row.props("data-drop")
@@ -701,11 +701,11 @@ def build_home(state: dict) -> None:
     def sidebar_rows() -> None:
         n = counts()
         prow(projects.ALL, "모든 논문", n[projects.ALL], "library_books")
-        ui.label("프로젝트").classes("md4-panel-title md4-hcap")
+        ui.label("컬렉션").classes("md4-panel-title md4-hcap")
         for p in data["projs"]:  # 만든 순서대로
             prow(p["id"], p["name"], n.get(p["id"], 0), "folder_special", project=True)
         prow(projects.NONE, projects.NONE_LABEL, n[projects.NONE], "inbox")
-        ui.button("새 프로젝트", icon="add", color=None, on_click=lambda: new_project()) \
+        ui.button("새 컬렉션", icon="add", color=None, on_click=lambda: new_project()) \
             .props("flat dense no-caps").classes("md4-hnew w-full") \
             .tooltip("이름만 정하면 만들어집니다 — 폴더는 나중에 정해도 됩니다")
 
@@ -734,7 +734,7 @@ def build_home(state: dict) -> None:
                     .classes("md4-hpath truncate").tooltip(str(root) if root else "")
                 ui.button(icon="edit", color=None, on_click=lambda: edit_project(s)) \
                     .props("flat dense round size=xs").classes("text-grey-6") \
-                    .tooltip("이 프로젝트 설정 — 이름·폴더·이 프로젝트만 다르게")
+                    .tooltip("이 컬렉션 설정 — 이름·폴더·이 컬렉션만 다르게")
         if not any(config.key_status().values()):
             ui.label("⚠ AI 키가 없어 참고문헌 정리·번역 기능이 꺼져 있습니다 — 눌러서 키 넣기") \
                 .classes("md4-hwarn ai q-mt-xs").on("click", lambda: open_settings("ai"))
@@ -853,10 +853,10 @@ def build_home(state: dict) -> None:
             for p in shown:
                 ui.menu_item(p["name"], on_click=lambda _, v=p["id"]: on_pick(v)).props("dense")
             if not shown:
-                ui.menu_item("프로젝트가 없습니다").props("dense disable")
+                ui.menu_item("컬렉션이 없습니다").props("dense disable")
             if with_new:
                 ui.separator()
-                ui.menu_item("새 프로젝트 만들기…", on_click=lambda: new_project_for_selection()).props("dense")
+                ui.menu_item("새 컬렉션 만들기…", on_click=lambda: new_project_for_selection()).props("dense")
 
     def new_project_for_selection() -> None:
         roots = sorted(selected)
@@ -882,10 +882,10 @@ def build_home(state: dict) -> None:
             ui.button("모바일 HTML", icon="smartphone", on_click=download_mobile).props("dense outline no-caps") \
                 .tooltip("폰에서 읽는 HTML 한 장 (원문·번역·문단 대조) — iCloud Drive·구글 드라이브에 저장하면 밖에서도 열립니다")
             # 추가 = 다른 소속은 그대로 두고 더하기, 빼기 = 그 소속만 떼기(그 폴더의 사본도 정리)
-            with ui.button("프로젝트에 추가", icon="playlist_add").props("dense outline no-caps"):
+            with ui.button("컬렉션에 추가", icon="playlist_add").props("dense outline no-caps"):
                 project_pick_menu(lambda v: bulk_member(v, True), with_new=True)
             member_of = {p for root in selected for p in (data["by_root"].get(root) or {}).get("pids", [])}
-            with ui.button("프로젝트에서 빼기", icon="playlist_remove").props("dense outline no-caps"):
+            with ui.button("컬렉션에서 빼기", icon="playlist_remove").props("dense outline no-caps"):
                 project_pick_menu(lambda v: bulk_member(v, False), only=member_of)
             if settings_dialog.any_library_dirs():
                 ui.button("폴더로 저장", icon="drive_file_move",
@@ -940,7 +940,7 @@ def build_home(state: dict) -> None:
 
         menu.clear()
         with menu:
-            ui.label("프로젝트에 넣기").classes("md4-menucap")
+            ui.label("컬렉션에 넣기").classes("md4-menucap")
             for p in data["projs"]:
                 on = p["id"] in r["pids"]
                 with ui.menu_item(auto_close=False).props("dense") as item:
@@ -950,9 +950,9 @@ def build_home(state: dict) -> None:
                         ui.label(p["name"])
                 item.on("click", lambda _, pid=p["id"], i=ic: flip(pid, i))
             if not data["projs"]:
-                ui.label("아직 프로젝트가 없습니다").classes("text-xs text-gray-400 q-px-md q-py-xs")
+                ui.label("아직 컬렉션이 없습니다").classes("text-xs text-gray-400 q-px-md q-py-xs")
             ui.separator()
-            ui.menu_item("새 프로젝트 만들기…", on_click=lambda: new_project(for_root=root)).props("dense")
+            ui.menu_item("새 컬렉션 만들기…", on_click=lambda: new_project(for_root=root)).props("dense")
         menu.props(f'target="#c{anchor.id}"')
         menu.open()
 
@@ -985,11 +985,11 @@ def build_home(state: dict) -> None:
                 ui.icon("cloud_upload", size="44px").classes("text-primary")
                 ui.label("PDF를 창 위로 끌어다 놓거나 '올리기'로 선택하세요").classes("text-base")
                 if s == projects.NONE:
-                    ui.label("미분류 논문이 없습니다 — 모든 논문이 프로젝트에 들어가 있습니다.") \
+                    ui.label("미분류 논문이 없습니다 — 모든 논문이 컬렉션에 들어가 있습니다.") \
                         .classes("text-xs text-gray-400")
                 elif s:
-                    ui.label(f"'{name_of(s)}' 프로젝트에 아직 논문이 없습니다 — 여기서 올리거나, 다른 목록의 "
-                             "카드를 왼쪽 이 프로젝트 행으로 끌어 놓으세요.").classes("text-xs text-gray-400")
+                    ui.label(f"'{name_of(s)}' 컬렉션에 아직 논문이 없습니다 — 여기서 올리거나, 다른 목록의 "
+                             "카드를 왼쪽 이 컬렉션 행으로 끌어 놓으세요.").classes("text-xs text-gray-400")
                 else:
                     ui.label("아직 변환한 논문이 없습니다. 여러 개를 올리면 순서대로 변환합니다.") \
                         .classes("text-xs text-gray-400")

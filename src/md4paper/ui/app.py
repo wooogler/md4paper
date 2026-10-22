@@ -4649,7 +4649,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         from nicegui import run as ng_run
 
         if not library.configured(library.project_of(ctrl.wd)):
-            ui.notify("저장 위치가 지정돼 있지 않습니다 — 홈의 '프로젝트' 또는 '저장 위치'에서 폴더를 고르세요.",
+            ui.notify("저장 위치가 지정돼 있지 않습니다 — 홈의 ⚙ 설정 → '저장 위치'나 컬렉션 폴더를 정하세요.",
                       type="warning")
             return
         try:
@@ -4669,7 +4669,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             return
         dests = " · ".join(str(d) for d in library.dirs_for(pid).values() if d)
         # 프로젝트에 속한 논문은 '어느 묶음의 폴더로 가는지'가 먼저 궁금하다 → 이름을 앞에 붙인다.
-        tip = f"프로젝트: {projects.name_of(pid)} → {dests}" if pid else f"저장 위치: {dests}"
+        tip = f"컬렉션: {projects.name_of(pid)} → {dests}" if pid else f"저장 위치: {dests}"
         ui.button("폴더로 저장", icon="drive_file_move", on_click=save_to_library) \
             .props("flat dense no-caps color=grey-8").tooltip(tip)
 

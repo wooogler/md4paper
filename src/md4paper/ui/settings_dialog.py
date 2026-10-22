@@ -335,8 +335,8 @@ def _library_panel(ui, run, state, on_change, can_pick, recent_workdirs) -> None
             if not can_pick:
                 _no_dialog(btn)
 
-    ui.label("변환·번역이 끝난 마크다운(원하면 원본 PDF도)을 쌓아 둘 공통 폴더입니다. 프로젝트에 폴더를 "
-             "정해 두면 그 논문은 그 폴더로 가고, 프로젝트가 없거나 폴더를 안 정한 논문만 이곳으로 옵니다.") \
+    ui.label("변환·번역이 끝난 마크다운(원하면 원본 PDF도)을 쌓아 둘 공통 폴더입니다. 컬렉션에 폴더를 "
+             "정해 두면 그 논문은 그 폴더로 가고, 컬렉션이 없거나 폴더를 안 정한 논문만 이곳으로 옵니다.") \
         .classes("text-xs text-gray-500")
     ui.label("공통 저장 폴더").classes("md4-setsub")
     common_row()
@@ -505,7 +505,7 @@ def _advanced_panel(ui, run, state, on_change, save_global,  # noqa: ANN001, ANN
             return
         pid = enrich_scope["pid"]
         roots = enrich.project_roots(pid, state["upload_dir"])
-        label = "모든 프로젝트" if pid == enrich.ALL else projects.name_of(pid)
+        label = "모든 컬렉션" if pid == enrich.ALL else projects.name_of(pid)
         if not roots:
             ui.notify(f"{label}에 속한 논문이 없습니다.", type="info")
             return
@@ -554,14 +554,14 @@ def _advanced_panel(ui, run, state, on_change, save_global,  # noqa: ANN001, ANN
     with ui.row().classes("items-center gap-2"):
         enrich_btn = ui.button("서지 정보 보강", icon="travel_explore",
                                on_click=lambda: enrich_now()).props("dense outline no-caps") \
-            .tooltip("고른 프로젝트의 논문에 대해: 빈 연도·학회를 채우고, 출판 기록을 받아 그 "
-                     "프로젝트 폴더의 references.bib를 정확하게 만들고, 참고문헌의 빈 DOI를 "
+            .tooltip("고른 컬렉션의 논문에 대해: 빈 연도·학회를 채우고, 출판 기록을 받아 그 "
+                     "컬렉션 폴더의 references.bib를 정확하게 만들고, 참고문헌의 빈 DOI를 "
                      "채워 인용을 링크로 만듭니다. 제목만 전송합니다.")
-        scope_sel = ui.select({_enrich_mod.ALL: "모든 프로젝트", **projects.options(with_none=True)},
+        scope_sel = ui.select({_enrich_mod.ALL: "모든 컬렉션", **projects.options(with_none=True)},
                               value=enrich_scope["pid"],
                               on_change=lambda e: enrich_scope.update(pid=e.value)) \
             .props("dense outlined").classes("w-44") \
-            .tooltip("보강할 범위 — 이 프로젝트의 논문만 확인하고 그 폴더의 references.bib를 갱신합니다")
+            .tooltip("보강할 범위 — 이 컬렉션의 논문만 확인하고 그 폴더의 references.bib를 갱신합니다")
     # 진행률 + 중지 — 편당 몇 초에서 몇십 초라 스피너만으로는 얼마나 남았는지 알 수 없다
     with ui.column().classes("w-full gap-1") as enrich_progress:
         with ui.row().classes("items-center gap-2 w-full"):
@@ -623,7 +623,7 @@ def _advanced_panel(ui, run, state, on_change, save_global,  # noqa: ANN001, ANN
              "이름이 같아야 md에서 PDF를 바로 찾을 수 있어요.").classes("text-xs text-gray-400")
 
     def refresh_scope() -> None:
-        opts = {_enrich_mod.ALL: "모든 프로젝트", **projects.options(with_none=True)}
+        opts = {_enrich_mod.ALL: "모든 컬렉션", **projects.options(with_none=True)}
         if enrich_scope["pid"] not in opts:  # 보던 프로젝트가 지워졌으면 전체로
             enrich_scope["pid"] = _enrich_mod.ALL
         scope_sel.set_options(opts, value=enrich_scope["pid"])
@@ -660,7 +660,7 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
     async def pick() -> None:
         cur = (root_in.value or "").strip() or (projects.root_of(pid) if editing else None) or state["upload_dir"]
         picked = await desktop.choose_folder(
-            f"'{name_in.value or '새'}' 프로젝트 폴더 선택", str(cur))
+            f"'{name_in.value or '새'}' 컬렉션 폴더 선택", str(cur))
         if picked:
             root_in.value = str(picked)
 
@@ -686,7 +686,7 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
         if editing:
             ui.notify(f"'{proj['name']}' 설정을 저장했습니다", type="positive", timeout=1500)
         else:
-            ui.notify(f"'{proj['name']}' 프로젝트를 만들었습니다"
+            ui.notify(f"'{proj['name']}' 컬렉션을 만들었습니다"
                       + ("" if raw else " — 폴더는 나중에 정해도 됩니다."), type="positive")
         res = on_saved(proj, not editing)
         if inspect.isawaitable(res):
@@ -699,7 +699,7 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
             pending[key] = value
 
     with ui.dialog() as dlg, ui.card().classes("gap-2").style("width:480px; max-width:94vw"):
-        ui.label(f"'{projects.name_of(pid)}' 프로젝트" if editing else "새 프로젝트").classes("font-bold")
+        ui.label(f"'{projects.name_of(pid)}' 컬렉션" if editing else "새 컬렉션").classes("font-bold")
         name_in = ui.input("이름", value=projects.name_of(pid) if editing else "") \
             .props('dense outlined autofocus placeholder="예: 튜터 챗봇 서베이"').classes("w-full")
         name_in.on("keydown.enter", save)
@@ -717,7 +717,7 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
 
         # 이 프로젝트만 다르게 쓸 설정 — 저장·출력에 관한 것만. 기본은 **전역 따름**이고, 바꾼 항목만
         # 프로젝트에 저장된다. 그래서 전역 설정을 고치면 따로 정하지 않은 프로젝트들은 저절로 따라온다.
-        title = f"고급 — 이 프로젝트만 다르게 ({len(own)}개 지정됨)" if own else "고급 — 이 프로젝트만 다르게"
+        title = f"고급 — 이 컬렉션만 다르게 ({len(own)}개 지정됨)" if own else "고급 — 이 컬렉션만 다르게"
         with ui.expansion(title, icon="tune", value=False).classes("w-full").props("dense"):
             ui.label("정하지 않은 항목은 전역 설정을 그대로 따릅니다.").classes("text-xs text-gray-400")
             with ui.row().classes("items-center gap-2 w-full no-wrap"):
@@ -749,8 +749,8 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
             if editing and on_delete is not None:
                 # 확인 대화상자를 이 위에 띄우고, 지우기로 하면 이 대화상자도 함께 닫는다. 먼저 닫고 바로 새 것을
                 # 열면 닫히는 애니메이션과 겹쳐 확인 창이 보이지 않았다.
-                ui.button("프로젝트 삭제", icon="delete", on_click=lambda: on_delete(pid, dlg.close)) \
-                    .props("flat dense no-caps color=grey").tooltip("프로젝트만 지우기 (논문·폴더는 그대로)")
+                ui.button("컬렉션 삭제", icon="delete", on_click=lambda: on_delete(pid, dlg.close)) \
+                    .props("flat dense no-caps color=grey").tooltip("컬렉션만 지우기 (논문·폴더는 그대로)")
             ui.space()
             ui.button("취소", on_click=dlg.close).props("flat")
             ui.button("저장" if editing else "만들기", icon="check" if editing else "add", on_click=save) \
