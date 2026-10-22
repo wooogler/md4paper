@@ -455,13 +455,14 @@ JS = r"""
     });
   }
   // SPA 이동은 서버가 한다(ui.navigate.to) — 셸의 ui.on('md4-agent-nav')가 받는다
-  function nav(url){
+  // gesture: 사용자가 방금 누른 칩에서 왔다 (단독 창에서만 뜻이 있다)
+  function nav(url, gesture){
     if (!url) return;
     if (SA){
-      // 단독 창에는 뷰어가 없다(그 이벤트를 받을 셸도 없다). 브라우저면 새 탭으로 — 칩 클릭처럼 사용자
-      // 제스처 안에서만 열리고, 답이 흐르다 온 이동(open_paper·goto_row)은 팝업 차단에 걸려 null이다.
-      // 앱 창이면 window.open이 시스템 쪽으로 새지 않게 시도하지 않는다. 못 열면 안내 줄을 남긴다.
-      var w = window.__md4AgentNative ? null : window.open(url, '_blank');
+      // 단독 창에는 뷰어가 없다(그 이벤트를 받을 셸도 없다). 브라우저에서 칩을 눌렀으면 새 탭으로 연다.
+      // 답이 흐르다 온 이동(open_paper·goto_row)은 열지 않고 안내 줄(+ 진짜 링크)만 — 팝업 차단 여부가
+      // 브라우저·타이밍마다 달라 열렸다 말았다 하는 것보다 낫다. 앱 창은 window.open을 쓰지 않는다.
+      var w = (gesture && !window.__md4AgentNative) ? window.open(url, '_blank') : null;
       if (!w){ notice = {url: url}; render(); }
       return;
     }
@@ -627,13 +628,13 @@ JS = r"""
     return '';
   }
   // 다른 논문의 행 — 그 논문을 연 뒤 도착한 뷰어(setPaper)가 이어서 간다
-  function gotoElsewhere(tok, row, id, url){
+  function gotoElsewhere(tok, row, id, url, gesture){
     if (!url) return false;
     try {
       sessionStorage.setItem(SS_GOTO, JSON.stringify({token: tok, row: row, id: id || null,
                                                       at: Date.now()}));
     } catch (e) {}
-    nav(url);
+    nav(url, gesture);
     return true;
   }
   function consumeGoto(){
@@ -1192,7 +1193,7 @@ JS = r"""
           if (isNote) gotoNote(id, row); else gotoRow(row);
           return;
         }
-        if (!gotoElsewhere(tok, row, isNote ? id : null, c.url)){
+        if (!gotoElsewhere(tok, row, isNote ? id : null, c.url, true)){
           errMsg = '그 논문의 위치를 찾지 못했습니다.'; render();
         }
       });

@@ -580,6 +580,11 @@ def test_standalone_js_guards_shared_state_and_navigation():
     nv = _js_block(JS, "function nav(")
     assert nv.index("if (SA){") < nv.index("emitEvent('md4-agent-nav'")
     assert "notice = {url: url}" in nv
+    # 새 탭은 칩 클릭(사용자 제스처)에서만 — 답이 흐르다 온 open_paper·goto_row는 안내 줄
+    assert "(gesture && !window.__md4AgentNative) ? window.open(url, '_blank') : null" in nv
+    assert "c.url, true)" in _js_block(JS, "function wireChips(")
+    da = _js_block(JS, "function doAction(")
+    assert "gotoElsewhere(a.token, a.row, null, a.url);" in da and "nav(a.url);" in da
     assert "메인 창에서 열어 주세요" in _js_block(JS, "function noticeNode(")
     assert "if (SA) return;" in _js_block(JS, "function refreshView(")
     ctx = _js_block(JS, "function ctxNow(")
