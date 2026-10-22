@@ -375,3 +375,22 @@ def test_apply_with_region_saves_new_crop(ictrl):
     assert (ictrl.wd.out_images / "formula-01.png").read_bytes() == b"\x89PNG new crop"
     rec = formulas.load(ictrl.wd)[0]
     assert rec["page"] == 3 and rec["bbox"] == [20.0, 80.0, 50.0, 100.0] and rec["manual_crop"]
+
+
+def test_rekey_cache_uses_glossary_unit_hash():
+    """용어가 나오는 유닛은 번역 캐시가 용어집 줄을 섞은 해시로 둔다 — gloss를 주면 그 해시로 옮긴다."""
+    from md4paper.ir import GlossaryEntry, GlossaryList
+    from md4paper.translate.apply import unit_hash
+    from md4paper.workdir import hash_text
+
+    gl = GlossaryList(entries=[GlossaryEntry(term="encoder", korean="인코더", policy="translate")])
+    doc = "# T\n\nThe encoder $$a$$\n"
+    src = doc[5:]
+    cache = {unit_hash(src, gl): "인코더 $$a$$\n"}
+    at = doc.index("$$a$$")
+    assert formula_fix.rekey_cache(cache, [src], doc, at, "$$a$$", "$$b$$") == 0  # 평문 해시로는 못 찾는다
+    assert formula_fix.rekey_cache(cache, [src], doc, at, "$$a$$", "$$b$$", gloss=gl) == 1
+    assert cache[unit_hash(src.replace("$$a$$", "$$b$$"), gl)] == "인코더 $$b$$\n"
+    legacy = {hash_text(src): "인코더 $$a$$\n"}  # 옛 v2 캐시(평문 해시)는 같은 체계로 옮긴다
+    assert formula_fix.rekey_cache(legacy, [src], doc, at, "$$a$$", "$$b$$", gloss=gl) == 1
+    assert legacy[hash_text(src.replace("$$a$$", "$$b$$"))] == "인코더 $$b$$\n"

@@ -3,6 +3,14 @@
 paper.en.md(cite 후면 최종 인용 형태 반영) → paper.ko.md. 섹션을 유닛으로 나눠 원문측 컨텍스트
 (개요 + 직전 섹션 원문 꼬리)만 참조하며 스레드로 병렬 번역한다(청크 간 결과 의존 없음). 내용 해시
 캐시로 바뀐 유닛만 재번역. 병기(첫 등장 원어)는 조립 후 postprocess가 전역 1회로 정리한다.
+
+**캐시 키(v3)**: 문서 키에는 문체·모델·헤더/참고문헌 번역 여부만 넣고 용어집은 뺀다. 용어집은 유닛
+해시(`unit_hash`)에 **그 유닛 원문에 나오는 항목의 줄만** 섞는다 — 용어 하나를 고치면(논문 용어집이든
+컬렉션 용어집이든) 그 용어가 나오는 유닛만 다시 번역된다. 예전(v2)엔 용어집 블록 전체가 문서 키에
+들어가 한 항목만 바꿔도 논문 전체가 재번역됐다. 프롬프트에는 여전히 용어집 **전체**가 들어간다(캐시
+키만 좁힌다). 대가: 용어가 글자 그대로 나오지 않는 간접 영향(복수형·파생형, 다른 용어의 일부로만
+나오는 경우 등)은 해시가 못 본다 — 그 유닛은 옛 번역을 그대로 쓴다. 관련 항목이 없는 유닛의 해시는
+평문 `hash_text(source)`라 옛 캐시 항목과 같다. 옛 v2 캐시는 `_load_cache`가 한 번 읽어 옮긴다.
 """
 
 from __future__ import annotations
@@ -14,7 +22,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from md4paper import config
-from md4paper.ir import Manifest
+from md4paper.ir import GlossaryList, Manifest
 from md4paper.llm.base import Provider
 from md4paper.regions import section_ids_by_text
 from md4paper.review import manifest as manifest_io
@@ -25,6 +33,7 @@ _REF_KEYWORDS = {"references", "reference", "bibliography"}
 _MERGE_MIN = 1500   # 이보다 작은 인접 번역 섹션은 한 유닛으로 병합 (LLM 호출 수 절감)
 _BIG_SPLIT = 6000   # 이보다 큰 섹션은 문단 경계로 파트 분할 (출력 토큰 한도·재시도 비용)
 _TAIL_CHARS = 400   # 직전 섹션 원문 꼬리(참고 문맥) 길이
+_SCHEME = 3         # cache.json의 해시 체계 표식 — 모델을 모르는 쪽(stale 판정)이 v3인지 알아보는 데 쓴다
 
 
 class TranslateError(RuntimeError):
@@ -121,26 +130,7 @@ def _build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict
     return final
 
 
-def stale_section_ids(wd: WorkDir, manifest: Manifest) -> set[str]:
-    """번역이 낡은 섹션 — 지금 en.md로 만든 번역 유닛의 원문이 캐시에 없는 섹션들의 id.
-
-    재변환·레이아웃 수정·직접 편집으로 원문이 바뀌면 그 유닛의 해시가 달라져 캐시에 없다 → 다음
-    번역 실행 때 그 유닛만 다시 번역되고 나머지는 캐시를 쓴다. UI가 "어느 섹션이 다시 번역될지"를
-    미리 보여 주는 데 쓴다. 번역 자체가 없거나 캐시가 없으면 빈 집합(전부 새 번역이라 '낡음'이 아니다).
-    캐시 키(모델·프롬프트)가 바뀌었는지는 보지 않는다 — 그 경우 어차피 전부 다시 번역된다.
-    실패(passthrough)한 유닛도 캐시에 없으므로 여기 포함된다(재번역 대상인 것은 같다).
-    """
-    if not (wd.ko_md.exists() and wd.cache_json.exists() and wd.en_md.exists()):
-        return set()
-    try:
-        chunks = json.loads(wd.cache_json.read_text(encoding="utf-8")).get("chunks", {})
-    except (OSError, json.JSONDecodeError):
-        return set()
-    out: set[str] = set()
-    for u in _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines()):
-        if u["translatable"] and u["sids"] and _cached_translation(chunks, u) is None:
-            out.update(u["sids"])
-    return out
+build_units = _build_units  # 공개 이름 (재번역 tool 등이 유닛을 같은 규칙으로 나눌 때)
 
 
 def run_glossary(wd: WorkDir, provider: Provider, *, regenerate: bool = True) -> int:
@@ -169,9 +159,86 @@ def _split_by_headings(text: str, k: int) -> list[str] | None:
     return ["\n".join(lines[idx[j]:(idx[j + 1] if j + 1 < k else len(lines))]) for j in range(k)]
 
 
-def _cached_translation(cache: dict[str, str], u: dict) -> str | None:
+def relevant_lines(gloss: GlossaryList, source: str) -> str:
+    """이 원문에 나오는 용어집 항목의 프롬프트 줄들(용어집 순, "\n"으로 이음) — 유닛 해시에 섞는 부분.
+
+    '나온다' = `term_key(term)`이 공백을 정규화하고 casefold한 원문에 부분 문자열로 들어 있음(줄바꿈을
+    넘는 여러 단어 용어도 잡힌다). 복수형·파생형처럼 글자 그대로 안 나오면 못 잡는다(감수). 줄은 프롬프트와
+    같은 `engine.glossary_line`이되 원어 자리는 `term_key`로 — 프롬프트가 "대소문자 무시"를 지시하므로
+    "Encoder"와 "encoder"는 같은 지시다. 그대로 두면 컬렉션이 논문과 표기만 다른 같은 항목을 올릴 때마다
+    번역 결과와 무관하게 그 유닛들을 다시 번역(비용)하게 된다. keep 항목의 줄에는 번역어가 없으니 keep
+    용어의 번역어만 고치는 것도 캐시를 낡게 하지 않는다(프롬프트에도 안 들어가는 글자라 결과가 같다).
+    """
+    if not gloss.entries:
+        return ""
+    text = re.sub(r"\s+", " ", source).casefold()
+    lines = []
+    for e in gloss.entries:
+        key = glossary.term_key(e.term)
+        if key and key in text:
+            lines.append(engine.glossary_line(e.model_copy(update={"term": key})))
+    return "\n".join(lines)
+
+
+def unit_hash(source: str, gloss: GlossaryList) -> str:
+    """번역 캐시 해시 — 원문 + 그 원문에 나오는 용어집 줄. 관련 항목이 없으면 평문 `hash_text(source)`.
+
+    평문으로 떨어지게 둔 이유: 용어가 안 나오는 유닛은 용어집과 무관하고, 옛 캐시 항목과 같은 해시라
+    그대로 읽힌다. 섹션 조각(sections)도 같은 함수로 — 재번역 tool이 "이 섹션의 캐시 항목 지우기"를 할
+    때도 이 함수를 써야 같은 항목을 찾는다.
+    """
+    rel = relevant_lines(gloss, source)
+    return hash_text(source + "\n\x00" + rel) if rel else hash_text(source)
+
+
+def unit_hashes(u: dict, gloss: GlossaryList) -> set[str]:
+    """유닛이 캐시에 남길 수 있는 해시들 — 유닛 원문 + 섹션 조각들."""
+    return {unit_hash(u["source"], gloss), *(unit_hash(t, gloss) for _s, t in (u.get("sections") or []))}
+
+
+class _Cache:
+    """보관된 번역 조회기 — 저장된 캐시가 어느 해시 체계인지에 따라 원문을 어느 해시로 찾을지 정한다.
+
+    v3: `unit_hash(원문, 지금 용어집)`으로. 옛 v2(`legacy`=그 실행 때의 논문 용어집): 항목이 평문
+    `hash_text(원문)`으로 저장돼 있다. 그 번역은 논문 용어집 전체로 만든 것이므로, 지금 용어집(컬렉션
+    덮어쓰기 포함)에서 **그 원문에 나오는 항목이 논문 용어집 때와 같을 때만** 쓴다 — 덮어쓰기가 그
+    유닛의 용어를 바꿨으면 거부해 다시 번역하게 한다.
+    """
+
+    def __init__(self, chunks: dict[str, str], gloss: GlossaryList,
+                 legacy: GlossaryList | None = None) -> None:
+        self.chunks = chunks
+        self.gloss = gloss
+        self.legacy = legacy
+
+    def get(self, text: str) -> str | None:
+        hit = self.chunks.get(unit_hash(text, self.gloss))
+        if hit is not None or self.legacy is None:
+            return hit
+        if relevant_lines(self.gloss, text) != relevant_lines(self.legacy, text):
+            return None
+        return self.chunks.get(hash_text(text))
+
+    def upgraded(self, units: list[dict]) -> _Cache:
+        """옛 모드면 지금 문서의 유닛·섹션 조각 중 쓸 수 있는 항목을 새 해시로 옮긴 v3 캐시로.
+
+        이번 실행에서 안 쓰는 항목(체크를 푼 유닛, 병합 경계가 달라 조각으로만 남은 섹션)도 새 해시로
+        옮겨 둬야 다음 저장의 병합(지금 문서의 새 해시 집합으로 거름)에서 버려지지 않는다.
+        """
+        if self.legacy is None:
+            return self
+        chunks = dict(self.chunks)
+        for u in units:
+            for text in [u["source"], *(t for _s, t in (u.get("sections") or []))]:
+                hit = self.get(text)
+                if hit is not None:
+                    chunks[unit_hash(text, self.gloss)] = hit
+        return _Cache(chunks, self.gloss)
+
+
+def _cached_translation(cache: _Cache, u: dict) -> str | None:
     """유닛의 보관된 번역 — 유닛 원문 해시로, 없으면 섹션 조각 해시들을 이어 붙여서."""
-    hit = cache.get(hash_text(u["source"]))
+    hit = cache.get(u["source"])
     if hit is not None:
         return hit
     secs = u.get("sections") or []
@@ -179,48 +246,122 @@ def _cached_translation(cache: dict[str, str], u: dict) -> str | None:
         return None
     parts: list[str] = []
     for _sid, text in secs:
-        t = cache.get(hash_text(text))
+        t = cache.get(text)
         if t is None:
             return None
         parts.append(t)
     return "\n".join(parts)
 
 
-def _remember(cache: dict[str, str], u: dict, translated: str) -> None:
+def _remember(cache: dict[str, str], u: dict, translated: str, gloss: GlossaryList) -> None:
     """유닛 번역을 캐시에 — 유닛 해시로, 그리고 섹션 조각이 여럿이면 조각별로도."""
-    cache[hash_text(u["source"])] = translated
+    cache[unit_hash(u["source"], gloss)] = translated
     secs = u.get("sections") or []
     if len(secs) >= 2 and all(sid for sid, _t in secs):
         pieces = _split_by_headings(translated, len(secs))
         if pieces is not None:
             for (_sid, text), piece in zip(secs, pieces):
-                cache[hash_text(text)] = piece
+                cache[unit_hash(text, gloss)] = piece
 
 
-def _unit_hashes(u: dict) -> set[str]:
-    return {hash_text(u["source"]), *(hash_text(t) for _s, t in (u.get("sections") or []))}
+def _cache_keys(korean_style: str, paper_gloss: GlossaryList, model: str,
+                manifest: Manifest) -> tuple[str, str]:
+    """(v3 키, 옛 v2 키). 캐시는 문체·모델·헤더/참고문헌 번역 여부가 같을 때만 재사용한다.
 
-
-def _cache_keys(korean_style: str, gloss, provider: Provider, manifest: Manifest, system_prompt: str) -> tuple[str, str]:
-    """(현재 키, 옛 키). 캐시는 문체·용어집·모델·헤더/참고문헌 번역 여부가 같을 때만 재사용한다.
-
-    제목·초록·개요(섹션 목록)는 키에 넣지 않는다 — 재변환으로 섹션 제목 하나만 바뀌어도 전부 다시
-    번역하게 되고, 그러면 '체크 안 한 섹션의 기존 번역 유지'도 함께 무너진다. 옛 키(시스템 프롬프트
-    전체)는 기존 캐시를 한 번 더 읽어 주기 위해 남긴다 — 다음 저장부터는 새 키로 쓴다.
+    용어집은 v3 키에서 뺐다 — 유닛 해시가 맡는다(모듈 docstring). 옛 v2 키(용어집 블록 전체 포함)는
+    **논문 용어집만으로** 만든다: 지난 실행이 논문 용어집만 썼으므로, 사용자가 그 뒤 논문 용어집을 안
+    고쳤다면 저장된 키와 같다 → 옛 캐시를 옮겨 읽는다. 제목·초록·개요(섹션 목록)는 키에 넣지 않는다 —
+    재변환으로 섹션 제목 하나만 바뀌어도 전부 다시 번역하게 되고, 그러면 '체크 안 한 섹션의 기존 번역
+    유지'도 함께 무너진다.
     """
-    tail = f"{provider.model}|headers={manifest.translate_headers}|refs={manifest.translate_references}"
-    return (hash_text(f"v2|{korean_style}|{engine._glossary_block(gloss)}|{tail}"),
-            hash_text(f"{system_prompt}|{tail}"))
+    tail = f"{model}|headers={manifest.translate_headers}|refs={manifest.translate_references}"
+    return (hash_text(f"v3|{korean_style}|{tail}"),
+            hash_text(f"v2|{korean_style}|{engine._glossary_block(paper_gloss)}|{tail}"))
 
 
-def _load_cache(wd: WorkDir, keys: tuple[str, ...]) -> dict[str, str]:
+def _read_stored(wd: WorkDir) -> dict | None:
     if not wd.cache_json.exists():
-        return {}
+        return None
     try:
         stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
-    return stored.get("chunks", {}) if stored.get("key") in keys else {}
+        return None
+    return stored if isinstance(stored, dict) else None
+
+
+def _load_cache(wd: WorkDir, *, v3_key: str, legacy_key: str, paper_gloss: GlossaryList,
+                eff_gloss: GlossaryList) -> _Cache:
+    """저장된 캐시 — 키가 v3면 새 해시로, 논문 용어집으로 만든 v2 키와 같으면 옛 모드로, 그 밖이면 빈 것."""
+    stored = _read_stored(wd)
+    if stored is None:
+        return _Cache({}, eff_gloss)
+    chunks = stored.get("chunks") or {}
+    if stored.get("key") == v3_key:
+        return _Cache(chunks, eff_gloss)
+    if stored.get("key") == legacy_key:
+        return _Cache(chunks, eff_gloss, legacy=paper_gloss)
+    return _Cache({}, eff_gloss)
+
+
+def _paper_glossary(wd: WorkDir) -> GlossaryList:
+    return glossary.load(wd) if wd.glossary_yaml.exists() else GlossaryList(entries=[])
+
+
+def _stored_cache(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None) -> _Cache | None:
+    """프로바이더 없이(stale·unticked 판정) 저장된 캐시를 읽는다. 쓸 수 없는 캐시면 None.
+
+    모델을 모르니 v3 키는 다시 만들 수 없다 — cache.json의 `scheme` 표식으로 알아보고, v3면 키(모델·
+    문체)는 따지지 않는다(예전부터 이 판정은 키를 안 봤다: 모델을 바꾸면 어차피 전부 다시 번역된다).
+    표식이 없는 옛 파일은 status.json에 남은 지난 번역의 문체·모델로 v2 키를 다시 만들어 맞춰 보고,
+    맞으면 옛 모드, 안 맞으면 None(다음 실행이 캐시를 못 쓴다). 기록이 없으면(모델 기록 전의 번역)
+    맞춰 볼 수 없으니 옛 모드로 읽는다 — 키를 안 보던 예전 동작과 같은 쪽으로.
+    """
+    stored = _read_stored(wd)
+    if stored is None:
+        return None
+    eff = gloss if gloss is not None else glossary.effective(wd)[0]
+    chunks = stored.get("chunks") or {}
+    if stored.get("scheme") == _SCHEME:
+        return _Cache(chunks, eff)
+    paper = _paper_glossary(wd)
+    last = wd.load_status().get("translate")
+    if isinstance(last, dict) and last.get("model"):
+        style = last.get("style") or manifest.korean_style
+        _v3, legacy_key = _cache_keys(style, paper, last["model"], manifest)
+        if stored.get("key") != legacy_key:
+            return None
+    return _Cache(chunks, eff, legacy=paper)
+
+
+def stale_units(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None = None) -> list[dict]:
+    """번역이 낡은 번역 유닛들(`build_units`의 유닛, 문서 순) — 지금 원문·용어집으로 캐시에 없는 것.
+
+    `stale_section_ids`의 바탕이고, 영향 미리보기(`glossary.impact`)가 낡은 유닛의 원문 글자 수로 비용을
+    어림하는 데 쓴다. gloss는 effective 용어집(None이면 이 논문의 것을 읽는다). 번역·캐시가 없거나
+    다음 실행이 캐시를 못 쓰는 경우(옛 키 불일치)는 빈 목록 — 전부 새 번역이라 '낡음'이 아니다.
+    """
+    if not (wd.ko_md.exists() and wd.cache_json.exists() and wd.en_md.exists()):
+        return []
+    cache = _stored_cache(wd, manifest, gloss)
+    if cache is None:
+        return []
+    return [u for u in _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines())
+            if u["translatable"] and u["sids"] and _cached_translation(cache, u) is None]
+
+
+def stale_section_ids(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None = None) -> set[str]:
+    """번역이 낡은 섹션 — 지금 en.md로 만든 번역 유닛이 캐시에 없는 섹션들의 id.
+
+    재변환·레이아웃 수정·직접 편집으로 원문이 바뀌거나, 유닛에 나오는 용어의 용어집 항목(논문 또는 컬렉션)
+    이 바뀌면 그 유닛의 해시가 달라져 캐시에 없다 → 다음 번역 실행 때 그 유닛만 다시 번역되고 나머지는
+    캐시를 쓴다. UI가 "어느 섹션이 다시 번역될지"를 미리 보여 주는 데 쓴다. 작은 섹션은 병합된 유닛
+    단위로 낡으므로 그 유닛의 섹션이 함께 잡힌다(실제로 함께 다시 번역된다). gloss는 effective 용어집
+    (None이면 `glossary.effective(wd)`). 실패(passthrough)한 유닛도 캐시에 없으므로 여기 포함된다.
+    """
+    out: set[str] = set()
+    for u in stale_units(wd, manifest, gloss):
+        out.update(u["sids"])
+    return out
 
 
 def unticked_without_cache(wd: WorkDir, manifest: Manifest) -> set[str]:
@@ -229,15 +370,13 @@ def unticked_without_cache(wd: WorkDir, manifest: Manifest) -> set[str]:
     체크를 풀어도 캐시에 그 원문의 번역이 있으면 run_translate가 그대로 둔다(keep). 없을 때만 영어로
     돌아가므로, UI가 실행 전에 "이 섹션들은 영어가 됩니다"라고 물을 수 있게 골라 준다. 번역이 아직
     없으면(첫 번역) 빈 집합 — 잃을 것이 없다. 참고문헌처럼 설정으로 빠진 구간은 체크와 무관하므로 제외.
+    보관 여부는 stale 판정과 같은 해시 규칙(effective 용어집)으로 본다 — 다음 실행이 캐시를 못 쓰는
+    경우(옛 키 불일치)엔 보관된 것이 없는 것으로 본다(실제로 그 섹션들은 영어가 된다).
     """
     if not (wd.ko_md.exists() and wd.en_md.exists()):
         return set()
-    chunks: dict = {}
-    if wd.cache_json.exists():
-        try:
-            chunks = json.loads(wd.cache_json.read_text(encoding="utf-8")).get("chunks", {})
-        except (OSError, json.JSONDecodeError):
-            chunks = {}
+    eff = glossary.effective(wd)[0]
+    cache = _stored_cache(wd, manifest, eff) or _Cache({}, eff)
     # 참고문헌은 설정(translate_references)으로 빠지는 것이라 체크와 무관 — 원래도 영어였으니 잃을 게 없다
     ref_ids = set() if manifest.translate_references else section_ids_by_text(manifest, _REF_KEYWORDS)
     unticked = {s.id for s in manifest.sections if not s.translate} - ref_ids
@@ -245,7 +384,7 @@ def unticked_without_cache(wd: WorkDir, manifest: Manifest) -> set[str]:
     for u in _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines()):
         if u["translatable"] or not u["sids"]:
             continue
-        if any(sid in unticked for sid in u["sids"]) and _cached_translation(chunks, u) is None:
+        if any(sid in unticked for sid in u["sids"]) and _cached_translation(cache, u) is None:
             out.update(sid for sid in u["sids"] if sid in unticked)
     return out
 
@@ -267,16 +406,19 @@ def run_translate(
     manifest = manifest_io.load(wd)
     protect_headings = not manifest.translate_headers
     title, abstract = context.extract_context(wd, manifest)  # 초록은 청크마다 주입되는 문서 컨텍스트
-    gloss = glossary.ensure(provider, wd, title, context.extract_glossary_source(wd, manifest))
+    paper_gloss = glossary.ensure(provider, wd, title, context.extract_glossary_source(wd, manifest))
+    gloss, _origin = glossary.effective(wd)  # 논문 용어집 + 주 컬렉션 용어집 덮어쓰기
     section_map = json.loads(wd.sections_map.read_text(encoding="utf-8")).get("sections", []) \
         if wd.sections_map.exists() else []
     outline = _build_outline(section_map)
     system_prompt = engine.build_system_prompt(korean_style, gloss, title, abstract, outline)
 
-    cache_key, legacy_key = _cache_keys(korean_style, gloss, provider, manifest, system_prompt)
-    cache = _load_cache(wd, (cache_key, legacy_key))
+    cache_key, legacy_key = _cache_keys(korean_style, paper_gloss, provider.model, manifest)
+    cache = _load_cache(wd, v3_key=cache_key, legacy_key=legacy_key, paper_gloss=paper_gloss,
+                        eff_gloss=gloss)
 
     units = _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines())
+    cache = cache.upgraded(units)  # 옛 v2 캐시면 쓸 수 있는 항목을 새 해시로 옮겨 둔다
     total = sum(1 for u in units if u["translatable"])
 
     # 섹션(sid)별 완료 추적 — 여러 파트가 같은 sid를 공유하므로 카운트로 관리
@@ -304,7 +446,7 @@ def run_translate(
             if kept is not None:  # 체크를 풀었어도 보관된 번역이 있으면 그대로 둔다
                 with lock:
                     counts["kept"] += 1
-                    _remember(new_cache, u, kept)
+                    _remember(new_cache, u, kept, gloss)
                 return kept
             return u["source"]
         with lock:
@@ -322,7 +464,7 @@ def run_translate(
         with lock:
             counts[st] += 1
             if st != "passthrough":
-                _remember(new_cache, u, translated)  # 실패(passthrough)는 캐시하지 않음 → 재실행 시 그 섹션만 재시도
+                _remember(new_cache, u, translated, gloss)  # 실패(passthrough)는 캐시하지 않음 → 재실행 시 그 섹션만 재시도
             done[0] += 1
             for sid in u["sids"]:
                 sid_done[sid] += 1
@@ -355,10 +497,10 @@ def run_translate(
     wd.ko_md.write_text(ko, encoding="utf-8")
     # 캐시는 합친다 — 이번에 안 쓴 항목도 지금 문서에 그 원문이 남아 있으면 보관(체크를 풀었다가
     # 다시 켜도 비용 없이 돌아온다). 원문이 사라진 항목만 버린다.
-    current: set[str] = set().union(*(_unit_hashes(u) for u in units)) if units else set()
-    merged = {h: t for h, t in {**cache, **new_cache}.items() if h in current}
+    current: set[str] = set().union(*(unit_hashes(u, gloss) for u in units)) if units else set()
+    merged = {h: t for h, t in {**cache.chunks, **new_cache}.items() if h in current}
     wd.cache_json.write_text(
-        json.dumps({"key": cache_key, "chunks": merged}, ensure_ascii=False, indent=2),
+        json.dumps({"key": cache_key, "scheme": _SCHEME, "chunks": merged}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 

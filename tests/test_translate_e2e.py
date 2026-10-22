@@ -349,3 +349,214 @@ def test_unticked_sections_keep_existing_translation(converted):
     converted.cache_json.unlink()
     losing = unticked_without_cache(converted, m)
     assert losing and intro.id not in losing
+
+
+# --- 컬렉션 용어집 · 유닛 단위 용어집 캐시 키(v3) -----------------------------------
+
+def _filler(tag: str, n: int = 30) -> str:
+    return " ".join(f"This {tag} paragraph sentence number {i} says plain things." for i in range(n))
+
+
+@pytest.fixture
+def long_paper(tmp_path, monkeypatch):
+    """섹션마다 유닛 하나(병합 기준 1500자를 넘게) — 용어 하나가 바뀌면 그 섹션만 낡는지 보려고.
+
+    Recurrent Part: recurrence·attention, Encoder Part: encoder, Plain Part: 용어 없음.
+    컬렉션 용어집 폴더가 테스트마다 비도록 CONFIG_DIR을 tmp로(projects.json은 conftest가 비운다).
+    """
+    from md4paper import config, projects, workdir
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / "cfg")
+    md = ("# A Long Study\n\n## Recurrent Part\n\nWe revisit recurrence and attention here. " + _filler("first")
+          + "\n\n## Encoder Part\n\nThe encoder maps inputs. " + _filler("second")
+          + "\n\n## Plain Part\n\n" + _filler("third") + "\n")
+    src = tmp_path / "ws" / "long.md"
+    src.parent.mkdir(parents=True)
+    src.write_text(md, encoding="utf-8")
+    wd = WorkDir(tmp_path / "ws" / "long.md4")
+    pipeline.convert(src, wd)
+    pid = projects.create("Coll")["id"]
+    workdir.set_projects(wd.root, [pid])
+    return wd, pid
+
+
+def _sid(wd, text: str) -> str:
+    import json
+
+    return next(e["id"] for e in json.loads(wd.sections_map.read_text(encoding="utf-8"))["sections"]
+                if e["text"] == text)
+
+
+def _counting(model: str = "gpt-5.6-luna"):
+    calls = {"n": 0}
+
+    def count(system: str, user: str) -> str:
+        calls["n"] += 1
+        return _body(user)
+
+    return calls, FakeProvider(complete_fn=count, parse_fn=lambda s, u, sc: FAKE_GLOSSARY, model=model)
+
+
+def _entry(term: str, korean: str, policy: str = "translate") -> GlossaryEntry:
+    return GlossaryEntry(term=term, korean=korean, policy=policy)
+
+
+def test_collection_term_stales_only_units_that_use_it(long_paper):
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import glossary
+    from md4paper.translate.apply import stale_section_ids
+
+    wd, pid = long_paper
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    m = manifest_io.load(wd)
+    assert stale_section_ids(wd, m) == set()
+    first = calls["n"]
+    assert first == 3
+
+    # 본문에 안 나오는 용어 → 어느 유닛의 해시도 안 바뀐다
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("Transformer-XL", "트랜스포머-XL")]))
+    assert stale_section_ids(wd, m) == set()
+
+    # 'recurrence'(Recurrent Part에만 나옴) — 그 유닛만 낡는다. 병합된 유닛이라 제목 섹션도 함께.
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("Recurrence", "순환")]))
+    stale = stale_section_ids(wd, m)
+    assert _sid(wd, "Recurrent Part") in stale
+    assert _sid(wd, "Encoder Part") not in stale and _sid(wd, "Plain Part") not in stale
+
+    summary = pipeline.run_translate(wd, fake)
+    assert calls["n"] == first + 1  # 그 유닛만 LLM을 다시 부른다
+    assert summary["cached"] == 2 and summary["glossary"] == 3  # effective = 논문 2 + 컬렉션 1
+    assert stale_section_ids(wd, m) == set()
+
+    # 논문 용어집과 같은 번역어로 덮어쓰면 프롬프트 줄이 같아 아무것도 낡지 않는다
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("Recurrence", "순환"),
+                                                        _entry("ENCODER", "인코더")]))
+    assert stale_section_ids(wd, m) == set()
+    # 번역어를 바꾸면 encoder가 나오는 유닛만
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("Recurrence", "순환"),
+                                                        _entry("ENCODER", "부호기")]))
+    assert stale_section_ids(wd, m) == {_sid(wd, "Encoder Part")}
+
+
+def _plant_v2_cache(wd) -> None:
+    """지금 v3 캐시를 옛 v2 모양으로 — 논문 용어집으로 만든 v2 키 + 평문 해시 항목."""
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+    from md4paper.workdir import hash_text
+
+    m = manifest_io.load(wd)
+    paper = glossary.load(wd)
+    stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
+    eff = glossary.effective(wd)[0]
+    plain: dict[str, str] = {}
+    for u in apply.build_units(wd, m, wd.en_md.read_text(encoding="utf-8").splitlines()):
+        for text in [u["source"], *(t for _s, t in (u.get("sections") or []))]:
+            hit = stored["chunks"].get(apply.unit_hash(text, eff))
+            if hit is not None:
+                plain[hash_text(text)] = hit
+    _v3, v2 = apply._cache_keys(m.korean_style, paper, "gpt-5.6-luna", m)
+    wd.cache_json.write_text(json.dumps({"key": v2, "chunks": plain}, ensure_ascii=False), encoding="utf-8")
+
+
+def test_v2_cache_is_read_and_upgraded_when_paper_glossary_unchanged(long_paper):
+    import json
+
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, _pid = long_paper
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _plant_v2_cache(wd)
+    m = manifest_io.load(wd)
+    assert apply.stale_section_ids(wd, m) == set()  # 옛 키가 논문 용어집과 맞으니 전부 보관됨
+
+    before = calls["n"]
+    summary = pipeline.run_translate(wd, fake)
+    assert calls["n"] == before and summary["cached"] == summary["chunks"] == 3
+    stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
+    v3, _v2 = apply._cache_keys(m.korean_style, glossary.load(wd), "gpt-5.6-luna", m)
+    assert stored["key"] == v3 and stored["scheme"] == 3
+    eff = glossary.effective(wd)[0]
+    units = apply.build_units(wd, m, wd.en_md.read_text(encoding="utf-8").splitlines())
+    current = set().union(*(apply.unit_hashes(u, eff) for u in units))
+    assert set(stored["chunks"]) <= current  # 평문 해시로 남은 옛 항목 없음 — 전부 새 해시로 다시 적혔다
+    assert apply.stale_section_ids(wd, m) == set()
+
+
+def test_v2_cache_rejects_only_units_whose_terms_the_collection_overrides(long_paper):
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, pid = long_paper
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _plant_v2_cache(wd)
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("encoder", "부호기")]))
+    m = manifest_io.load(wd)
+    assert apply.stale_section_ids(wd, m) == {_sid(wd, "Encoder Part")}
+
+    before = calls["n"]
+    summary = pipeline.run_translate(wd, fake)
+    assert calls["n"] == before + 1 and summary["cached"] == 2
+    assert apply.stale_section_ids(wd, m) == set()
+
+
+def test_v2_cache_with_edited_paper_glossary_is_not_reused(long_paper):
+    """옛 키가 지금 논문 용어집과 안 맞으면(그 뒤 논문 용어집을 고침) 예전처럼 전부 다시 번역 — 낡음은 빈 집합."""
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, _pid = long_paper
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    _plant_v2_cache(wd)
+    glossary.save(GlossaryList(entries=[*glossary.load(wd).entries, _entry("plain", "평범")]), wd)
+    assert apply.stale_section_ids(wd, manifest_io.load(wd)) == set()
+    before = calls["n"]
+    pipeline.run_translate(wd, fake)
+    assert calls["n"] == before + 3
+
+
+def test_unit_hash_is_plain_without_relevant_terms():
+    from md4paper.translate.apply import relevant_lines, unit_hash
+    from md4paper.workdir import hash_text
+
+    gl = GlossaryList(entries=[_entry("Living Test Set", "살아 있는 테스트 세트"), _entry("encoder", "인코더")])
+    plain = "Nothing relevant in this text."
+    assert unit_hash(plain, gl) == hash_text(plain)
+    assert unit_hash(plain, GlossaryList(entries=[])) == hash_text(plain)
+    hit = "We grow a living\ntest   set over time."  # 대소문자·줄바꿈·공백이 달라도 나온 것으로
+    assert relevant_lines(gl, hit) == "- living test set → 살아 있는 테스트 세트 (이 번역어로)"
+    assert unit_hash(hit, gl) != hash_text(hit)
+    # 원어 표기(대소문자)만 다른 같은 항목은 같은 해시 — 프롬프트가 대소문자를 무시하라고 지시한다
+    same = GlossaryList(entries=[_entry("LIVING TEST SET", "살아 있는 테스트 세트")])
+    assert unit_hash(hit, same) == unit_hash(hit, GlossaryList(entries=gl.entries[:1]))
+
+
+def test_impact_reports_stale_papers_and_rough_cost(long_paper):
+    from md4paper.translate import glossary
+
+    wd, pid = long_paper
+    ws = wd.root.parent
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    assert glossary.impact(pid, ws) == []  # 낡은 게 없으면 빈 목록
+
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("recurrence", "순환")]))
+    rows = glossary.impact(pid, ws)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["root"] == wd.root and row["model"] == "gpt-5.6-luna"  # 지난 번역 모델
+    assert row["stale"][-1] == _sid(wd, "Recurrent Part") and row["units"] == 1
+    assert 1500 < row["chars"] < 2500
+    inp = int(row["chars"] / 3.5)
+    assert row["est_cost_usd"] == pytest.approx(inp / 1e6 * 0.2 + int(inp * 1.3) / 1e6 * 1.2)
+    assert row["title"]
+
+    other = glossary.impact(pid, ws, model_for=lambda _wd: "claude-sonnet-5")
+    assert other[0]["model"] == "claude-sonnet-5" and other[0]["est_cost_usd"] > row["est_cost_usd"]
+    assert glossary.impact("p-없는-컬렉션", ws) == []

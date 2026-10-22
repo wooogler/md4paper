@@ -376,21 +376,33 @@ def _nth(text: str, sub: str, k: int) -> int:
     return i
 
 
-def rekey_cache(cache: dict[str, str], sources: list[str], doc: str, at: int, old: str, new: str) -> int:
+def rekey_cache(cache: dict[str, str], sources: list[str], doc: str, at: int, old: str, new: str,
+                gloss=None) -> int:  # noqa: ANN001 — GlossaryList | None
     """번역 캐시를 새 원문 키로 옮긴다 — 원문·번역 양쪽에서 **그 한 자리만** 바뀐 경우.
 
     `sources`는 바꾸기 전 en.md(`doc`)로 만든 유닛·섹션 원문들, `at`은 doc에서 바뀐 자리(`old`의 시작).
     그 자리를 품은 원문만 옮긴다. 번역에서는 원문 속 같은 글자 중 몇 번째인지로 짝을 찾는다 —
     개수가 다르면(번역이 수식을 빼먹거나 덧붙였으면) 옮기지 않아 그 섹션이 '원문 바뀜'으로 남는다.
+
+    `gloss`(effective 용어집)를 주면 번역 캐시와 같은 유닛 해시(`apply.unit_hash`: 원문 + 그 원문에
+    나오는 용어집 줄)로 찾고 쓴다. 안 주면 평문 해시 — 용어가 나오는 유닛은 못 찾아 옮기지 않는다
+    (그 섹션은 '원문 바뀜'으로 남을 뿐 틀린 번역이 붙지는 않는다). 옛 v2 캐시(평문 해시)도 읽히도록
+    새 해시로 못 찾으면 평문으로 한 번 더 찾고, 찾은 쪽 체계로 새 키를 쓴다.
     """
+    hashers = [hash_text]
+    if gloss is not None:
+        from md4paper.translate.apply import unit_hash  # 순환 import 피하기
+
+        hashers = [lambda t: unit_hash(t, gloss), hash_text]
     moved = 0
     for src in sources:
         off = doc.find(src) if src else -1
         if off < 0 or not off <= at < off + len(src) or src[at - off:at - off + len(old)] != old:
             continue
-        tr = cache.get(hash_text(src))
-        if tr is None:
+        key_of = next((h for h in hashers if h(src) in cache), None)
+        if key_of is None:
             continue
+        tr = cache[key_of(src)]
         rel = at - off
         rank = src[:rel].count(old)
         if tr.count(old) != src.count(old):
@@ -398,7 +410,7 @@ def rekey_cache(cache: dict[str, str], sources: list[str], doc: str, at: int, ol
         j = _nth(tr, old, rank)
         if j < 0:
             continue
-        cache[hash_text(src[:rel] + new + src[rel + len(old):])] = tr[:j] + new + tr[j + len(old):]
+        cache[key_of(src[:rel] + new + src[rel + len(old):])] = tr[:j] + new + tr[j + len(old):]
         moved += 1
     return moved
 

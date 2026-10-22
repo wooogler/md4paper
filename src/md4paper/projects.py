@@ -260,7 +260,8 @@ def delete(pid: str, workspace: Path | None = None) -> bool:
 
     `workspace`(작업 폴더)를 주면 그 안의 모든 논문(숨김 포함)에서 이 id를 뗀다 — 다른 소속은
     그대로라, 이 프로젝트에만 속했던 논문만 미분류가 된다. 안 주면 논문 쪽 문자열은 남지만
-    없는 id라 어디서나 걸러 읽힌다.
+    없는 id라 어디서나 걸러 읽힌다. 컬렉션 용어집 파일(`CONFIG_DIR/glossary/<id>.yaml`)도 지운다 —
+    id는 다시 쓰이지 않지만, 남겨 두면 설정 폴더에 주인 없는 파일이 쌓인다.
     """
     if workspace is not None:
         from md4paper.workdir import recent_workdirs, remove_from_project  # 순환 import 피하기
@@ -270,13 +271,16 @@ def delete(pid: str, workspace: Path | None = None) -> bool:
                 remove_from_project(row["root"], pid)
     data = load()
     rest = [p for p in data["projects"] if p["id"] != pid]
-    if len(rest) == len(data["projects"]):
-        return False
-    data["projects"] = rest
-    if data["active"] == pid:
-        data["active"] = ALL
-    _save(data)
-    return True
+    found = len(rest) != len(data["projects"])
+    if found:
+        data["projects"] = rest
+        if data["active"] == pid:
+            data["active"] = ALL
+        _save(data)
+    from md4paper.translate import glossary  # 순환 import 피하기 (translate → … → projects)
+
+    glossary.delete_collection(pid)  # 목록에 없던 id여도 남은 파일은 치운다 (없으면 조용히)
+    return found
 
 
 def root_of(pid: str) -> Path | None:

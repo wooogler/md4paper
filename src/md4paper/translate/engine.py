@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from md4paper.ir import GlossaryList
+from md4paper.ir import GlossaryEntry, GlossaryList
 from md4paper.llm.base import Provider
 from md4paper.translate import chunker
 from md4paper.translate.style import style_instruction
@@ -16,20 +16,22 @@ _POLICY_NOTE = {
 }
 
 
+def glossary_line(e: GlossaryEntry) -> str:
+    """용어집 항목 하나의 프롬프트 줄. 번역 캐시의 유닛 해시(apply.relevant_lines)도 이 줄을 쓴다 —
+    프롬프트에 실제로 들어가는 글자와 캐시 키가 어긋나지 않게 한 곳에서 만든다."""
+    if e.policy == "keep":  # 원어 유지 — 한국어를 보여주지 않는다(보여주면 LLM이 그걸로 번역함)
+        return f"- {e.term} → 영어 원문 그대로 (번역·음역 금지)"
+    if e.policy == "transliterate":
+        return f"- {e.term} → {e.korean} (음역, 소리대로)"
+    if e.policy == "병기-first-use":
+        return f"- {e.term} → {e.korean} (첫 등장 시 '한국어(원문)' 병기)"
+    return f"- {e.term} → {e.korean} (이 번역어로)"  # translate
+
+
 def _glossary_block(gloss: GlossaryList) -> str:
     if not gloss.entries:
         return "(없음)"
-    lines = []
-    for e in gloss.entries:
-        if e.policy == "keep":  # 원어 유지 — 한국어를 보여주지 않는다(보여주면 LLM이 그걸로 번역함)
-            lines.append(f"- {e.term} → 영어 원문 그대로 (번역·음역 금지)")
-        elif e.policy == "transliterate":
-            lines.append(f"- {e.term} → {e.korean} (음역, 소리대로)")
-        elif e.policy == "병기-first-use":
-            lines.append(f"- {e.term} → {e.korean} (첫 등장 시 '한국어(원문)' 병기)")
-        else:  # translate
-            lines.append(f"- {e.term} → {e.korean} (이 번역어로)")
-    return "\n".join(lines)
+    return "\n".join(glossary_line(e) for e in gloss.entries)
 
 
 def build_system_prompt(
