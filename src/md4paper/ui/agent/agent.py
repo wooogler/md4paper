@@ -73,6 +73,8 @@ SYSTEM = """너는 md4paper의 논문 읽기 도우미다. 사용자는 PDF를 �
 할 수 있는 것: tool로 논문 본문을 찾고 읽기(search_paper, read_rows, outline), 사용자의 메모 탭과
 하이라이트 읽기(list_note_tabs, read_notes, read_highlights), 라이브러리의 논문·컬렉션 목록
 (list_papers, list_projects), BibTeX(get_bibtex), 사용자 화면 옮기기(goto_row, open_paper).
+쓰기(사용자가 승인해야 실행됨): 메모 탭에 쓰기(write_note), 하이라이트 긋기(add_highlight),
+논문을 컬렉션에 넣고 빼기(set_project_membership), 사용자에 대해 기억하기(remember).
 
 규칙:
 - 논문 내용에 관한 답은 **tool로 읽은 문단에만** 근거한다. 읽지 않은 내용은 추측하지 말고,
@@ -92,7 +94,10 @@ SYSTEM = """너는 md4paper의 논문 읽기 도우미다. 사용자는 PDF를 �
 - 화면에 열린 논문이 없으면(홈) list_papers로 찾고, 다른 논문은 tool에 token을 넘긴다.
 - 논문이 몇 편인지는 list_papers·list_projects 결과 첫머리의 숫자로 답한다. 목록은 잘려 있을 수
   있으니 목록 줄 수를 세지 않는다.
-- 화면 이동(goto_row, open_paper)은 사용자가 보여 달라고 하거나 이동을 원할 때만 한다."""
+- 화면 이동(goto_row, open_paper)은 사용자가 보여 달라고 하거나 이동을 원할 때만 한다.
+- 쓰기 tool은 사용자가 그렇게 해 달라고 할 때만 부른다. 부르면 사용자에게 승인 카드가 뜬다.
+  사용자가 거절하면 같은 쓰기를 다시 시도하지 말고 거절된 것을 받아들인다.
+- add_highlight의 quote는 read_rows·search_paper로 읽은 그 행의 글을 그대로 복사한다."""
 
 
 def memory_text() -> str:
@@ -404,6 +409,8 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
 
     output = result.output
     if isinstance(output, DeferredToolRequests):
+        # token 없이 부른 쓰기는 승인 뒤에도 이 논문에 쓴다 (routes가 재개 때 metadata로 넘긴다)
+        session.pending_token = deps.current_token
         await asyncio.to_thread(sessions.save, session)
         yield _event("approval_needed", session.pending or {"calls": []})
         yield _event("done", {"turn_id": None, "html": "", "citations": [], "usage": turn_usage,
@@ -419,6 +426,7 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
             "html": html, "citations": citations, "usage": turn_usage,
             "cost_usd": round(cost, 6), "model": label}
     session.turns.append(turn)
+    session.pending_token = None
     await asyncio.to_thread(sessions.save, session)
     yield _event("done", {"turn_id": turn["id"], "html": html, "citations": citations,
                           "usage": turn_usage, "cost_usd": turn["cost_usd"],

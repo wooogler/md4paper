@@ -71,15 +71,27 @@ class Session:
     conversation: object = field(default_factory=_empty_conversation)  # pydantic_ai.Conversation
     turns: list[dict] = field(default_factory=list)
     usage: dict = field(default_factory=lambda: {"input": 0, "output": 0, "cost_usd": 0.0})
+    # 승인을 기다리는 호출이 생길 때 화면에 열려 있던 논문. 승인은 사용자가 다른 논문으로 옮긴
+    # 뒤에 올 수 있으므로, token 없이 불린 쓰기 tool은 재개 때 이 논문에 쓴다(지금 화면이 아니라).
+    pending_token: str | None = None
+
     @property
     def pending(self) -> dict | None:
-        """승인 대기 중인 tool 호출 — `{"calls": [{id, name, args}]}` 또는 None."""
+        """승인 대기 중인 tool 호출 — `{"calls": [{id, name, args, description}], "token"}` 또는 None.
+
+        description은 승인 카드에 보일 사람용 한 줄(`tools.describe_call`), token은 `pending_token`.
+        """
         req = getattr(self.conversation, "deferred_tool_requests", None)
         if req is None:
             return None
-        calls = [{"id": p.tool_call_id, "name": p.tool_name, "args": p.args_as_dict()}
-                 for p in [*req.approvals, *req.calls]]
-        return {"calls": calls} if calls else None
+        from md4paper.ui.agent.tools import describe_call
+
+        calls = []
+        for p in [*req.approvals, *req.calls]:
+            args = p.args_as_dict()
+            calls.append({"id": p.tool_call_id, "name": p.tool_name, "args": args,
+                          "description": describe_call(p.tool_name, args)})
+        return {"calls": calls, "token": self.pending_token} if calls else None
 
     def meta(self) -> dict:
         """목록에 실을 요약."""
@@ -99,7 +111,8 @@ def _to_dict(s: Session) -> dict:
     conv = json.loads(ConversationTypeAdapter.dump_json(s.conversation))
     return {"version": VERSION, "id": s.id, "title": s.title, "created": s.created,
             "updated": s.updated, "model": s.model, "paper_tokens": s.paper_tokens,
-            "conversation": conv, "turns": s.turns, "usage": s.usage}
+            "conversation": conv, "turns": s.turns, "usage": s.usage,
+            "pending_token": s.pending_token}
 
 
 def _from_dict(data: dict) -> Session:
@@ -120,6 +133,7 @@ def _from_dict(data: dict) -> Session:
         turns=[t for t in (data.get("turns") or []) if isinstance(t, dict)],
         usage={"input": int(usage.get("input") or 0), "output": int(usage.get("output") or 0),
                "cost_usd": float(usage.get("cost_usd") or 0.0)},
+        pending_token=str(data.get("pending_token") or "") or None,
     )
 
 

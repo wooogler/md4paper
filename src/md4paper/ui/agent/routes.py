@@ -7,6 +7,11 @@
 `state["current_wd"]`로 폴백하지 않는다(창이 여럿이면 엉뚱한 논문을 읽게 된다). 그러니 app.py는
 `wd_for`로 **폴백 없는** 조회(`state["wd_by_token"].get`)를 넘겨야 한다.
 
+승인: 쓰기 tool을 부른 턴은 `approval_needed`로 끝나고 세션에 대기 호출이 남는다. 창은 같은 턴
+라우트에 `approvals: {call_id: true|false}`를 보내 재개한다(빠진 id는 거절). 대기 중인데 approvals
+없이 새 질문이 오면 대기 호출을 모두 거절로 닫고 그 질문을 잇는다 — 사용자가 카드를 무시하고
+넘어간 것이다(닫지 않으면 Pydantic AI가 새 질문을 받지 않는다).
+
 비용: 세션 누적 비용이 `config.resolve_agent_cost_cap()`(기본 $2)에 닿으면 턴을 시작하지 않고
 400 `{"code": "cost_cap"}`. 창이 확인을 받아 `override: true`로 다시 보내면 그 턴만 허용한다.
 
@@ -31,6 +36,8 @@ from md4paper.ui.agent.tools import Deps
 from md4paper.workdir import WorkDir
 
 MAX_MESSAGE = 4000     # 질문 길이 상한
+DENIED = "사용자가 거절했습니다."
+SKIPPED = "사용자가 승인하지 않고 새 질문으로 넘어갔습니다. 이 작업은 실행되지 않았습니다."
 
 # 지금 턴이 도는 세션 → 시작 시각. 한 세션에 턴 둘이 겹치면 대화 기록이 갈라지므로 두 번째는 409.
 # 스트림이 시작도 못 하고 끊기면(finally가 안 돎) 표시가 남으므로 BUSY_TTL이 지나면 풀린 것으로 본다.
@@ -89,9 +96,19 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
     from fastapi.responses import JSONResponse, StreamingResponse
     from pydantic import ValidationError
     from pydantic_ai import DeferredToolResults
+    from pydantic_ai.tools import ToolDenied
     from starlette.exceptions import HTTPException
 
     make = build_agent or default_agent
+
+    def _results(ids: list[str], ok: dict[str, bool], pending: dict,
+                 why: str = DENIED) -> DeferredToolResults:
+        """승인/거절 → 재개 입력. token 없이 부른 쓰기가 승인을 요청한 때의 논문에 쓰도록
+        그 논문을 호출별 metadata로 싣는다 (tool은 ctx.tool_call_metadata["token"]으로 받는다)."""
+        meta = {"token": pending.get("token")}
+        return DeferredToolResults(
+            approvals={i: True if ok.get(i) else ToolDenied(why) for i in ids},
+            metadata={i: dict(meta) for i in ids})
 
     def _models_payload() -> dict:
         ok, reason = readiness(make)
@@ -149,17 +166,22 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
         approvals = body.get("approvals")
         deferred = None
         message = str(body.get("message") or "").strip()[:MAX_MESSAGE]
+        pending = s.pending
         if approvals:
-            pending = s.pending
             if pending is None or not isinstance(approvals, dict):
                 return JSONResponse({"error": "승인 대기 중인 작업이 없습니다."}, status_code=400)
-            want = {c["id"] for c in pending["calls"]}
-            if set(map(str, approvals)) != want:
-                return JSONResponse({"error": "모든 대기 작업에 승인/거부를 보내야 합니다."},
+            want = [c["id"] for c in pending["calls"]]
+            unknown = set(map(str, approvals)) - set(want)
+            if unknown:
+                return JSONResponse({"error": f"대기 중이 아닌 작업입니다: {sorted(unknown)}"},
                                     status_code=400)
-            deferred = DeferredToolResults(approvals={str(k): bool(v)
-                                                      for k, v in approvals.items()})
-            message = ""
+            got = {str(k): v for k, v in approvals.items()}
+            # 일부만 와도 된다 — 답이 없는 호출은 거절로 닫는다(Pydantic AI는 전부 답해야 재개한다)
+            deferred = _results(want, {i: got.get(i) is True for i in want}, pending)
+        elif pending is not None and message:
+            # 승인 카드를 두고 새 질문 — 대기 호출을 모두 거절로 닫고 질문을 잇는다
+            want = [c["id"] for c in pending["calls"]]
+            deferred = _results(want, dict.fromkeys(want, False), pending, why=SKIPPED)
         elif not message:
             return JSONResponse({"error": "질문이 비어 있습니다."}, status_code=400)
 
@@ -188,6 +210,7 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
 
         async def stream():  # noqa: ANN202
             try:
+                # 승인 재개도 질문과 함께 올 수 있다 (approvals + message, 또는 새 질문이 대기를 닫을 때)
                 async for ev in run_turn(agent, s, message or None, deps,
                                          deferred_tool_results=deferred):
                     yield _sse(ev)

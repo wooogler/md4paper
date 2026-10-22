@@ -96,13 +96,17 @@ def test_conversation_roundtrip_with_usage_and_pending():
     sessions.touch_paper(s, "0123456789ab")
     sessions.touch_paper(s, "fedcba987654")
     sessions.touch_paper(s, "0123456789ab")
+    s.pending_token = "0123456789ab"
     sessions.save(s)
 
     back = sessions.load(s.id)
     assert len(back.conversation.messages) == 6
     assert back.conversation.conversation_id == s.conversation.conversation_id
     assert back.conversation.usage.input_tokens == 120
-    assert back.pending == {"calls": [{"id": "w1", "name": "write_note", "args": {"text": "x"}}]}
+    # 승인 카드용 한 줄 설명과, 승인을 요청한 때 화면의 논문이 함께 돈다
+    assert back.pending == {"calls": [{"id": "w1", "name": "write_note", "args": {"text": "x"},
+                                       "description": "'메모' 탭 끝에 1줄 추가"}],
+                            "token": "0123456789ab"}
     assert back.paper_tokens == ["fedcba987654", "0123456789ab"]
     assert sessions.list_sessions()[0]["last_paper"] == "0123456789ab"
 

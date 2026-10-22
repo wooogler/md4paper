@@ -12,20 +12,28 @@
   마커는 이 집합 안의 것만 칩이 된다.
 - 화면을 움직이는 tool(goto_row/open_paper)은 `deps.ui_actions`에 동작을 넣을 뿐이다. SSE 생성기가
   그것을 스트림에 끼워 보내고 브라우저가 실행한다.
+- 쓰기 tool(write_note·add_highlight·set_project_membership·remember)은 `requires_approval` —
+  모델이 부르면 run이 승인 대기로 끝나고, 사용자가 승인한 뒤의 run에서야 실제로 실행된다.
+  승인 카드의 한 줄 설명은 `DESCRIBE`(tool 이름 → args로 문장 만들기). 실행한 뒤에는
+  `{"kind": "refresh", "what": …}` 화면 동작을 넣어 뷰어가 메모·하이라이트·목록을 다시 읽게 한다.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import secrets
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import quote
 
-from pydantic_ai import RunContext
+from pydantic_ai import RunContext, Tool
 
-from md4paper.ui.agent import retrieval
+from md4paper.ui.agent import retrieval, sessions
 from md4paper.ui.agent.cites import note_tag, row_label
 from md4paper.ui.agent.context import ScreenContext
 from md4paper.workdir import WorkDir
@@ -77,9 +85,17 @@ def _clip(text: str | None, limit: int = ROW_CLIP) -> str:
     return t if len(t) <= limit else t[:limit].rstrip() + " …"
 
 
-def _resolve(deps: Deps, token: str | None) -> tuple[str, WorkDir] | str:
-    """토큰 → (토큰, WorkDir). 실패하면 모델에게 보일 안내 문자열."""
-    tok = (token or deps.current_token or "").strip()
+_CURRENT = object()   # _resolve의 기본 논문 = 지금 화면
+
+
+def _resolve(deps: Deps, token: str | None,
+             default: object = _CURRENT) -> tuple[str, WorkDir] | str:
+    """토큰 → (토큰, WorkDir). 실패하면 모델에게 보일 안내 문자열.
+
+    token이 비면 default(기본: 지금 화면의 논문). 쓰기 tool은 승인을 요청한 때의 논문을 넘긴다.
+    """
+    fallback = deps.current_token if default is _CURRENT else default
+    tok = (token or fallback or "").strip()
     if not tok:
         return ("지금 화면에 열린 논문이 없습니다. list_papers로 논문을 찾아 token을 지정하세요.")
     wd = deps.wd_for(tok)
@@ -503,5 +519,363 @@ async def open_paper(ctx: RunContext[Deps], token: str, lang: str | None = None)
     return f"'{title}' 논문을 열었습니다."
 
 
+# --- 쓰기 (사용자 승인 뒤 실행) ----------------------------------------
+# 모델이 부르면 run은 승인 대기로 끝나고(DeferredToolRequests), 여기 함수는 사용자가 승인한 뒤의
+# run에서야 돈다. 그사이 사용자가 다른 논문으로 옮겼을 수 있으므로 token을 비워 부른 호출은
+# '승인을 요청했을 때 화면의 논문'(재개 때 tool_call_metadata로 들어온다)에 쓴다.
+
+NOTE_MAX = 20000       # write_note 한 번에 쓰는 글 상한
+MEMORY_LINE_MAX = 500  # remember 한 줄 상한
+MEMORY_WARN = 4000     # agent.MEMORY_MAX와 같은 값 — 넘으면 뒷부분이 지시문에 안 들어간다
+ANCHOR_CTX = 40        # 하이라이트 앵커의 앞뒤 문맥 길이 — 뷰어 JS의 CTX와 같게
+# 뷰어가 셀을 그리는 markdown2 extras (app.py의 `_md = [...]`, ui.markdown(enb, extras=_md))
+VIEW_EXTRAS = "fenced-code-blocks tables latex"
+
+
+def _write_target(ctx: RunContext[Deps], token: str | None) -> tuple[str, WorkDir] | str:
+    """쓰기 tool의 대상 논문 — token이 없으면 승인을 요청한 때 화면의 논문(없으면 지금 화면)."""
+    meta = ctx.tool_call_metadata if isinstance(ctx.tool_call_metadata, dict) else {}
+    if "token" in meta:
+        return _resolve(ctx.deps, token, default=meta["token"])
+    return _resolve(ctx.deps, token)
+
+
+def _refresh(deps: Deps, what: str, token: str | None, **extra: object) -> None:
+    """뷰어에 다시 읽으라고 알린다 — 열린 화면이 들고 있던 옛 목록으로 파일을 덮지 않게."""
+    deps.ui_actions.put_nowait({"kind": "refresh", "what": what, "token": token, **extra})
+
+
+def _lines(text: str) -> int:
+    return sum(1 for ln in (text or "").splitlines() if ln.strip())
+
+
+async def write_note(ctx: RunContext[Deps], name: str, text: str, token: str | None = None,
+                     mode: str = "append") -> str:
+    """사용자의 메모 탭에 글을 쓴다. **사용자가 승인해야 실행된다.**
+
+    사용자가 메모로 남겨 달라고 할 때만 쓴다. 탭이 없으면 그 이름으로 새로 만든다.
+    마크다운으로 쓰고, 논문 행을 가리킬 때는 인용 칩 대신 "r12"처럼 평문으로 적는다.
+
+    Args:
+        name: 메모 탭 이름 (list_note_tabs로 확인). 없는 이름이면 새 탭을 만든다.
+        text: 쓸 내용 (마크다운).
+        token: 논문 token. 생략하면 지금 화면의 논문.
+        mode: "append"(기본, 탭 끝에 빈 줄을 두고 덧붙임) 또는 "replace"(탭 내용을 통째로 바꿈 —
+            사용자가 바꿔 달라고 분명히 말했을 때만).
+    """
+    from md4paper import notes
+
+    if mode not in ("append", "replace"):
+        return f"mode는 'append' 또는 'replace'여야 합니다 (받은 값: {mode!r})."
+    body = (text or "").strip()
+    if not body:
+        return "쓸 내용이 비어 있어 아무것도 쓰지 않았습니다."
+    if len(body) > NOTE_MAX:
+        return f"내용이 너무 깁니다 ({len(body)}자, 상한 {NOTE_MAX}자). 나눠서 쓰세요."
+    got = _write_target(ctx, token)
+    if isinstance(got, str):
+        return got
+    tok, wd = got
+    want = notes.clean_name(name) or notes.DEFAULT_NAME
+
+    def work() -> tuple[str, str, bool]:
+        created = want not in notes.tab_names(wd)
+        tab = notes.add(wd, want) if created else want
+        old, stamp = notes.read_stamped(wd, tab)
+        new = body + "\n" if mode == "replace" or not old.strip() \
+            else old.rstrip() + "\n\n" + body + "\n"
+        # stamp로 읽은 뒤 바깥(편집기·다른 창)에서 바뀌었으면 덮지 않는다. 통째로 바꿀 때는
+        # 덮기 전 내용을 notes/.trash/에 한 벌 남긴다(keep_old).
+        notes.write(wd, tab, new, expect=stamp, keep_old=(mode == "replace"))
+        return tab, new, created
+
+    try:
+        tab, _new, created = await asyncio.to_thread(work)
+    except notes.Conflict:
+        return (f"'{want}' 탭이 방금 바깥에서 바뀌어 쓰지 않았습니다. read_notes로 다시 읽은 뒤 "
+                "사용자에게 다시 쓸지 물어보세요.")
+    _refresh(ctx.deps, "notes", tok, tab=tab)
+    n = _lines(body)
+    if created:
+        return f"새 메모 탭 '{tab}'을 만들어 {n}줄을 썼습니다."
+    if mode == "replace":
+        return f"'{tab}' 탭 내용을 새 글({n}줄)로 바꿨습니다 (이전 내용은 휴지통에 한 벌 남김)."
+    return f"'{tab}' 탭 끝에 {n}줄을 덧붙였습니다."
+
+
+class _TextOf(HTMLParser):
+    """HTML → textContent (태그를 버리고 글자만, 엔티티는 풀어서)."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.out.append(data)
+
+
+def cell_text(md: str) -> str:
+    """뷰어 셀의 평문 — 하이라이트 오프셋은 마크다운 원문이 아니라 **렌더된 셀의 textContent** 기준이다.
+
+    뷰어와 같은 렌더러(NiceGUI ui.markdown = markdown2, 같은 extras)로 HTML을 만들고 태그를 걷는다.
+    뷰어 쪽의 수식 표식·이미지 주소 바꾸기 같은 차이는 남지만, 뷰어는 오프셋이 안 맞으면
+    quote로 다시 찾으므로(app.py resolve) 문구만 같으면 붙는다.
+    """
+    try:
+        from nicegui.elements.markdown import prepare_content
+
+        html = prepare_content(md or "", VIEW_EXTRAS)
+    except Exception:  # noqa: BLE001 — 렌더러가 없으면 원문으로 (quote 재탐색이 받쳐 준다)
+        return md or ""
+    p = _TextOf()
+    p.feed(html)
+    p.close()
+    return "".join(p.out)
+
+
+def locate(text: str, quote: str) -> tuple[int, int] | None:
+    """평문에서 quote의 [start, end) — 그대로 없으면 공백 차이(줄바꿈·연속 공백)를 무시하고 찾는다."""
+    q = (quote or "").strip()
+    if not q:
+        return None
+    i = text.find(q)
+    if i >= 0:
+        return i, i + len(q)
+    flat: list[str] = []
+    where: list[int] = []      # flat의 각 글자가 원문 몇 번째 글자인지
+    prev_space = True
+    for k, ch in enumerate(text):
+        if ch.isspace():
+            if prev_space:
+                continue
+            flat.append(" ")
+            prev_space = True
+        else:
+            flat.append(ch)
+            prev_space = False
+        where.append(k)
+    qf = " ".join(q.split())
+    j = "".join(flat).find(qf)
+    if j < 0:
+        return None
+    return where[j], where[j + len(qf) - 1] + 1
+
+
+def _anno_id() -> str:
+    """뷰어 JS의 uid()와 같은 꼴 — 'a' + 밀리초(36진) + 무작위 5자."""
+    n, digits = int(time.time() * 1000), "0123456789abcdefghijklmnopqrstuvwxyz"
+    ms = ""
+    while n:
+        n, r = divmod(n, 36)
+        ms = digits[r] + ms
+    return "a" + ms + "".join(secrets.choice(digits) for _ in range(5))
+
+
+async def add_highlight(ctx: RunContext[Deps], row: int, side: str, quote: str, note: str = "",
+                        color: str = "yellow", token: str | None = None) -> str:
+    """논문의 한 문장(구절)에 하이라이트를 긋고 메모를 단다. **사용자가 승인해야 실행된다.**
+
+    사용자가 표시해 달라고 할 때만 쓴다. quote는 read_rows·search_paper로 읽은 그 행의 글을
+    **그대로 복사**해야 위치를 찾는다(한 문장 정도, 수식·기호를 바꾸지 말 것).
+
+    Args:
+        row: 행 번호 (결과의 [rN]의 N).
+        side: "en"(원문) 또는 "ko"(번역).
+        quote: 하이라이트할 문구 — 그 행의 원문/번역에 들어 있는 글 그대로.
+        note: 하이라이트에 붙일 메모 (선택).
+        color: "yellow"(기본), "green", "blue", "pink", "purple".
+        token: 논문 token. 생략하면 지금 화면의 논문.
+    """
+    from md4paper.ui import annotations
+
+    if side not in annotations.SIDES:
+        return "side는 'en'(원문) 또는 'ko'(번역)여야 합니다."
+    if color not in annotations.COLORS:
+        return f"color는 {', '.join(annotations.COLORS)} 중 하나여야 합니다."
+    if not (quote or "").strip():
+        return "quote가 비어 있습니다 — 하이라이트할 문구를 그대로 넣으세요."
+    got = _write_target(ctx, token)
+    if isinstance(got, str):
+        return got
+    tok, wd = got
+    chunks = (await asyncio.to_thread(retrieval.paper, wd)).chunks
+    c = next((x for x in chunks if x.row == int(row)), None)
+    if c is None:
+        return (f"행 범위 밖입니다 (r0–r{len(chunks) - 1})." if chunks
+                else "이 논문에서 읽을 수 있는 본문이 없습니다.")
+    src = c.en if side == "en" else c.ko
+    if not (src or "").strip():
+        return f"r{c.row}에는 번역이 없습니다. side='en'으로 원문에 그으세요."
+    plain = await asyncio.to_thread(cell_text, src)
+    span = locate(plain, quote)
+    where = retrieval.SIDE_KO[side]
+    if span is None:
+        return (f"r{c.row} {where}에서 그 문구를 찾지 못했습니다. read_rows로 그 행을 읽고 "
+                "글을 그대로 복사해 다시 부르세요.")
+    s, e = span
+    item = {"id": _anno_id(), "color": color, "note": (note or "").strip(),
+            "anchors": [{"side": side, "row": c.row, "start": s, "end": e, "quote": plain[s:e],
+                         "prefix": plain[max(0, s - ANCHOR_CTX):s],
+                         "suffix": plain[e:e + ANCHOR_CTX]}],
+            "created": time.time()}
+
+    def work() -> None:
+        items = annotations.load(wd)
+        items.append(item)
+        annotations.save(wd, items, backup=True)
+
+    await asyncio.to_thread(work)
+    n = retrieval._note_of(item)
+    if n is not None:    # 방금 그은 표시도 답에서 [[a…]]로 인용할 수 있게
+        _register_note(ctx.deps, tok, n)
+    _refresh(ctx.deps, "highlights", tok, id=item["id"])
+    return (f"r{c.row} {where}에 하이라이트를 그었습니다 [{note_tag(item['id'])}]: "
+            f"\"{_clip(plain[s:e], 120)}\"")
+
+
+def _find_project(key: str) -> dict | None:
+    """컬렉션 id 또는 이름(대소문자 무시) → 컬렉션."""
+    from md4paper import projects
+
+    k = (key or "").strip()
+    items = projects.all_projects()
+    return (next((p for p in items if p["id"] == k), None)
+            or next((p for p in items if p["name"].lower() == k.lower()), None))
+
+
+async def set_project_membership(ctx: RunContext[Deps], token: str, project_id: str,
+                                 add: bool = True) -> str:
+    """논문을 컬렉션에 넣거나 뺀다 (한 논문은 여러 컬렉션에 속할 수 있다). **사용자가 승인해야 실행된다.**
+
+    Args:
+        token: 논문 token (list_papers에서). 빈 문자열이면 지금 화면의 논문.
+        project_id: 컬렉션 id 또는 이름 (list_projects에서).
+        add: True면 넣기, False면 빼기.
+    """
+    from md4paper import library
+
+    got = _write_target(ctx, token)
+    if isinstance(got, str):
+        return got
+    tok, wd = got
+    proj = await asyncio.to_thread(_find_project, project_id)
+    if proj is None:
+        return f"'{project_id}' 컬렉션이 없습니다. list_projects로 id를 확인하세요."
+    pid, pname = proj["id"], proj["name"]
+
+    def work() -> str | None:
+        cur = library.projects_of(wd)
+        if add == (pid in cur):
+            return None
+        new = [*cur, pid] if add else [i for i in cur if i != pid]
+        library.set_memberships(wd, new)   # 저장 폴더의 사본도 소속에 맞춰 따라간다
+        return pid
+
+    changed = await asyncio.to_thread(work)
+    if changed is None:
+        return f"이미 '{pname}' 컬렉션에 {'들어 있습니다' if add else '없습니다'}."
+    _refresh(ctx.deps, "library", tok)
+    return f"논문을 '{pname}' 컬렉션{'에 넣었습니다' if add else '에서 뺐습니다'}."
+
+
+async def remember(ctx: RunContext[Deps], text: str) -> str:
+    """사용자에 대해 앞으로도 기억할 것을 장기 메모리(memory.md)에 한 줄 적는다. **사용자가 승인해야 실행된다.**
+
+    사용자가 기억해 달라고 하거나, 앞으로의 대화에 계속 쓸 선호·배경(연구 분야, 답 형식 취향 등)을
+    밝혔을 때만 쓴다. 한 번 읽고 말 논문 내용은 적지 않는다. 다음 질문부터 지시문에 들어간다.
+
+    Args:
+        text: 기억할 내용 한 줄 (짧게).
+    """
+    line = " ".join((text or "").split())[:MEMORY_LINE_MAX]
+    if not line:
+        return "기억할 내용이 비어 있습니다."
+    path = sessions.memory_path()
+
+    def work() -> int:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        old = path.read_text(encoding="utf-8") if path.exists() else ""
+        sep = "" if not old or old.endswith("\n") else "\n"
+        with path.open("a", encoding="utf-8") as f:
+            f.write(f"{sep}- {date.today().isoformat()} {line}\n")
+        return len(old) + len(sep) + len(line) + 14
+
+    size = await asyncio.to_thread(work)
+    msg = f"기억해 두었습니다: {line}"
+    if size > MEMORY_WARN:
+        msg += (f"\n(memory.md가 {MEMORY_WARN}자를 넘어 뒷부분은 지시문에 들어가지 않습니다 — "
+                "사용자에게 memory.md를 정리하라고 알려 주세요.)")
+    return msg
+
+
+# --- 승인 카드 설명 -----------------------------------------------------
+
+_COLOR_ADJ = {"yellow": "노란", "green": "초록", "blue": "파란", "pink": "분홍", "purple": "보라"}
+
+
+def _short(text: object, limit: int) -> str:
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= limit else t[:limit].rstrip() + "…"
+
+
+def _on_paper(args: dict) -> str:
+    tok = str(args.get("token") or "").strip()
+    return f" (논문 {tok})" if tok else ""
+
+
+def _describe_write_note(args: dict) -> str:
+    name = str(args.get("name") or "").strip() or "메모"
+    n = _lines(str(args.get("text") or ""))
+    if args.get("mode") == "replace":
+        return f"'{name}' 탭 내용을 새 글({n}줄)로 바꿈{_on_paper(args)}"
+    return f"'{name}' 탭 끝에 {n}줄 추가{_on_paper(args)}"
+
+
+def _describe_add_highlight(args: dict) -> str:
+    side = retrieval.SIDE_KO.get(str(args.get("side") or "en"), "원문")
+    color = _COLOR_ADJ.get(str(args.get("color") or "yellow"), "")
+    out = f"r{args.get('row')} {side}에 {color} 하이라이트: \"{_short(args.get('quote'), 50)}\""
+    if str(args.get("note") or "").strip():
+        out += f" + 메모 \"{_short(args.get('note'), 40)}\""
+    return out + _on_paper(args)
+
+
+def _describe_membership(args: dict) -> str:
+    key = str(args.get("project_id") or "")
+    try:
+        proj = _find_project(key)
+    except Exception:  # noqa: BLE001 — 설명 한 줄 때문에 승인 카드가 깨지면 안 된다
+        proj = None
+    name = proj["name"] if proj else key
+    verb = "에 넣기" if args.get("add", True) else "에서 빼기"
+    return f"논문을 컬렉션 '{name}'{verb}{_on_paper(args)}"
+
+
+def _describe_remember(args: dict) -> str:
+    return f"기억해 두기 (memory.md): \"{_short(args.get('text'), 80)}\""
+
+
+DESCRIBE: dict[str, Callable[[dict], str]] = {
+    "write_note": _describe_write_note,
+    "add_highlight": _describe_add_highlight,
+    "set_project_membership": _describe_membership,
+    "remember": _describe_remember,
+}
+
+
+def describe_call(name: str, args: dict) -> str:
+    """승인 카드에 보일 사람용 한 줄. 모르는 tool은 이름만."""
+    fn = DESCRIBE.get(name)
+    if fn is None:
+        return f"{name} 실행"
+    try:
+        return fn(args if isinstance(args, dict) else {})
+    except Exception:  # noqa: BLE001 — 깨진 인자여도 카드는 뜬다
+        return f"{name} 실행"
+
+
+WRITE_TOOLS = [write_note, add_highlight, set_project_membership, remember]
+
 TOOLS = [search_paper, read_rows, outline, list_note_tabs, read_notes, read_highlights,
-         list_papers, list_projects, get_bibtex, goto_row, open_paper]
+         list_papers, list_projects, get_bibtex, goto_row, open_paper,
+         *(Tool(fn, requires_approval=True) for fn in WRITE_TOOLS)]
