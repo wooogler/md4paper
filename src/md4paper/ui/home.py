@@ -35,33 +35,42 @@ PAPER_MIME = "text/x-md4-paper"
 
 HOME_CSS = """
 /* 홈 = 뷰어와 같은 2단. 높이·여백은 _CHROME_CSS의 .md4-body 규칙이 맡는다(창 전체는 스크롤되지 않는다). */
-.md4-hside { flex: 0 0 240px; width: 240px; height: 100%; background: #f4f3f1; border-right: 1px solid #e6e4e0;
+.md4-hside { flex: 0 0 272px; width: 272px; height: 100%; background: #f4f3f1; border-right: 1px solid #e6e4e0;
   flex-wrap: nowrap; }
-.md4-hside-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 8px 6px; flex-wrap: nowrap; }
-.md4-hcap { padding: 14px 10px 4px; }
-.md4-prow { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 4px 0 10px; border-radius: 6px;
-  cursor: pointer; color: #37352f; font-size: 13.5px; user-select: none; transition: background .12s ease; }
-.md4-prow + .md4-prow { margin-top: 1px; }
+/* 행은 사이드바 끝에서 끝까지 — 좌우 여백은 행 안(16px)에서 준다. hover·고른 행의 바탕이 가장자리까지 닿아
+   어느 줄인지 한눈에 들어온다. 캡·'새 컬렉션'·바닥 줄도 같은 16px 들여쓰기에 맞춘다. */
+.md4-hside-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 0 6px; flex-wrap: nowrap; }
+.md4-hcap { padding: 16px 16px 6px; }
+.md4-prow { display: flex; align-self: stretch; align-items: center; gap: 10px; min-height: 38px; padding: 0 10px 0 16px; border-radius: 0;
+  cursor: pointer; color: #37352f; font-size: 14.5px; line-height: 1.3; user-select: none; transition: background .12s ease; }
 .md4-prow:hover { background: rgba(0,0,0,.05); }
 .md4-prow.on { background: rgba(35,131,226,.13); color: #2383e2; font-weight: 600; }
 .md4-prow-i { color: #9a968e; flex: 0 0 auto; }
 .md4-prow.on .md4-prow-i { color: #2383e2; }
-.md4-prow-t { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.md4-prow-n { flex: 0 0 auto; font-size: 12px; color: #9a968e; font-weight: 400; padding-right: 4px; }
-.md4-prow-more { flex: 0 0 auto; opacity: 0; color: #6b6862; margin: 0 -2px 0 -6px; }
-.md4-prow:hover .md4-prow-more { opacity: 1; }
-.md4-prow:hover .md4-prow-n:has(+ .md4-prow-more) { display: none; }
-/* 카드를 끄는 동안 놓을 수 있는 행(프로젝트)을 옅은 테두리로, 그 위에 올리면 진하게 — 놓으면 그 프로젝트에 더해진다 */
+/* 이름(+ 폴더를 가진 컬렉션은 그 아래 폴더 이름) — 둘 다 한 줄로 자른다 */
+.md4-prow-t { flex: 1 1 auto; min-width: 0; padding: 5px 0; }
+.md4-prow-name, .md4-prow-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.md4-prow-sub { font-size: 11.5px; color: #9a968e; font-weight: 400; margin-top: 1px; }
+.md4-prow-n { flex: 0 0 auto; min-width: 2ch; text-align: right; font-size: 12.5px; color: #9a968e; font-weight: 400;
+  font-variant-numeric: tabular-nums; }
+/* ⋯ 자리는 늘 잡아 둔다(편수가 hover 때 옆으로 밀리지 않게). 폭이 넉넉해져 편수와 함께 보인다. */
+.md4-prow-more { flex: 0 0 auto; opacity: 0; color: #6b6862; margin: 0 -4px 0 -4px; }
+.md4-prow:hover .md4-prow-more, .md4-prow-more[aria-expanded=true] { opacity: 1; }
+/* ⋯가 없는 행(모든 논문·미분류)도 같은 자리를 비워 둔다 — 편수가 한 세로줄에 서게 (⋯ 24px − 겹침 8px) */
+.md4-prow-gap { flex: 0 0 16px; }
+/* 카드를 끄는 동안 놓을 수 있는 행(컬렉션)을 옅은 테두리로, 그 위에 올리면 진하게 — 놓으면 그 컬렉션에 더해진다 */
 html.md4-carddrag .md4-prow[data-drop] { box-shadow: inset 0 0 0 1px rgba(35,131,226,.35); }
 .md4-prow.hot, html.md4-carddrag .md4-prow.hot[data-drop] { background: rgba(35,131,226,.18); box-shadow: inset 0 0 0 1.5px #2383e2; }
-.md4-hnew { justify-content: flex-start; margin-top: 4px; color: #6b6862; }
-.md4-hfoot { flex: 0 0 auto; padding: 6px 8px 10px; border-top: 1px solid #e6e4e0; }
-.md4-hfoot .q-btn { justify-content: flex-start; color: #6b6862; }
+.md4-hnew { justify-content: flex-start; margin-top: 6px; color: #6b6862; border-radius: 0; min-height: 36px; }
+.md4-hfoot { flex: 0 0 auto; padding: 6px 0 10px; border-top: 1px solid #e6e4e0; }
+.md4-hfoot .q-btn { justify-content: flex-start; color: #6b6862; border-radius: 0; }
+.md4-hnew.q-btn, .md4-hfoot .q-btn { padding: 0 16px; }
+.md4-hnew .q-btn__content, .md4-hfoot .q-btn__content { justify-content: flex-start; }
 /* 작업 폴더 경로 — 길면 앞을 줄이고 끝(폴더 이름)을 보인다(rtl). 앞의 '/'가 rtl에서 끝으로 튀지 않게
    글자 앞에 LRM을 붙여 그린다. */
-.md4-hws { font-size: 11px; color: #9a968e; padding: 0 6px; max-width: 100%; overflow: hidden;
+.md4-hws { font-size: 11px; color: #9a968e; padding: 0 16px; max-width: 100%; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.md4-hfoot .nicegui-row { padding: 0 6px; flex-wrap: wrap; }
+.md4-hfoot .nicegui-row { padding: 0 16px; flex-wrap: wrap; }
 /* 오른쪽 목록 열 — 머리·도구 줄은 제 높이, 목록은 남은 높이 안에서만 스크롤. 드롭 때 업로더가
    이 열 전체로 펼쳐지므로 기준 상자(position)가 된다. */
 .md4-hmain { flex: 1 1 auto; min-width: 0; height: 100%; position: relative; flex-wrap: nowrap; }
@@ -144,6 +153,7 @@ html.md4-filedrag .md4-dropov { display: flex; }
   .md4-hfoot .q-btn, .md4-hnew { color: #a8a8a8; }
   .md4-prow { color: #d4d4d4; }
   .md4-prow-more { color: #a8a8a8; }
+  .md4-prow-n, .md4-prow-sub { color: #8a8a8a; }
   .md4-prow:hover { background: rgba(255,255,255,.07); }
   .md4-prow.on { background: rgba(90,150,230,.22); color: #7bb7ff; }
   .md4-prow.on .md4-prow-i { color: #7bb7ff; }
@@ -671,12 +681,16 @@ def build_home(state: dict) -> None:
             background_tasks.create(_process_queue(state))
 
     # ===== 왼쪽 — 프로젝트 사이드바 =====
-    def prow(value: str, label: str, n: int, icon: str, *, project: bool = False) -> None:
+    def prow(value: str, label: str, n: int, icon: str, *, project: bool = False, sub: str = "") -> None:
+        """사이드바 한 줄. `sub`는 이름 아래 옅은 둘째 줄 — 폴더를 가진 컬렉션의 폴더 이름(어디로 쌓이는지)."""
         on = view["scope"] == value
         row = ui.element("div").classes("md4-prow" + (" on" if on else ""))
         with row:
-            ui.icon(icon, size="17px").classes("md4-prow-i")
-            ui.label(label).classes("md4-prow-t")
+            ui.icon(icon, size="18px").classes("md4-prow-i")
+            with ui.element("div").classes("md4-prow-t"):
+                ui.label(label).classes("md4-prow-name")
+                if sub:
+                    ui.label(sub).classes("md4-prow-sub")
             ui.label(str(n)).classes("md4-prow-n")
             if project:
                 more = ui.button(icon="more_horiz", color=None) \
@@ -689,6 +703,8 @@ def build_home(state: dict) -> None:
                     ui.separator()
                     ui.menu_item("컬렉션 삭제", on_click=lambda _, p=value: confirm_delete_project(p)) \
                         .props("dense").classes("text-negative")
+            else:
+                ui.element("span").classes("md4-prow-gap")
         if project:
             row.props("data-drop")
             row.on("dragover", js_handler=_ROW_DRAGOVER_JS)
@@ -703,7 +719,9 @@ def build_home(state: dict) -> None:
         prow(projects.ALL, "모든 논문", n[projects.ALL], "library_books")
         ui.label("컬렉션").classes("md4-panel-title md4-hcap")
         for p in data["projs"]:  # 만든 순서대로
-            prow(p["id"], p["name"], n.get(p["id"], 0), "folder_special", project=True)
+            root = str(p.get("root") or "").strip()  # projects.root_of와 같은 규칙 — 파일을 다시 읽지 않게
+            prow(p["id"], p["name"], n.get(p["id"], 0), "folder_special", project=True,
+                 sub=Path(root).expanduser().name if root else "")
         prow(projects.NONE, projects.NONE_LABEL, n[projects.NONE], "inbox")
         ui.button("새 컬렉션", icon="add", color=None, on_click=lambda: new_project()) \
             .props("flat dense no-caps").classes("md4-hnew w-full") \
