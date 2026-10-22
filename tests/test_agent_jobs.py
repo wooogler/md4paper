@@ -154,6 +154,20 @@ def test_plan_and_invalidate_retranslate_only_that_section(paper):
     assert len(calls) == 1 and "method encoder" in calls[0]
 
 
+def test_invalidate_merged_unit_retranslates_it(tmp_path):
+    """짧은 섹션들은 한 유닛으로 묶여 섹션 조각 해시로도 캐시된다 — 조각 해시까지 지워야 다시 번역된다.
+    (apply.unit_hashes 접합부가 바뀌어도 '그 유닛만 다시'가 끝까지 되는지 지키는 테스트.)"""
+    wd = WorkDir(tmp_path / "short.md4")
+    pipeline.convert(Path(__file__).parent / "corpus" / "sample_cite.md", wd)
+    run_translate(wd, fake(), "해라체")
+    method = _sid_of(wd, "2 Method")
+    plan = jobtools.plan_retranslate(wd, [method])
+    assert len(plan["affected"]) > 1                      # 이웃과 묶였다
+    jobtools.invalidate_cache(wd, plan["hashes"])
+    summary = run_translate(wd, fake(), "해라체")
+    assert summary["ok"] >= 1
+
+
 def test_plan_refuses_unknown_unticked_and_untranslated(paper, tmp_path):
     assert "없는 섹션 id" in jobtools.plan_retranslate(paper, ["h_9999"])
     from md4paper.review import manifest as manifest_io
