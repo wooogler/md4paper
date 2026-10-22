@@ -46,7 +46,7 @@ _ABS_LEAD = re.compile(
     r"|^(?-i:(?:Abstract|ABSTRACT)\s+(?=[A-Z]))", re.I)  # 'Abstract The …'(구두점 없이 붙은 표시)
 # 머리말 '목록류' 문단(헤딩·굵은 글씨·맨 글자 모두) — 헤딩이면 그 아래 문단까지 건너뛴다
 _META = re.compile(
-    r"^(?:#{1,6}\s*|\*\*)?\s*(?:acm reference format|ccs concepts|categories and subject descriptors|"
+    r"^(?:#{1,6}\s*|\*{1,2}|_{1,2})?\s*(?:acm reference format|ccs concepts|categories and subject descriptors|"
     r"keywords?|index terms|general terms|additional key words|author keywords|"
     r"키워드|주제어|핵심어|ccs\s*개념|acm\s*참고\s*형식)", re.I)
 # 저작권·식별자·게재 정보 문단 (문단 머리에서만 본다 — 초록 끝에 붙은 저작권 한 줄 때문에 초록을 버리지 않게)
@@ -152,7 +152,7 @@ def extract_abstract(md: str) -> str:
     # 2) 표시가 없으면 가장 긴 평문 문단 (쪽 나눔으로 쪼개진 문단은 다시 잇는다)
     best, run, skip = "", "", False
     for b in region:
-        if _is_heading(b):
+        if _is_heading(b) or (_META.match(b) and len(b) < 60):  # 기울임 라벨 문단('*CCS Concepts*')도 헤딩처럼
             skip = bool(_META.match(b))  # 키워드·CCS 헤딩 아래 문단은 건너뛴다
             run = ""
             continue

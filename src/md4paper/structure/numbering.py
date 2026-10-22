@@ -56,13 +56,32 @@ _FRONT_MATTER_LABELS = (
     "index terms",
     "general terms",
     "acm classification",
+    "categories and subject descriptors",
+)
+# 추출기가 단어 사이 공백을 잃기도 해서("ACMReference Format:") 단어 사이는 공백 0개 이상으로 본다
+_FRONT_MATTER_RE = re.compile(
+    r"(?:" + "|".join(r"\s*".join(map(re.escape, label.split())) for label in _FRONT_MATTER_LABELS)
+    + r")(?:$|[\s:.\-–—·])",
+    re.I,
 )
 
 
 def is_front_matter_label(text: str) -> bool:
     """CCS Concepts · ACM Reference Format · Keywords 같은 앞부분 라벨인가."""
-    t = re.sub(r"\s+", " ", text).strip().lower()
-    return any(re.match(re.escape(label) + r"(?:$|[\s:.\-–—])", t) for label in _FRONT_MATTER_LABELS)
+    return bool(_FRONT_MATTER_RE.match(text.strip()))
+
+
+def split_front_matter_label(text: str) -> tuple[str, str]:
+    """'CCS Concepts: · Human-centered …' → ('CCS Concepts:', '· Human-centered …').
+
+    추출기가 라벨과 내용을 한 헤딩 줄로 붙여 내보낸 경우 라벨만 떼어 표기하려고 쓴다.
+    앞부분 라벨이 아니면 (text, '').
+    """
+    t = text.strip()
+    m = _FRONT_MATTER_RE.match(t)
+    if not m:
+        return t, ""
+    return t[: m.end()].strip(), t[m.end():].strip()
 
 
 _ROMAN_VALUES = {"I": 1, "V": 5, "X": 10, "L": 50, "C": 100, "D": 500, "M": 1000}

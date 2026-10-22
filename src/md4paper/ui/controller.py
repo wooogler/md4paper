@@ -14,9 +14,9 @@ from md4paper.ir import Flavor, GlossaryEntry, GlossaryList, Manifest
 from md4paper.review import manifest as manifest_io
 from md4paper.workdir import WorkDir
 
-LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, "skip", "merge-up", "drop"]
-# run-in 헤더는 italic(이탤릭 표기)도 고를 수 있다
-RUNIN_LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, "italic", "skip", "merge-up", "drop"]
+# italic: 헤더가 아닌 기울임 문단 — run-in 소제목, CCS Concepts·Keywords 같은 앞부분 라벨
+LEVEL_OPTIONS = [1, 2, 3, 4, 5, 6, "italic", "skip", "merge-up", "drop"]
+RUNIN_LEVEL_OPTIONS = LEVEL_OPTIONS
 SETTING_FIELDS = (
     "citation_parts", "reference_links", "flavor", "caption_style", "runin_headings",
     "korean_style", "translate_headers", "translate_references",

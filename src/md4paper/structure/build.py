@@ -134,6 +134,7 @@ def build(raw_md: str, wd: WorkDir, flavor: Flavor = Flavor.STANDARD, provider=N
         zip(cands, releveled)
     ):
         unnumbered_runin = False
+        front_label = numbering.is_front_matter_label(text)
         if is_runin:
             unnumbered = needs_review  # relevel이 깊이를 못 준 무번호 run-in
             needs_review = False       # run-in은 기본 동작이 정해져 경고 대상 아님
@@ -149,13 +150,19 @@ def build(raw_md: str, wd: WorkDir, flavor: Flavor = Flavor.STANDARD, provider=N
             # 소제목이면 runin_mode에 따라 표기(승격/이탤릭/유지), 아니면(본문·리스트·캡션) skip
             final_level = ({"header": computed, "italic": "italic"}.get(runin_mode, "skip")
                            if is_head else "skip")
+            if front_label:  # 'Keywords: …' 같은 앞부분 라벨은 소제목이 아니다 — 기울임 라벨로
+                final_level = "italic"
         else:
             final_level = marker_level if needs_review else level
-            if needs_review and numbering.is_front_matter_label(text):
-                needs_review = False  # 앞부분 라벨은 번호가 없는 게 정상 — 원래 레벨 그대로
+            if front_label:
+                # CCS Concepts·Keywords·ACM Reference Format 같은 앞부분 서지 라벨은 섹션이 아니다 —
+                # 목차·섹션 트리에서 빼고 기울임 라벨 문단으로 남긴다(뒤 본문은 그대로). 번호가 없는 게 정상이라 리뷰 대상도 아님.
+                final_level, needs_review = "italic", False
         # 이전 논문에서 이 헤더 이름에 대해 사용자가 정한 선택이 있으면 그걸 적용
         auto_level = final_level
         remembered = prefs.lookup(text)
+        if front_label and isinstance(remembered, int):
+            remembered = None  # 앞부분 라벨에 기억된 '제목 레벨'은 무시 — drop·skip 같은 처리 선택만 따른다
         if remembered is not None:
             final_level = remembered
             needs_review = False  # 사용자가 이미 판단한 항목
