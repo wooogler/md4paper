@@ -733,3 +733,25 @@ def test_save_notes_conflict_and_trash(ctrl):
     with pytest.raises(notes.Conflict):
         ctrl.save_notes("#", expect=st)
     assert ctrl.notes() == "외부 편집\n"
+
+
+def test_opening_old_manifest_reassembles_front_matter_labels(tmp_path):
+    """옛 매니페스트(CCS Concepts가 제목 1)로 만든 논문을 열면 en.md도 바로 고쳐진다."""
+    from md4paper.assemble import render
+    from md4paper.review import manifest as manifest_io
+    from md4paper.structure import build
+
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.ensure()
+    raw = "# A Paper\n\n## CCS Concepts\n\n· HCI.\n\n# 1 Introduction\n\nBody.\n"
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    m = build.build(raw, wd)
+    ccs = next(s for s in m.sections if s.text == "CCS Concepts")
+    ccs.level = ccs.auto_level = 1  # 옛 build 결과
+    manifest_io.save(m, wd)
+    render.assemble(raw, m, wd)
+    assert "# CCS Concepts" in wd.en_md.read_text(encoding="utf-8")
+
+    UIController(wd)
+    en = wd.en_md.read_text(encoding="utf-8")
+    assert "# CCS Concepts" not in en and "*CCS Concepts*\n\n· HCI." in en

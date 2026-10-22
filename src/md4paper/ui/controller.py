@@ -67,7 +67,14 @@ class UIController:
 
     def __init__(self, wd: WorkDir) -> None:
         self.wd = wd
+        before = wd.sections_yaml.read_text(encoding="utf-8") if wd.sections_yaml.exists() else None
         self.manifest: Manifest = manifest_io.load(wd)
+        # load가 옛 매니페스트를 고쳐 썼으면(앞부분 라벨 → 기울임 등) en.md도 맞춘다 — 손으로 고친 en.md는 그대로
+        if (before is not None and wd.raw_md.exists() and not self.has_manual_edit()
+                and wd.sections_yaml.read_text(encoding="utf-8") != before):
+            from md4paper import pipeline
+
+            pipeline.run_assemble(wd)
 
     # --- 섹션 편집 ---
     def section(self, sid: str):
