@@ -197,7 +197,7 @@ def test_write_collection_glossary_approval_merge_and_refresh(tmp_path):
     assert out.startswith("컬렉션 'NIRVANA' 용어집에 4개 반영(새로 2, 바뀜 1, 그대로 1)")
     assert "영향: 다시 번역될 섹션이 없습니다" in out   # make_wd 논문엔 번역 캐시가 없다
     assert "건너뛴 항목 2개" in out and "policy 'weird'" in out and "term이 비어" in out
-    assert "바뀐 섹션 재번역" in out
+    assert "낡은 섹션 재번역" in out
     assert "반영했어요" in events[-1][1]["html"]
 
     # replace는 통째로 — 빠진 항목 수도 알린다

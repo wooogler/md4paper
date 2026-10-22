@@ -29,8 +29,10 @@ CONFLICT_LIMIT_DEFAULT = 40
 CONFLICT_LIMIT_MAX = 200
 PAPERS_PER_VARIANT = 4   # 변이마다 적는 논문 token 수
 WRITE_MAX = 500          # write_collection_glossary 한 번에 받는 항목 수 상한
-RETRANSLATE_HINT = ("재번역은 사용자가 원할 때 합니다 — translate 패널의 '바뀐 섹션 재번역' 또는 홈 "
-                    "일괄 번역(재번역 tool이 있으면 그것).")
+# 컬렉션 단위 재번역은 섹션 id로 한 편씩 도는 retranslate_sections와 모양이 안 맞는다 — 여러 편이면 홈의
+# 일괄 번역(전체 선택 → 번역) 또는 컬렉션 용어집 대화상자의 '낡은 섹션 재번역'으로 안내한다.
+RETRANSLATE_HINT = ("재번역은 사용자가 원할 때 합니다 — 홈에서 컬렉션을 '전체 선택' 뒤 '번역', 또는 컬렉션 ⋯ 메뉴 "
+                    "'용어집…'의 '낡은 섹션 재번역'(낡은 논문만 골라 띄운다). 한 편의 몇 섹션만이면 retranslate_sections.")
 
 
 # --- 공통 ---------------------------------------------------------------
