@@ -560,15 +560,45 @@ def load(wd) -> dict | None:  # noqa: ANN001 — WorkDir
     return got if isinstance(got, dict) and got.get("title") else None
 
 
+def save(wd, record: dict) -> None:  # noqa: ANN001 — WorkDir
+    """출판 기록을 `bib_source.json`에 쓴다 (받아 온 기록·사용자 수정 반영 모두 이 한 곳으로)."""
+    import json
+
+    wd.bib_source_json.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# 사용자가 고칠 수 있는 서지 칸 중 출판 기록에도 같은 이름으로 있는 것 (short_title은 기록에 없다)
+USER_RECORD_FIELDS = ("title", "authors", "year", "venue", "doi")
+
+
+def apply_user_fields(record: dict, meta: dict | None) -> dict:
+    """사용자가 손으로 고친 칸(`meta["user_fields"]`)의 값을 기록 위에 덮어 쓴 새 기록.
+
+    BibTeX 항목은 기록을 paper_meta보다 우선하므로(§bibtex.entry_for), 기록이 사용자 값을
+    따라야 고친 제목·저자가 .bib까지 간다. 저자를 덮을 때는 `author_latex`를 버린다 —
+    `fields_from_meta`가 그쪽을 먼저 쓰기 때문에 남겨 두면 출판사 저자 표기가 그대로 나간다.
+    """
+    meta = meta or {}
+    fields = [f for f in (meta.get("user_fields") or []) if f in USER_RECORD_FIELDS]
+    if not fields:
+        return record
+    out = dict(record)
+    for f in fields:
+        out[f] = meta.get(f)
+        if f == "authors":
+            out.pop("author_latex", None)
+    return out
+
+
 def update_workdir(wd, *, mailto: str | None = None, client=None,  # noqa: ANN001
                    force: bool = False) -> dict | None:  # noqa: ANN001
     """이 논문의 출판 기록을 받아 `bib_source.json`에 저장. 반환: 받은 기록 (못 찾으면 None).
 
     이미 받아 둔 게 있으면 다시 받지 않는다(`force`로 강제). **여기서만 네트워크를 쓴다** —
     `bibtex.entry_for`는 저장된 것만 읽으므로 내보내기는 언제나 오프라인이고 빠르다.
+    새로 받은 기록에는 사용자가 고친 칸을 덮어 쓴 뒤 저장한다(`apply_user_fields`) — 강제
+    여부와 무관하게, 처음 받는 기록도 사용자 수정을 따른다.
     """
-    import json
-
     from md4paper import paper_meta
 
     if not force:
@@ -583,7 +613,30 @@ def update_workdir(wd, *, mailto: str | None = None, client=None,  # noqa: ANN00
                 mailto=mailto, client=client)
     if not got:
         return None
-    wd.bib_source_json.write_text(json.dumps(got, ensure_ascii=False, indent=2), encoding="utf-8")
+    got = apply_user_fields(got, meta)
+    save(wd, got)
+    return got
+
+
+def refetch(wd, mailto: str | None = None) -> dict | None:  # noqa: ANN001 — WorkDir
+    """'온라인에서 다시 찾기' — 받아 둔 기록이 있어도 새로 받는다. 반환: 저장한 기록 (못 찾으면 None).
+
+    사용자가 고친 칸은 새 기록 위에 다시 덮인다(`update_workdir` 안에서). 기록에 DOI가 있고
+    paper_meta에는 아직 없으면(사용자가 DOI 칸을 고친 적이 없을 때만) paper_meta에도 적는다 —
+    홈 미리보기의 '서지 ✓'가 paper_meta의 DOI를 보기 때문이다. 폴더 수정시각은 되돌린다
+    (다시 찾았다고 목록 맨 위로 튀지 않게).
+    """
+    from md4paper import paper_meta
+    from md4paper.ir import StoredPaperMeta
+
+    with paper_meta.keeping_mtime(wd):
+        got = update_workdir(wd, mailto=mailto, force=True)
+        meta = paper_meta.load(wd)
+        if got and got.get("doi") and meta and not meta.get("doi") \
+                and "doi" not in (meta.get("user_fields") or []):
+            fields = set(StoredPaperMeta.model_fields)
+            meta = {k: v for k, v in meta.items() if k in fields}
+            paper_meta.save(wd, StoredPaperMeta(**{**meta, "doi": str(got["doi"])}))
     return got
 
 

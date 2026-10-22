@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+from contextlib import contextmanager
 
-from md4paper.ir import PaperMeta
+from md4paper.ir import PaperMeta, StoredPaperMeta
 from md4paper.llm.base import Provider
 from md4paper.workdir import WorkDir
 
@@ -85,6 +87,148 @@ def load(wd: WorkDir) -> dict | None:
         return json.loads(wd.paper_meta_json.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+@contextmanager
+def keeping_mtime(wd: WorkDir):  # noqa: ANN201
+    """블록 안에서 무엇을 쓰든 논문 폴더 수정시각을 되돌린다 (홈 목록은 폴더 mtime으로 최근순).
+
+    서지를 고치거나 다시 받는 것은 '작업'이 아니다 — 그것만으로 논문이 목록 맨 위로 튀면 안 된다.
+    `set_projects`·미리보기 캐시와 같은 규칙. 나노초로 되돌려 같은 값이 정확히 남게 한다.
+    """
+    try:
+        before = wd.root.stat()
+    except OSError:
+        before = None
+    try:
+        yield
+    finally:
+        if before is not None:
+            try:
+                os.utime(wd.root, ns=(before.st_atime_ns, before.st_mtime_ns))
+            except OSError:
+                pass
+
+
+def _stored(meta: dict | None) -> StoredPaperMeta:
+    """저장된 dict → StoredPaperMeta (모르는 키는 버린다 — 옛·새 버전 파일이 섞여도 읽히게)."""
+    fields = set(StoredPaperMeta.model_fields)
+    return StoredPaperMeta(**{k: v for k, v in (meta or {}).items() if k in fields})
+
+
+# --- 사용자 서지 수정 (홈 미리보기에서 칸을 눌러 고친다) ---
+EDITABLE = ("title", "authors", "year", "venue", "doi", "short_title")
+_DOI_PREFIX = re.compile(r"^\s*(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", re.I)
+_BAD_FILENAME = re.compile(r'[<>:"/\\|?*\x00-\x1f\s]')  # 파일명 금지 문자 + 공백 (약칭은 CamelCase)
+
+
+def _one_line(value) -> str:  # noqa: ANN001
+    return " ".join(str(value or "").split())
+
+
+def _clean_year(value) -> int | None:  # noqa: ANN001
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise ValueError("연도는 숫자여야 합니다")
+    try:
+        year = float(str(value).strip()) if isinstance(value, str) else float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"연도는 숫자여야 합니다: {value!r}") from None
+    if year != int(year):
+        raise ValueError(f"연도는 정수여야 합니다: {value!r}")
+    if not 1800 <= int(year) <= 2100:
+        raise ValueError(f"연도는 1800~2100 사이여야 합니다: {int(year)}")
+    return int(year)
+
+
+def _clean_field(key: str, value):  # noqa: ANN001, ANN202
+    """사용자가 넣은 값 하나를 저장 형태로 다듬는다. 받을 수 없는 값이면 ValueError."""
+    if key == "title":
+        title = _one_line(value)
+        if not title:
+            raise ValueError("제목은 비울 수 없습니다")
+        return title
+    if key == "authors":
+        items = value.splitlines() if isinstance(value, str) else list(value or [])
+        return [n for n in (_one_line(a) for a in items) if n]
+    if key == "year":
+        return _clean_year(value)
+    if key == "venue":
+        return _one_line(value)
+    if key == "doi":
+        return _DOI_PREFIX.sub("", str(value or "")).strip()  # 대소문자는 그대로 (DOI는 원문 표기 보존)
+    if key == "short_title":
+        return _BAD_FILENAME.sub("", str(value or ""))
+    raise ValueError(f"고칠 수 없는 서지 칸입니다: {key!r}")
+
+
+def update_fields(wd: WorkDir, changes: dict) -> dict:
+    """사용자가 고친 서지 칸을 저장 — 고친 칸은 `user_fields`에 올려 이후 보강·재추출이 덮지 않게.
+
+    받는 키: title(비면 ValueError) · authors(list[str], 한 줄에 한 명인 문자열도 받는다) ·
+    year(int|None, 1800~2100 밖이면 ValueError) · venue · doi(`https://doi.org/`·`doi:` 접두 제거) ·
+    short_title(파일명 금지 문자·공백 제거). 모든 값을 먼저 검사하고 나서 쓴다(반쯤 저장되지 않게).
+
+    값이 그대로면 아무것도 쓰지 않는다. 받아 둔 출판 기록(`bib_source.json`)이 있으면 같은 칸을
+    거기에도 반영한다 — BibTeX 항목은 기록을 우선하므로 그래야 고친 값이 .bib에 간다.
+    폴더 수정시각은 되돌린다. 반환: 저장된(또는 그대로인) 서지 dict.
+    """
+    cleaned = {k: _clean_field(k, v) for k, v in (changes or {}).items()}
+    current = _stored(load(wd))
+    now = current.model_dump()
+    changed = [k for k, v in cleaned.items() if now.get(k) != v]
+    if not changed:
+        return now
+    user = list(dict.fromkeys([*current.user_fields, *changed]))  # 집합처럼, 처음 고친 순서 유지
+    updated = StoredPaperMeta(**{**now, **cleaned, "user_fields": user})
+    from md4paper import bibsource
+
+    with keeping_mtime(wd):
+        save(wd, updated)
+        record = bibsource.load(wd)
+        if record:
+            bibsource.save(wd, bibsource.apply_user_fields(record, updated.model_dump()))
+    return updated.model_dump()
+
+
+def reextract(wd: WorkDir, provider: Provider) -> dict:
+    """front matter에서 서지를 LLM으로 다시 뽑아 저장 — 사용자가 고친 칸은 옛 값을 지킨다.
+
+    변환 직후 자동 추출(app `_auto_metadata`)과 홈의 'AI로 다시 추출'이 같이 쓴다.
+    제목이 비면 manifest 제목으로, 연도가 비면 PDF(저작권 연도 > 생성일자)로 보완한다.
+    추출 스키마(PaperMeta)에 없는 저장 칸(doi·meta_source·user_fields)은 옛 값을 그대로 둔다
+    — 다시 뽑았다고 온라인에서 받아 둔 DOI가 사라지면 안 된다.
+    본문이 없으면 ValueError, LLM 오류는 그대로 올린다(호출측이 알림·무시를 정한다).
+    반환: 저장된 서지 dict.
+    """
+    text = front_text(wd)
+    if not text.strip():
+        raise ValueError("서지를 뽑을 본문이 없습니다 (변환 결과가 비어 있음)")
+    meta = extract(provider, text)
+    if not meta.title:  # 제목이 비면 manifest 제목으로 보완
+        try:
+            from md4paper.review import manifest as manifest_io
+
+            meta.title = manifest_io.load(wd).title
+        except Exception:  # noqa: BLE001 — manifest 없음·깨짐: 빈 제목 그대로
+            pass
+    if meta.year is None and wd.meta_json.exists():  # front matter에 연도 없으면 PDF로 폴백
+        try:
+            src = json.loads(wd.meta_json.read_text(encoding="utf-8")).get("source", "")
+        except (OSError, ValueError):
+            src = ""
+        if str(src).lower().endswith(".pdf"):
+            meta.year = pdf_year(src)
+    old = _stored(load(wd)).model_dump()
+    merged = {**old, **meta.model_dump()}
+    for field in old["user_fields"]:  # 사용자 수정이 이긴다
+        if field in old:
+            merged[field] = old[field]
+    stored = StoredPaperMeta(**merged)
+    with keeping_mtime(wd):
+        save(wd, stored)
+    return stored.model_dump()
 
 
 def authors_short(authors: list[str], limit: int = 2) -> str:
@@ -201,40 +345,70 @@ def naming_preview(template: str | None = None) -> str:
     return folder_base(_EXAMPLE_META, template)
 
 
+def naming_base_for(wd: WorkDir) -> str:
+    """이 논문을 지금 이름 규칙(주 컬렉션 설정 반영)으로 부를 기준명. 서지가 없으면 "".
+
+    홈 미리보기가 `wd.root.stem`과 견줘 "이름 규칙대로면 …" 힌트를 띄울 때 쓴다.
+    """
+    from md4paper import library
+
+    meta = load(wd)
+    if not meta:
+        return ""
+    return folder_base(meta, project=library.project_of(wd))  # 이름 규칙은 컬렉션마다 다를 수 있다
+
+
+def _rename_to(wd: WorkDir, base: str, workspace) -> WorkDir:  # noqa: ANN001 — Path | str
+    """논문 한 편을 `base`로 리네임 + 저장 위치 사본을 새 이름으로 다시 내보내고 옛 이름 사본 정리."""
+    from pathlib import Path
+
+    from md4paper import library
+    from md4paper.workdir import rename_workdir
+
+    old_stem = wd.root.stem
+    new_wd = rename_workdir(wd, base, Path(workspace))  # 열어 둔 탭도 여기서 따라간다(tabstore.rename_tab)
+    if new_wd.root == wd.root:
+        return wd
+    places = library.export_targets(new_wd)  # 폴더 가진 소속 컬렉션마다 사본이 있다
+    if any(library.configured(p) for p in places):  # 저장 위치 사본도 새 이름으로 (자동 저장이 꺼져 있어도 — 명시적 정리)
+        try:
+            library.export_paper(new_wd)
+            for p in places:  # 옛 이름 사본은 그 논문이 사본을 둔 폴더마다
+                library.remove_stem(old_stem, p)
+        except OSError:
+            pass  # 사본 정리 실패가 리네임 자체를 막지 않게
+    return new_wd
+
+
+def rename_to_naming(wd: WorkDir, workspace) -> WorkDir:  # noqa: ANN001 — Path | str
+    """논문 한 편을 지금 이름 규칙대로 리네임 — 폴더·.md4·PDF·저장 위치 사본까지. 반환: 옮겨진 WorkDir.
+
+    서지가 없거나 이미 그 이름이면(또는 리네임할 수 없는 구조면) `wd`를 그대로 돌려준다.
+    폴더 이름은 서지를 고쳐도 저절로 바뀌지 않는다 — 사용자가 단추로 부를 때만.
+    """
+    base = naming_base_for(wd)
+    return _rename_to(wd, base, workspace) if base else wd
+
+
 def apply_naming(workspace) -> dict:  # noqa: ANN001 — Path | str
     """작업 폴더의 모든 논문(숨김 포함)을 현재 이름 규칙으로 정리.
 
-    논문 폴더·.md4·원본 PDF를 리네임(rename_workdir)하고, 저장 위치가 지정돼 있으면
-    새 이름으로 다시 내보낸 뒤 옛 이름 사본을 청소한다. 서지가 없는 논문은 건너뛴다.
+    논문 한 편마다 `rename_to_naming`과 같은 일(폴더·.md4·원본 PDF 리네임, 저장 위치가 지정돼
+    있으면 새 이름으로 다시 내보낸 뒤 옛 이름 사본 청소)을 한다. 서지가 없는 논문은 건너뛴다.
     반환: {"renamed": n, "unchanged": n, "no_meta": n}
     """
     from pathlib import Path
 
-    from md4paper import library
-    from md4paper.workdir import WorkDir, recent_workdirs, rename_workdir
+    from md4paper.workdir import WorkDir, recent_workdirs
 
     ws = Path(workspace)
     counts = {"renamed": 0, "unchanged": 0, "no_meta": 0}
     for r in recent_workdirs(ws, limit=100_000, include_hidden=True):
         wd = WorkDir(r["root"])
-        meta = load(wd)
-        project = library.project_of(wd)  # 이름 규칙은 프로젝트마다 다를 수 있다
-        base = folder_base(meta, project=project) if meta else ""
+        base = naming_base_for(wd)
         if not base:
             counts["no_meta"] += 1
             continue
-        old_stem = wd.root.stem
-        new_wd = rename_workdir(wd, base, ws)
-        if new_wd.root == wd.root:
-            counts["unchanged"] += 1
-            continue
-        counts["renamed"] += 1
-        places = library.export_targets(new_wd)  # 폴더 가진 소속 프로젝트마다 사본이 있다
-        if any(library.configured(p) for p in places):  # 저장 위치 사본도 새 이름으로 (자동 저장이 꺼져 있어도 — 명시적 정리)
-            try:
-                library.export_paper(new_wd)
-                for p in places:  # 옛 이름 사본은 그 논문이 사본을 둔 폴더마다
-                    library.remove_stem(old_stem, p)
-            except OSError:
-                pass  # 사본 정리 실패가 리네임 자체를 막지 않게
+        new_wd = _rename_to(wd, base, ws)
+        counts["unchanged" if new_wd.root == wd.root else "renamed"] += 1
     return counts
