@@ -140,6 +140,8 @@ def test_ui_home_upload_page(tmp_path):
     assert ".md4-upload .q-uploader__header { position: absolute; inset: 0;" in body
     assert ".q-uploader__header { display: none" not in body
     assert ".md4-upload .q-uploader__list { pointer-events: none; }" in body  # 목록이 클릭을 가로챈다
+    # 미리보기 서지 칸은 눌러서 바로 고친다 — 편집 중 칸은 메모 탭 이름 바꾸기처럼 흰 바탕 + 파란 테두리
+    assert ".md4-pv-ed.editing" in body and "md4-pv-kv" in body and "md4-pv-hint" in body
 
 
 def test_ui_home_empty_workspace_says_where_it_is_looking(tmp_path):
@@ -153,3 +155,27 @@ def test_ui_home_empty_workspace_says_where_it_is_looking(tmp_path):
     assert "창 위로 끌어다 놓거나" in body  # 빈 목록 = 큰 올리기 안내
     assert "보고 있는 작업 폴더" in body and str(tmp_path) in body
     assert "저장 위치 → 작업 폴더" in body
+
+
+def test_home_preview_field_parsing():
+    """미리보기 서지 칸 — 입력칸 글자 ↔ 저장 값 (서버 없이). 저자는 한 줄에 한 명, 연도는 숫자만."""
+    from md4paper.ui.home import field_text, parse_field
+
+    assert field_text("authors", ["A Kim", " ", "B Lee"]) == ("A Kim, B Lee", "A Kim\nB Lee")
+    assert parse_field("authors", "A Kim\n\n  B Lee  \r\n") == ["A Kim", "B Lee"]
+    assert field_text("year", None) == ("", "") and field_text("year", 2024) == ("2024", "2024")
+    assert parse_field("year", " 2024 ") == 2024 and parse_field("year", "") is None
+    with pytest.raises(ValueError):
+        parse_field("year", "20x4")
+    assert parse_field("title", "  Attention\nIs  All ") == "Attention Is All"  # Shift+Enter 줄바꿈은 공백으로
+    assert parse_field("abstract", " a\n\nb ") == "a\n\nb"  # 초록은 문단 줄바꿈을 지킨다
+
+
+def test_home_naming_hint_ignores_uniquified_folder():
+    """같은 이름의 다른 논문 때문에 'X (2)'로 유일화된 폴더는 이미 규칙대로 — 힌트가 영영 남지 않게."""
+    from md4paper.ui.home import _same_base
+
+    assert _same_base("2017_Attention_Vaswani", "2017_Attention_Vaswani")
+    assert _same_base("2017_Attention_Vaswani (2)", "2017_Attention_Vaswani")
+    assert not _same_base("2017_Attention_Vaswani (x)", "2017_Attention_Vaswani")
+    assert not _same_base("paper", "2017_Attention_Vaswani")

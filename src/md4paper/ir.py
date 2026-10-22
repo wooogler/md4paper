@@ -225,6 +225,9 @@ class StoredPaperMeta(PaperMeta):
 
     doi: str = ""  # 서지 API로 보강했을 때만 채워짐
     meta_source: str = ""  # 값의 출처: ""(PDF/LLM) | "openalex" | "crossref" | "openalex+crossref"
+    # 사용자가 손으로 고친 칸 이름들(예: ["title", "year"]) — 이후 온라인 보강·AI 재추출이 이 칸은
+    # 채우지도 덮지도 않는다(사용자 수정이 이긴다). 옛 paper_meta.json에는 없으므로 기본은 빈 목록.
+    user_fields: list[str] = Field(default_factory=list)
 
 
 # --- 용어집 (translate 단계) ----------------------------------------------
