@@ -2615,6 +2615,18 @@ def _relative_time(ts: float) -> str:
     return f"{diff // 86400}일 전"
 
 
+async def open_source_pdf(ctrl: UIController) -> None:
+    """원본 PDF를 운영체제 PDF 뷰어(미리보기 등)로 따로 연다 — 논문 화면 헤더와 홈 미리보기의 PDF 단추."""
+    from nicegui import run, ui
+
+    pdf = ctrl.source_pdf()
+    if not pdf or not Path(pdf).is_file():
+        ui.notify("원본 PDF를 찾지 못했습니다 (마크다운에서 변환한 논문일 수 있어요).", type="warning")
+        return
+    if not await run.io_bound(desktop.open_file, Path(pdf)):
+        ui.notify("PDF 뷰어를 열지 못했습니다.", type="negative")
+
+
 def build(ctrl: UIController, state: dict | None = None) -> None:
     """현재 페이지 컨텍스트에 UI를 구성한다. state는 서버 수명 상태(작업 폴더·포트 — 헤더 탭용)."""
     from nicegui import ui
@@ -2629,15 +2641,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     scroll_memory.install(tok)  # 읽던 자리(단계별 스크롤) 기억 — 탭으로 오가도 그 자리로
 
     async def open_pdf_app() -> None:
-        """원본 PDF를 운영체제 PDF 뷰어(미리보기 등)로 따로 연다."""
-        from nicegui import run
-
-        pdf = ctrl.source_pdf()
-        if not pdf or not Path(pdf).is_file():
-            ui.notify("원본 PDF를 찾지 못했습니다 (마크다운에서 변환한 논문일 수 있어요).", type="warning")
-            return
-        if not await run.io_bound(desktop.open_file, Path(pdf)):
-            ui.notify("PDF 뷰어를 열지 못했습니다.", type="negative")
+        await open_source_pdf(ctrl)
 
     def review_tools() -> None:
         if ctrl.source_pdf():
@@ -5615,6 +5619,19 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         if not target.is_relative_to(base) or not target.is_file():
             raise HTTPException(status_code=404)
         return FileResponse(target)
+
+    @fastapi_app.get("/wdthumb/{token}")
+    def _serve_thumb(token: str):  # noqa: ANN202 — 홈 미리보기의 대표 이미지 (§preview)
+        # current_wd로 폴백하지 않는다 — 모르는 토큰에 다른 논문 그림을 내주면 미리보기가 엉뚱해진다
+        cur = state["wd_by_token"].get(token)
+        try:
+            from md4paper import preview
+        except ImportError:
+            preview = None
+        png = preview.thumbnail_png(cur) if (cur is not None and preview is not None) else None
+        if png is None or not Path(png).is_file():
+            raise HTTPException(status_code=404)
+        return FileResponse(png)
 
     @fastapi_app.get("/pdfpage/{token}/{idx:int}")
     def _serve_pdf_page(token: str, idx: int):  # noqa: ANN202 — 해당 논문 PDF의 idx(0-based) 페이지 PNG

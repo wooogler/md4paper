@@ -1,4 +1,4 @@
-"""홈 — 왼쪽 프로젝트 사이드바 | 오른쪽 논문 목록 (논문 화면과 같은 2단 크롬).
+"""홈 — 왼쪽 컬렉션 사이드바 | 논문 목록 | 오른쪽 미리보기 (논문 화면과 같은 크롬).
 
 논문 화면은 '왼쪽 레일 + 본문'이 창을 꽉 채운다. 홈도 같은 틀이라야 탭을 오갈 때 화면이 다른 앱처럼
 튀지 않는다. 그래서 `.md4-body`(헤더 44px를 뺀 창 높이, 창 전체 스크롤 없음)와 뷰어의 색 토큰
@@ -6,9 +6,14 @@
 
 - **왼쪽**: 모든 논문 / 프로젝트들 / 미분류 + 새 프로젝트 · 설정 · 버전 · 작업 폴더. 고른 행이
   목록 필터이자 새로 올리는 논문의 소속이다(`projects.set_active`로 다음 실행에도 기억).
-- **오른쪽**: 고른 범위의 제목 · 검색·정렬·올리기 · 변환 큐 · 선택 툴바 · 논문 카드.
+- **가운데**: 고른 범위의 제목 · 검색·정렬·올리기·미리보기 접기 · 변환 큐 · 논문 카드.
 - **올리기**: PDF를 창 위로 끌면 목록 열 전체가 놓을 자리가 된다(아래 _DRAG_HTML). '올리기'
   단추는 진짜 `<input type=file>`을 단추 위에 펼쳐 둔 것이다(WKWebView는 JS input.click()을 막는다).
+- **미리보기(오른쪽 열, Zotero식)**: 카드를 한 번 누르면 **선택**(카드 `.on`, 미리보기에 대표 이미지·
+  서지·초록·메모 발췌·단추), 더블클릭·Enter·미리보기 '열기'가 논문 화면이다. 체크박스는 따로 여러 편을
+  고르는 일괄 선택이고, 체크가 있으면 미리보기 자리가 일괄 동작 칸이 된다(목록 위 선택 툴바는 없앴다).
+  선택은 이 홈 인스턴스에만 둔다(state 아님). 초록·이미지는 `run.io_bound`로 읽고 그 사이 선택이 바뀌면
+  늦게 온 결과는 버린다(seq 비교). 접힘 여부는 전역 설정 `[ui].home_preview`에 기억한다.
 - **소속(N:M)**: 논문 하나가 여러 프로젝트에 속한다. 카드의 프로젝트 태그를 누르면 체크 메뉴로
   넣고 빼고, 카드를 사이드바 프로젝트 행에 끌어 놓으면 그 프로젝트에 **더한다**(옮기지 않는다).
 
@@ -23,6 +28,8 @@ app.py가 이 모듈을 홈을 그릴 때 지연 import 하므로 순환이 없�
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from pathlib import Path
 
@@ -118,7 +125,13 @@ html.md4-filedrag .md4-dropov { display: flex; }
 .md4-pcard:hover { background: #fbfaf9; border-color: #dcdad5; }
 .md4-pcard.sel { border-color: rgba(35,131,226,.5); background: rgba(35,131,226,.04); }
 .md4-pcard[draggable=true] { -webkit-user-drag: element; }
-.md4-pmain { flex: 1 1 auto; min-width: 0; cursor: pointer; }
+.md4-pmain { flex: 1 1 auto; min-width: 0; user-select: none; }
+/* 카드 전체가 클릭 대상 — 한 번 = 선택(미리보기), 두 번·Enter = 열기. 고른 카드는 파란 테두리+옅은 바탕. */
+.md4-pcard { cursor: pointer; outline: none; }
+.md4-pcard:focus-visible { box-shadow: 0 0 0 2px rgba(35,131,226,.35); }
+.md4-pcard.on, .md4-pcard.on:hover { background: rgba(35,131,226,.07); border-color: #2383e2;
+  box-shadow: inset 0 0 0 1px #2383e2; }
+.md4-pcard.on.md4-pincard { box-shadow: inset 3px 0 0 #2383e2, inset 0 0 0 1px #2383e2 !important; }
 .md4-ptitle { font-size: 14px; color: #37352f; }
 .md4-ptitle.unopened { font-weight: 600; }
 .md4-pbib { font-size: 12px; color: #787570; }
@@ -144,6 +157,43 @@ html.md4-filedrag .md4-dropov { display: flex; }
 .md4-ptags:hover .md4-ptag.none { color: #6b6862; background: rgba(0,0,0,.04); }
 .md4-ptag-add { opacity: 0; color: #9a968e; }
 .md4-pcard:hover .md4-ptag-add { opacity: 1; }
+/* 오른쪽 미리보기 열 — 뷰어 패널처럼 흰 바탕 + 왼쪽 경계선, 본문만 스크롤하고 단추 줄은 바닥에 고정 */
+.md4-hprev { flex: 0 0 360px; width: 360px; height: 100%; background: #fff; border-left: 1px solid #e6e4e0;
+  flex-wrap: nowrap; }
+/* 좁은 창(앱 창을 줄였을 때) — 세 열이 목록을 짓누르지 않게 사이드바·미리보기를 조금씩 좁힌다 */
+@media (max-width: 1100px) {
+  .md4-hside { flex-basis: 220px; width: 220px; }
+  .md4-hprev { flex-basis: 290px; width: 290px; }
+}
+.md4-pv-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 18px 20px; flex-wrap: nowrap; }
+.md4-pv-body > * { flex-shrink: 0; }  /* 넘치면 줄이지 말고 스크롤 — 안 그러면 그림 칸이 min-height로 찌그러진다 */
+.md4-pv-foot { flex: 0 0 auto; padding: 8px 12px; border-top: 1px solid #e6e4e0; background: #fff; }
+.md4-pv-thumb { width: 100%; min-height: 120px; max-height: 220px; display: flex; align-items: center;
+  justify-content: center; background: #f7f6f3; border-radius: 8px; overflow: hidden; }
+.md4-pv-thumb img { display: block; width: 100%; max-height: 220px; object-fit: contain; }
+.md4-pv-thumb .q-skeleton { width: 100%; height: 150px; }
+.md4-pv-title { font-size: 16px; font-weight: 700; line-height: 1.35; color: #37352f; overflow-wrap: anywhere; }
+.md4-pv-auth { font-size: 12.5px; line-height: 1.45; color: #6b6862; }
+.md4-pv-bib { font-size: 12.5px; color: #9a968e; }
+.md4-pv-abs { font-size: 13.5px; line-height: 1.55; color: #37352f; white-space: pre-line; overflow-wrap: anywhere; }
+.md4-pv-abs.none { color: #9a968e; }
+.md4-pv-notes { font-size: 12.5px; line-height: 1.5; color: #6b6862; background: #fbfaf9; border-radius: 6px;
+  padding: 8px 10px; white-space: pre-line; overflow-wrap: anywhere; }
+.md4-pv-ok { font-size: 11.5px; color: #21ba45; }
+/* EN/KO — 작은 세그먼트 */
+.md4-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 6px; background: rgba(55,53,47,.06); }
+.md4-seg span { font-size: 11px; font-weight: 600; line-height: 1; padding: 3px 8px; border-radius: 4px; cursor: pointer;
+  color: #9a968e; user-select: none; }
+.md4-seg span.on { background: #fff; color: #37352f; box-shadow: 0 1px 2px rgba(0,0,0,.1); cursor: default; }
+/* 단일 선택을 보는 중에 체크해 둔 논문이 있으면 — 일괄 동작으로 돌아가는 한 줄 */
+.md4-pv-selnote { font-size: 12px; color: #2383e2; background: rgba(35,131,226,.08); border-radius: 6px;
+  padding: 5px 9px; cursor: pointer; }
+.md4-pv-selnote:hover { background: rgba(35,131,226,.14); }
+.md4-pv-bulk .q-btn { width: 100%; }
+.md4-pv-bulk .q-btn__content { justify-content: flex-start; }
+.md4-pv-sel { font-size: 12.5px; color: #6b6862; line-height: 1.4; }
+.md4-pv-empty { align-items: center; text-align: center; color: #9a968e; margin-top: 36px; }
+.md4-pv-stat { font-size: 13px; color: #6b6862; }
 .md4-menucap { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #9a968e; padding: 8px 16px 2px; }
 /* 다크 모드 — 뷰어처럼 사이드바(레일)만 어둡게. 본문 열은 Quasar가 밝은 테마 그대로라(입력칸·카드 글자가
    밝은 바탕 기준) 목록까지 어둡게 칠하면 글자가 묻힌다. */
@@ -158,6 +208,9 @@ html.md4-filedrag .md4-dropov { display: flex; }
   .md4-prow.on { background: rgba(90,150,230,.22); color: #7bb7ff; }
   .md4-prow.on .md4-prow-i { color: #7bb7ff; }
   .md4-prow.hot, html.md4-carddrag .md4-prow.hot[data-drop] { background: rgba(90,150,230,.3); box-shadow: inset 0 0 0 1.5px #7bb7ff; }
+  /* 미리보기 열은 목록과 같은 이유로 밝게 둔다(뷰어 .md4-panel도 다크에서 밝다) — 사이드바와 맞닿지
+     않으니 경계선·바닥 줄만 밝은 바탕 기준 그대로. 썸네일 바탕은 흰 그림이 바탕에 묻히지 않게 조금 짙게. */
+  .md4-pv-thumb { background: #efeeeb; }
 }
 """
 
@@ -256,14 +309,38 @@ def _stored_pids(r: dict) -> list[str]:
     return [str(p) for p in raw if p]
 
 
+def _preview_module():  # noqa: ANN202 — md4paper.preview (없으면 None — 미리보기는 빈 값으로 그린다)
+    try:
+        from md4paper import preview
+    except ImportError:
+        return None
+    return preview
+
+
+def preview_open() -> bool:
+    """미리보기 열을 펴 둘지 — 전역 설정 [ui].home_preview (뷰어 패널 구성처럼 다음 실행에도 기억)."""
+    v = config.load_config().get("ui", {}).get("home_preview")
+    return v if isinstance(v, bool) else True
+
+
+def _has_source_pdf(wd: WorkDir) -> bool:
+    """원본이 PDF인지 (UIController.source_pdf와 같은 규칙 — manifest까지 읽지 않게 meta.json만)."""
+    try:
+        src = json.loads(wd.meta_json.read_text(encoding="utf-8")).get("source") or ""
+    except (OSError, ValueError, AttributeError):
+        return False
+    return src.lower().endswith(".pdf") and Path(src).is_file()
+
+
 def build_home(state: dict) -> None:
     """홈 화면 — 프로젝트 사이드바 | 논문 목록. (app.build_home이 여기로 넘긴다)"""
     from nicegui import background_tasks, run, ui
 
+    from md4paper import paper_meta
     from md4paper.extract import DEFAULT_BACKEND, available_backends
     from md4paper.ui.app import (
         _CHROME_CSS, _EXPORT_TARGET, _EXTLINK_HTML, _QUEUE_ACTIVE, _pdf_page_count, _process_queue,
-        _relative_time, _review_url, new_window_button, save_source, tab_bar,
+        _relative_time, _review_url, new_window_button, open_source_pdf, save_source, tab_bar, wd_token,
     )
     from md4paper.ui.controller import UIController
     from md4paper.workdir import delete_workdir, recent_workdirs, set_hidden, set_pinned
@@ -293,7 +370,15 @@ def build_home(state: dict) -> None:
     backend_ready = bool(available_backends())
     # 고른 범위(scope)는 목록 필터 + 새로 올릴 논문의 소속 — 앱을 다시 켜도 같은 묶음을 보게 기억한다.
     view = {"q": "", "sort": "recent", "show_hidden": False, "scope": projects.active()}
-    selected: set[str] = set()  # 다중 선택된 워크디렉토리 root (문자열)
+    selected: set[str] = set()  # 체크박스로 고른 워크디렉토리 root (문자열) — 일괄 동작용
+    # 한 번 클릭으로 고른 논문(미리보기) — 홈 인스턴스에만 둔다. seq는 미리보기를 그릴 때마다 올라
+    # 늦게 도착한 초록·이미지를 버리는 데 쓴다. bulk: 마지막 동작이 체크박스였는지(미리보기 자리를 일괄
+    # 동작 칸으로). lang: 초록 EN/KO 고른 값(None = 번역본이 있으면 KO).
+    pick: dict = {"root": None, "seq": 0, "bulk": False, "lang": None}
+    pv: dict = {"open": preview_open(), "col": None, "btn": None}
+    card_els: dict = {}  # root → 카드 요소 (선택 표시를 목록을 다시 그리지 않고 옮기려고)
+    loads: dict = {}  # (root, 종류, 언어) → asyncio.Task — 같은 것을 두 번 읽지 않게(EN/KO 토글이 즉시)
+    preview = _preview_module()
     data: dict = {"rows": [], "by_root": {}, "projs": [], "names": {}}
 
     # ===== 한 번 훑기 — 사이드바 편수와 목록이 같은 결과를 쓴다 =====
@@ -355,8 +440,9 @@ def build_home(state: dict) -> None:
         head.refresh()
         more_menu.refresh()
         drop_caption.refresh()
-        sel_bar.refresh()
         recent_list.refresh()
+        preview_pane.refresh()
+        sync_preview()
 
     # 대화상자는 목록·사이드바 밖의 고정 자리에 짓는다 — 카드 메뉴 안에서 지으면 목록을 다시 그릴 때
     # 열려 있던 대화상자까지 함께 지워진다.
@@ -539,6 +625,7 @@ def build_home(state: dict) -> None:
         r["pinned"] = not r["pinned"]
         r["pinned_at"] = time.time() if r["pinned"] else 0.0
         recent_list.refresh()
+        preview_pane.refresh()
 
     def hide_paper(r: dict, hidden: bool = True) -> None:
         """목록 표시만 끄기/되돌리기 (파일은 그대로 — status.json에 표시)."""
@@ -648,12 +735,16 @@ def build_home(state: dict) -> None:
 
     def clear_selection() -> None:
         selected.clear()
-        sel_bar.refresh()
+        pick["bulk"] = False
         recent_list.refresh()
+        preview_pane.refresh()
+        sync_preview()
 
     def toggle_sel(root: str, on: bool) -> None:
         selected.add(root) if on else selected.discard(root)
-        sel_bar.refresh()
+        pick["bulk"] = bool(selected)  # 체크 = 일괄 선택 → 미리보기 자리가 일괄 동작 칸으로
+        sync_preview()
+        preview_pane.refresh()
 
     def set_export_target(value: str) -> None:
         config.set_section_value("output", "export_target", value)
@@ -794,7 +885,7 @@ def build_home(state: dict) -> None:
         more_menu.refresh()
         recent_list.refresh()
 
-    # ===== 오른쪽 — 큐 · 선택 툴바 · 목록 =====
+    # ===== 오른쪽 — 큐 · 목록 =====
     @ui.refreshable
     def queue_panel() -> None:
         q = state["queue"]
@@ -865,7 +956,7 @@ def build_home(state: dict) -> None:
                             .tooltip("취소" if st == "pending" else "닫기")
 
     def project_pick_menu(on_pick, only: set[str] | None = None, with_new: bool = False) -> None:  # noqa: ANN001
-        """선택 툴바의 '프로젝트에 추가/빼기' 메뉴 — 프로젝트 이름만 늘어놓는다."""
+        """미리보기 일괄 동작 칸의 '컬렉션에 추가/빼기' 메뉴 — 프로젝트 이름만 늘어놓는다."""
         with ui.menu():
             shown = [p for p in data["projs"] if only is None or p["id"] in only]
             for p in shown:
@@ -888,29 +979,6 @@ def build_home(state: dict) -> None:
 
         with host:
             settings_dialog.open_project_dialog(state, None, saved)
-
-    @ui.refreshable
-    def sel_bar() -> None:
-        if not selected:
-            return
-        with ui.row().classes("items-center gap-2 w-full no-wrap q-py-xs"):
-            ui.label(f"{len(selected)}개 선택").classes("text-sm font-semibold text-primary")
-            ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")).props("dense outline no-caps")
-            ui.button("한국어 zip", icon="download", on_click=lambda: download_bulk("ko")).props("dense outline no-caps")
-            ui.button("모바일 HTML", icon="smartphone", on_click=download_mobile).props("dense outline no-caps") \
-                .tooltip("폰에서 읽는 HTML 한 장 (원문·번역·문단 대조) — iCloud Drive·구글 드라이브에 저장하면 밖에서도 열립니다")
-            # 추가 = 다른 소속은 그대로 두고 더하기, 빼기 = 그 소속만 떼기(그 폴더의 사본도 정리)
-            with ui.button("컬렉션에 추가", icon="playlist_add").props("dense outline no-caps"):
-                project_pick_menu(lambda v: bulk_member(v, True), with_new=True)
-            member_of = {p for root in selected for p in (data["by_root"].get(root) or {}).get("pids", [])}
-            with ui.button("컬렉션에서 빼기", icon="playlist_remove").props("dense outline no-caps"):
-                project_pick_menu(lambda v: bulk_member(v, False), only=member_of)
-            if settings_dialog.any_library_dirs():
-                ui.button("폴더로 저장", icon="drive_file_move",
-                          on_click=lambda: save_to_library([Path(p) for p in selected])) \
-                    .props("dense outline no-caps").tooltip("저장 위치로 내보내기")
-            ui.space()
-            ui.button("선택 해제", on_click=clear_selection).props("flat dense no-caps")
 
     def visible_rows() -> list[dict]:
         """지금 범위·검색·숨김 보기로 걸러 정렬한 목록 (고정한 논문이 맨 앞)."""
@@ -978,6 +1046,7 @@ def build_home(state: dict) -> None:
         if member_ui["changed"]:
             member_ui["changed"] = False
             recent_list.refresh()
+            preview_pane.refresh()  # 카드에서 고쳤으면 미리보기 태그도 (초록·이미지는 캐시라 다시 읽지 않는다)
 
     def paint_tags(tags_box, r: dict) -> None:  # noqa: ANN001 — ui.element
         tags_box.clear()
@@ -1020,6 +1089,7 @@ def build_home(state: dict) -> None:
             return
         now = time.monotonic()
         new_roots = state.get("recent_new", {})
+        card_els.clear()
 
         def cap(text: str, icon: str = "") -> None:
             with ui.element("div").classes("md4-listcap"):
@@ -1034,14 +1104,22 @@ def build_home(state: dict) -> None:
             bib = _bib_line(r)
             el = ui.element("div").classes("md4-pcard" + (" md4-recent-new" if is_new else "")
                                            + (" md4-pincard" if r["pinned"] else "")
-                                           + (" sel" if root in selected else ""))
+                                           + (" sel" if root in selected else "")
+                                           + (" on" if root == pick["root"] else ""))
             # 사이드바 프로젝트 행으로 끌어 놓으면 그 프로젝트에 더한다 (dragstart는 _DRAG_HTML이 한곳에서)
-            el.props("draggable=true")
+            el.props("draggable=true tabindex=0")
             el._props["data-md4-root"] = root  # noqa: SLF001 — 경로에 따옴표·공백이 있어도 안전하게
+            card_els[root] = el
+            # 한 번 = 선택(미리보기), 두 번·Enter = 논문 화면. 체크박스·태그·hover 단추는 카드까지 번지지
+            # 않게 막는다 — 안 막으면 📌를 두 번 누르거나 체크박스를 빠르게 두 번 누를 때 논문이 열린다.
+            el.on("click", lambda _, rt=root: select(rt))
+            el.on("dblclick", lambda _, rt=r["root"]: open_wd(rt))
+            el.on("keydown.enter", lambda _, rt=r["root"]: open_wd(rt))
             with el:
                 ui.checkbox(value=root in selected, on_change=lambda e, rt=root: toggle_sel(rt, e.value)) \
-                    .props("dense").classes("shrink-0")
-                main = ui.column().classes("md4-pmain gap-0").on("click", lambda _, rt=r["root"]: open_wd(rt))
+                    .props("dense").classes("shrink-0") \
+                    .on("click", js_handler=_STOP_JS).on("dblclick", js_handler=_STOP_JS)
+                main = ui.column().classes("md4-pmain gap-0")
                 with main:
                     # .nicegui-column은 align-items:flex-start — 자식이 컬럼 폭으로 늘어나지 않아
                     # w-full(컬럼 자식)·min-w-0(행 안 라벨) 없이는 truncate가 발동하지 않고
@@ -1069,9 +1147,12 @@ def build_home(state: dict) -> None:
                         # 카드 열기로 번지지 않게 막고 서버에 '이 카드의 메뉴를 열어 달라'고만 보낸다
                         tags_box.on("click", lambda _, item=r, t=tags_box: open_member_menu(item, t, t),
                                     js_handler="(e) => { e.stopPropagation(); emit(); }")
+                        tags_box.on("dblclick", js_handler=_STOP_JS)
                 if r["pinned"]:
                     ui.icon("push_pin", size="16px").classes("md4-pinmark").tooltip("고정한 논문")
-                with ui.row().classes("md4-pacts items-center gap-0 no-wrap"):
+                acts = ui.row().classes("md4-pacts items-center gap-0 no-wrap")
+                acts.on("click", js_handler=_STOP_JS).on("dblclick", js_handler=_STOP_JS)
+                with acts:
                     # 고정 = 목록 맨 위 '고정한 논문' 구역. 관심 논문을 모아 두고 매번 찾지 않도록.
                     ui.button(icon="push_pin", on_click=lambda _, item=r: toggle_pin(item)) \
                         .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-6")) \
@@ -1123,6 +1204,298 @@ def build_home(state: dict) -> None:
                 cap("나머지 논문")
             for r in rest:
                 card(r)
+
+    # ===== 오른쪽 — 미리보기 (Zotero식: 한 번 클릭 = 선택, 더블클릭·Enter·'열기' = 논문 화면) =====
+    def select(root: str) -> None:
+        """카드 한 번 클릭 — 고른 표시만 옮기고 미리보기를 그린다(목록은 다시 그리지 않는다)."""
+        was_bulk, pick["bulk"] = pick["bulk"], False
+        if pick["root"] == root and not was_bulk:
+            return  # 더블클릭의 두 번째 click — 같은 카드면 할 일이 없다
+        old = card_els.get(pick["root"])
+        if old is not None:
+            old.classes(remove="on")
+        pick["root"] = root
+        cur = card_els.get(root)
+        if cur is not None:
+            cur.classes(add="on")
+        preview_pane.refresh()
+
+    def picked_row() -> dict | None:
+        """미리보기에 그릴 논문 — 지금 범위·숨김 보기에서 보일 수 있을 때만 (다른 묶음으로 가면 요약으로)."""
+        r = data["by_root"].get(pick["root"] or "")
+        if r is None or not in_scope(r, view["scope"]) or (r["hidden"] and not view["show_hidden"]):
+            return None
+        if not any(x is r for x in live_rows()):  # 아직 큐에서 처리 중
+            return None
+        return r
+
+    def fetch(root: str, kind: str, lang: str = ""):  # noqa: ANN202 — asyncio.Task
+        """미리보기 재료 읽기 — 한 번 시작한 읽기는 Task로 들고 있어 다시 그려도 두 번 읽지 않는다."""
+        key = (root, kind, lang)
+        task = loads.get(key)
+        if task is None:
+            wd = WorkDir(Path(root))
+            if preview is None:
+                fn = lambda: None if kind == "thumb" else ""  # noqa: E731
+            elif kind == "thumb":
+                fn = lambda: preview.thumbnail_png(wd)  # noqa: E731
+            elif kind == "abs":
+                fn = lambda: preview.abstract_of(wd, lang)  # noqa: E731
+            else:
+                fn = lambda: preview.notes_excerpt(wd)  # noqa: E731
+            task = loads[key] = asyncio.ensure_future(run.io_bound(fn))
+        return task
+
+    def cached(root: str, kind: str, lang: str = ""):  # noqa: ANN202 — (있음?, 값)
+        task = loads.get((root, kind, lang))
+        if task is not None and task.done() and not task.cancelled() and task.exception() is None:
+            return True, task.result()
+        return False, None
+
+    async def get(root: str, kind: str, lang: str = ""):  # noqa: ANN202
+        try:
+            return await fetch(root, kind, lang)
+        except Exception:  # noqa: BLE001 — 미리보기 재료는 없어도 된다 (다음에 다시 시도)
+            loads.pop((root, kind, lang), None)
+            return None
+
+    def draw_thumb(box, root: str, png) -> None:  # noqa: ANN001
+        box.clear()
+        if not png:
+            box.set_visibility(False)
+            return
+        try:
+            ver = Path(png).stat().st_mtime_ns
+        except OSError:
+            box.set_visibility(False)
+            return
+        with box:
+            ui.element("img").props(f'src="/wdthumb/{wd_token(Path(root))}?v={ver}" alt="" draggable=false')
+
+    def draw_abs(box, text) -> None:  # noqa: ANN001
+        box.clear()
+        with box:
+            if text:
+                ui.label(text).classes("md4-pv-abs")
+            else:
+                ui.label("초록을 찾지 못했습니다").classes("md4-pv-abs none")
+
+    def draw_notes(box, text) -> None:  # noqa: ANN001
+        box.clear()
+        if not text:
+            return
+        with box:
+            ui.label("메모").classes("md4-panel-title")
+            ui.label(text).classes("md4-pv-notes w-full")
+
+    async def fill(seq: int, box, root: str, kind: str, lang: str, draw) -> None:  # noqa: ANN001
+        """비동기로 읽어 그 칸만 채운다 — 그 사이 다른 논문을 골랐으면(seq가 바뀜) 버린다."""
+        val = await get(root, kind, lang)
+        if pick["seq"] != seq or (kind == "abs" and pick.get("abs_lang") != lang):
+            return
+        try:
+            draw(box, root, val) if kind == "thumb" else draw(box, val)
+        except Exception:  # noqa: BLE001 — 칸이 이미 지워졌거나(다시 그림) 창이 닫혔다
+            pass
+
+    def load_into(box, root: str, kind: str, lang: str, draw, placeholder=None) -> None:  # noqa: ANN001
+        """캐시에 있으면 바로 그리고, 없으면 자리표시를 두고 읽기를 건다."""
+        ok, val = cached(root, kind, lang)
+        if ok:
+            draw(box, root, val) if kind == "thumb" else draw(box, val)
+            return
+        if placeholder is not None:
+            with box:
+                placeholder()
+        background_tasks.create(fill(pick["seq"], box, root, kind, lang, draw), name="md4-preview")
+
+    def abs_skeleton() -> None:
+        ui.label("불러오는 중…").classes("md4-pv-bib")
+        for w in ("100%", "96%", "88%"):
+            ui.skeleton("text").style(f"width:{w}")
+
+    def set_lang(lang: str) -> None:
+        pick["lang"] = lang
+        r = picked_row()
+        if r is None:
+            return
+        pick["abs_lang"] = lang
+        for k, span in pv.get("seg", {}).items():
+            span.classes(add="on") if k == lang else span.classes(remove="on")
+        box = pv.get("abs_box")
+        if box is not None:
+            box.clear()
+            load_into(box, str(r["root"]), "abs", lang, draw_abs, abs_skeleton)
+
+    def show_bulk() -> None:
+        pick["bulk"] = True
+        preview_pane.refresh()
+
+    def draw_single(r: dict) -> None:
+        root = str(r["root"])
+        wd = WorkDir(r["root"])
+        state.setdefault("wd_by_token", {})[wd_token(r["root"])] = wd  # /wdthumb가 이 논문을 찾게
+        unopened = not r.get("opened")
+        lang = pick["lang"] if (pick["lang"] and (r["has_ko"] or pick["lang"] == "en")) else \
+            ("ko" if r["has_ko"] else "en")
+        pick["abs_lang"] = lang
+        with ui.column().classes("md4-pv-body md4-scroll gap-3 w-full"):
+            if selected:
+                ui.label(f"☑ {len(selected)}편 체크됨 — 일괄 동작 보기 ›").classes("md4-pv-selnote") \
+                    .on("click", show_bulk)
+            thumb = ui.element("div").classes("md4-pv-thumb")
+            load_into(thumb, root, "thumb", "", draw_thumb, lambda: ui.skeleton("rect"))
+            with ui.column().classes("gap-1 w-full"):
+                ui.label(r["title"]).classes("md4-pv-title")
+                if r.get("authors"):
+                    ui.label(", ".join(r["authors"])).classes("md4-pv-auth")
+                bib = " · ".join(str(x) for x in (r.get("year"), r.get("venue")) if x)
+                if bib:
+                    ui.label(bib).classes("md4-pv-bib")
+            tags_box = ui.element("div").classes("md4-ptags")
+            paint_tags(tags_box, r)
+            tags_box.on("click", lambda _, item=r, t=tags_box: open_member_menu(item, t, t))
+            with ui.row().classes("items-center gap-x-2 gap-y-1 w-full"):
+                if r["has_ko"]:
+                    ui.badge("번역 완료", color="green").props("outline")
+                else:
+                    ui.badge("영어 변환", color="blue").props("outline")
+                if unopened:
+                    ui.badge("NEW", color="primary")
+                if r["hidden"]:
+                    ui.badge("숨김", color="grey").props("outline")
+                ui.label(_relative_time(r["mtime"])).classes("md4-pmeta")
+                doi = (paper_meta.load(wd) or {}).get("doi")
+                if doi:
+                    ui.label("서지 ✓").classes("md4-pv-ok").tooltip(f"서지 정보 보강됨 — DOI {doi}")
+            with ui.row().classes("items-center w-full no-wrap q-mt-xs"):
+                ui.label("초록").classes("md4-panel-title")
+                ui.space()
+                pv["seg"] = {}
+                if r["has_ko"]:
+                    with ui.element("div").classes("md4-seg"):
+                        for k in ("en", "ko"):
+                            sp = ui.element("span").classes("on" if k == lang else "")
+                            with sp:
+                                ui.label(k.upper())
+                            sp.on("click", lambda _, k=k: set_lang(k))
+                            pv["seg"][k] = sp
+            abs_box = ui.column().classes("gap-1 w-full")
+            pv["abs_box"] = abs_box
+            load_into(abs_box, root, "abs", lang, draw_abs, abs_skeleton)
+            notes_box = ui.column().classes("gap-1 w-full")
+            load_into(notes_box, root, "notes", "", draw_notes)
+        with ui.row().classes("md4-pv-foot items-center gap-1 w-full no-wrap"):
+            ui.button("열기", icon="menu_book", on_click=lambda: open_wd(r["root"])) \
+                .props("unelevated dense no-caps color=primary").classes("q-px-sm") \
+                .tooltip("논문 화면으로 — 카드를 두 번 눌러도 됩니다")
+            new_window_button(r["root"], state, r["title"], small=True)
+            if _has_source_pdf(wd):
+                ui.button(icon="picture_as_pdf", on_click=lambda: open_source_pdf(UIController(wd))) \
+                    .props("flat dense round size=sm color=grey-7") \
+                    .tooltip("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서")
+            ui.button("EN", on_click=lambda: download_zip(r["root"], "en")) \
+                .props("flat dense no-caps size=sm color=grey-7").tooltip("영어 마크다운 zip (마크다운+이미지)")
+            if r["has_ko"]:
+                ui.button("KO", on_click=lambda: download_zip(r["root"], "ko")) \
+                    .props("flat dense no-caps size=sm color=primary") \
+                    .tooltip("한국어 번역 마크다운 zip (마크다운+이미지)")
+            ui.space()
+            ui.button(icon="push_pin", on_click=lambda: toggle_pin(r)) \
+                .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-6")) \
+                .tooltip("고정 해제" if r["pinned"] else "목록 맨 위에 고정")
+            if r["hidden"]:
+                ui.button(icon="visibility", on_click=lambda: hide_paper(r, False)) \
+                    .props("flat dense round size=sm color=primary").tooltip("목록에 다시 표시")
+            else:
+                ui.button(icon="delete", on_click=lambda: confirm_delete(r)) \
+                    .props("flat dense round size=sm color=grey-6").tooltip("목록에서 숨기기 / 파일 삭제")
+
+    def draw_bulk() -> None:
+        """체크한 논문들 — 예전 목록 위 선택 툴바가 하던 일괄 동작을 이 칸에 세로로."""
+        n = len(selected)
+        with ui.column().classes("md4-pv-body md4-scroll gap-2 w-full"):
+            with ui.row().classes("items-baseline w-full no-wrap"):
+                ui.label(f"{n}편 선택").classes("md4-pv-title")
+                ui.space()
+                ui.button("선택 해제", on_click=clear_selection).props("flat dense no-caps size=sm")
+            rows = [data["by_root"][x] for x in selected if x in data["by_root"]]
+            rows.sort(key=lambda x: x["title"].lower())
+            with ui.column().classes("gap-0 w-full"):
+                for x in rows[:8]:
+                    ui.label("· " + x["title"]).classes("md4-pv-sel truncate w-full").tooltip(x["title"])
+                if len(rows) > 8:
+                    ui.label(f"외 {len(rows) - 8}편").classes("md4-pv-sel")
+            ui.label("일괄 동작").classes("md4-panel-title q-mt-sm")
+            with ui.column().classes("md4-pv-bulk gap-1 w-full"):
+                ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")) \
+                    .props("outline dense no-caps")
+                ui.button("한국어 zip", icon="download", on_click=lambda: download_bulk("ko")) \
+                    .props("outline dense no-caps")
+                ui.button("모바일 HTML", icon="smartphone", on_click=download_mobile).props("outline dense no-caps") \
+                    .tooltip("폰에서 읽는 HTML 한 장 (원문·번역·문단 대조) — iCloud Drive·구글 드라이브에 저장하면 "
+                             "밖에서도 열립니다")
+                # 추가 = 다른 소속은 그대로 두고 더하기, 빼기 = 그 소속만 떼기(그 폴더의 사본도 정리)
+                with ui.button("컬렉션에 추가 ▾", icon="playlist_add").props("outline dense no-caps"):
+                    project_pick_menu(lambda v: bulk_member(v, True), with_new=True)
+                member_of = {p for root in selected for p in (data["by_root"].get(root) or {}).get("pids", [])}
+                with ui.button("컬렉션에서 빼기 ▾", icon="playlist_remove").props("outline dense no-caps"):
+                    project_pick_menu(lambda v: bulk_member(v, False), only=member_of)
+                if settings_dialog.any_library_dirs():
+                    ui.button("폴더로 저장", icon="drive_file_move",
+                              on_click=lambda: save_to_library([Path(p) for p in selected])) \
+                        .props("outline dense no-caps").tooltip("저장 위치로 내보내기")
+
+    def draw_summary() -> None:
+        """아무것도 고르지 않았을 때 — 이 범위 요약 + 미리보기 안내."""
+        s = view["scope"]
+        rows = [r for r in live_rows() if not r["hidden"] and in_scope(r, s)]
+        n_ko = sum(1 for r in rows if r["has_ko"])
+        with ui.column().classes("md4-pv-body md4-scroll gap-2 w-full"):
+            ui.label(scope_label()).classes("md4-pv-title")
+            ui.label(f"{len(rows)}편 · 번역 {n_ko}편").classes("md4-pv-stat")
+            if s not in (projects.ALL, projects.NONE):
+                root = projects.root_of(s)
+                with ui.row().classes("items-start gap-1 no-wrap w-full"):
+                    ui.icon("folder" if root else "folder_off", size="15px").classes("text-grey-5 q-mt-xs")
+                    ui.label(str(root) if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다") \
+                        .classes("md4-pv-bib break-all")
+            with ui.column().classes("md4-pv-empty gap-1 w-full"):
+                ui.icon("article", size="40px").classes("text-grey-4")
+                ui.label("논문을 고르면 여기에 미리보기").classes("text-sm")
+                ui.label("한 번 클릭 = 미리보기 · 두 번 클릭(또는 Enter) = 열기 · 체크박스 = 여러 편 일괄 동작") \
+                    .classes("text-xs")
+
+    @ui.refreshable
+    def preview_pane() -> None:
+        pick["seq"] += 1  # 이전 그림에 걸어 둔 읽기는 이제 버려진다
+        pv["seg"], pv["abs_box"] = {}, None
+        if not (pv["open"] or selected):
+            return  # 접혀 있으면 그리지도 읽지도 않는다
+        r = picked_row()
+        if selected and (pick["bulk"] or r is None):
+            draw_bulk()
+        elif r is not None:
+            draw_single(r)
+        else:
+            draw_summary()
+
+    def sync_preview() -> None:
+        """미리보기 열 보이기 — 접어 뒀어도 체크한 논문이 있으면 편다(일괄 동작이 거기에만 있다)."""
+        col, btn = pv["col"], pv["btn"]
+        if col is None:
+            return
+        shown = pv["open"] or bool(selected)
+        if col.visible != shown:
+            col.set_visibility(shown)
+        if btn is not None:  # 펴 있으면 파랗게, 접혀 있으면 회색
+            btn.classes(replace="text-primary" if pv["open"] else "text-grey-7")
+
+    def toggle_preview() -> None:
+        pv["open"] = not pv["open"]
+        config.set_section_value("ui", "home_preview", pv["open"])  # 다음 실행에도 같은 모양
+        sync_preview()
+        preview_pane.refresh()
 
     def poll() -> None:  # 큐 진행 갱신 + 전체 처리 완료(또는 실패) 시에만 목록에 등장 + 하이라이트
         q = state["queue"]
@@ -1187,14 +1560,22 @@ def build_home(state: dict) -> None:
                 with ui.button(icon="more_horiz", color=None).props("flat dense round").classes("text-grey-7") \
                         .tooltip("숨긴 논문 · 내보내기 형식 · 이 목록 저장"):
                     more_menu()
+                pv["btn"] = ui.button(icon="view_sidebar", color=None, on_click=toggle_preview) \
+                    .props("flat dense round").classes("text-primary") \
+                    .tooltip("오른쪽 미리보기 접기/펴기")
             with ui.column().classes("md4-hlist md4-scroll w-full"):
                 queue_panel()  # 변환 중인 논문 — 끝나면 바로 아래 목록에 나타나므로 같은 칸에 둔다
-                sel_bar()  # 다중 선택 시 일괄 툴바
                 recent_list()
             with ui.element("div").classes("md4-dropov"):
                 drop_caption()
             # 카드 태그의 체크 메뉴 하나 — 목록을 다시 그려도 남도록 목록 밖에 둔다 (부모 클릭으로는 안 열림)
             member_ui["menu"] = ui.menu().props("no-parent-event auto-close=false")
             member_ui["menu"].on("hide", member_menu_closed)
+
+        # ---- 오른쪽 끝: 미리보기 (고른 논문 · 체크한 논문들의 일괄 동작 · 범위 요약) ----
+        pv["col"] = ui.column().classes("md4-hprev gap-0")
+        with pv["col"]:
+            preview_pane()
+        sync_preview()
 
     ui.timer(0.6, poll)

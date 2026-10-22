@@ -126,6 +126,10 @@ def test_ui_home_upload_page(tmp_path):
     assert "__md4FileDrag" in body and "md4-dropov" in body
     # 목록 카드: 사이드바로 끌 수 있고, 소속 프로젝트 태그를 단다 (미분류면 '미분류' 태그)
     assert "data-md4-root" in body and "md4-ptag" in body
+    # 오른쪽 미리보기 열(Zotero식) — 아무것도 고르지 않았으면 범위 요약 + 안내. 카드 한 번 = 선택,
+    # 두 번(dblclick)·Enter = 열기. 목록 위 선택 툴바는 없앴다(일괄 동작은 미리보기 자리로).
+    assert "md4-hprev" in body and "논문을 고르면 여기에 미리보기" in body
+    assert "dblclick" in body
     # 목록 카드의 제목 말줄임 — .nicegui-column은 자식을 컬럼 폭으로 stretch하지 않으므로
     # 제목 라벨에 truncate+min-w-0, 그 부모 행에 w-full이 없으면 긴 제목이 화면 밖으로 흘러넘친다.
     assert '"truncate","min-w-0"' in body  # 제목 라벨
