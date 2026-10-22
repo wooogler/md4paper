@@ -1312,8 +1312,10 @@ JS = r"""
   // 메모·하이라이트는 지금 뷰어의 논문일 때만(다른 논문이면 열 때 새로 읽으므로 할 일이 없다).
   function refreshView(what, tok){
     if (what === 'library'){
-      // 홈의 목록·컬렉션 칩은 서버가 짓는다 — 같은 홈 주소로 다시 가게 해 본문만 새로 짓는다
-      if (!onReview()) nav('/home');
+      // 홈의 목록·컬렉션 칩은 서버가 짓는다 — 본문(sub_pages)만 다시 짓게 한다. 같은 주소로 가는
+      // ui.navigate.to는 sub_pages가 '이미 그 화면'으로 보고 다시 짓지 않아 refresh 표시를 붙인다
+      if (!onReview() && typeof emitEvent === 'function')
+        emitEvent('md4-agent-nav', {url: '/home', refresh: true});
       return;
     }
     if (!tok || tok !== paper || !onReview()) return;
@@ -1593,10 +1595,23 @@ def init_js(token: str | None) -> str:
             f"window.__md4Agent && window.__md4Agent.setPaper({tok});")
 
 
-def _nav(url: str) -> None:
-    """JS가 부탁한 화면 이동 — 앱 안의 두 화면 주소만 받는다(바깥 주소로 끌려가지 않게)."""
+def _nav(url: str, refresh: bool = False) -> None:
+    """JS가 부탁한 화면 이동 — 앱 안의 두 화면 주소만 받는다(바깥 주소로 끌려가지 않게).
+
+    refresh(홈만): 이동 대신 지금 홈 본문을 다시 짓는다 — 에이전트가 컬렉션 소속을 바꾼 뒤 카드 칩을
+    맞추려고. 같은 주소로 가는 ui.navigate.to는 sub_pages가 그대로 두므로 SubPages.refresh()를 부른다.
+    그새 사용자가 뷰어로 옮겼으면(지금 본문이 홈이 아니면) 아무것도 하지 않는다.
+    """
     from nicegui import ui
 
+    if refresh and url == "/home":
+        from nicegui import context
+        from nicegui.elements.sub_pages import SubPages
+
+        for el in list(context.client.elements.values()):
+            if isinstance(el, SubPages) and getattr(el, "_rendered_path", "/home") in ("/", "/home"):
+                el.refresh()
+        return
     if isinstance(url, str) and (url.startswith("/review?wd=") or url == "/home"):
         ui.navigate.to(url)
 
@@ -1613,4 +1628,4 @@ def install(state: dict | None = None) -> None:  # noqa: ARG001 — 셸 설치 �
     spa.add_css(CSS)
     spa.add_body_html(HTML)
     spa.add_body_html(f"<script>{JS}</script>")
-    ui.on(NAV_EVENT, lambda e: _nav((e.args or {}).get("url", "")))
+    ui.on(NAV_EVENT, lambda e: _nav((e.args or {}).get("url", ""), bool((e.args or {}).get("refresh"))))

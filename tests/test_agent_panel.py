@@ -387,7 +387,7 @@ def test_refresh_action_branches():
     # 메모·하이라이트는 지금 뷰어의 논문일 때만 (다른 논문이면 열 때 새로 읽는다)
     assert "if (!tok || tok !== paper || !onReview()) return;" in rv
     assert rv.index("what === 'library'") < rv.index("tok !== paper")
-    assert "nav('/home')" in rv
+    assert "emitEvent('md4-agent-nav', {url: '/home', refresh: true})" in rv
 
 
 def test_refresh_hooks_match_app_names():
@@ -434,3 +434,29 @@ def test_cost_cap_warning_and_override_retry():
     head = _js_block(JS, "function renderHead(")
     assert "sess.cost_cap" in head and "' / $' + cap.toFixed(2)" in head
     assert ".ag-cost.over {" in CSS
+
+
+def test_home_refresh_rebuilds_sub_pages_only_when_home_is_shown(monkeypatch):
+    """같은 주소 이동은 sub_pages가 무시한다 — refresh는 지금 홈을 보여 주는 SubPages만 다시 짓는다."""
+    from nicegui import context, ui
+    from nicegui.elements.sub_pages import SubPages
+
+    class _SP(SubPages):
+        def __init__(self, path: str) -> None:  # noqa: D107 — 진짜 요소를 짓지 않는 대역
+            self._rendered_path = path
+            self.n = 0
+
+        def refresh(self) -> None:
+            self.n += 1
+
+    home, review = _SP("/home"), _SP("/review")
+
+    class _C:
+        elements = {1: home, 2: review}
+
+    monkeypatch.setattr(type(context), "client", property(lambda self: _C()))
+    went: list[str] = []
+    monkeypatch.setattr(ui.navigate, "to", went.append)
+    agent_panel._nav("/home", refresh=True)
+    agent_panel._nav("https://evil.example/", refresh=True)
+    assert (home.n, review.n, went) == (1, 0, [])
