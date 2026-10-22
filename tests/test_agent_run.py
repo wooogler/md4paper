@@ -253,3 +253,39 @@ def test_approval_pauses_then_resumes(tmp_path):
     final = sessions.load(s.id)
     assert final.pending is None
     assert [t["role"] for t in final.turns] == ["user", "assistant"]
+
+
+def test_list_papers_header_counts_whole_library(tmp_path):
+    """목록을 잘라 보여도 머리에 전체·조건·보인 편수와 컬렉션별 편수가 있다 (줄 수로 세지 않게)."""
+    from types import SimpleNamespace
+
+    from md4paper import projects
+    from md4paper.ui.agent.tools import list_papers
+    from md4paper.workdir import set_projects
+
+    ws = tmp_path / "ws"
+    wds = [make_wd(ws, f"p{i}", title=f"Paper {i}") for i in range(5)]
+    nir = projects.create("NIRVANA")["id"]
+    tut = projects.create("튜터")["id"]
+    for wd in wds[:3]:
+        set_projects(wd.root, [nir])
+    set_projects(wds[3].root, [nir, tut])
+    reg = Registry()
+    deps = _deps(reg, None, workspace=ws)
+
+    def call(**kw) -> str:
+        return asyncio.run(list_papers(SimpleNamespace(deps=deps), **kw))
+
+    out = call(limit=2)
+    head = out.splitlines()[0]
+    assert "전체 5편" in head and "2편을 보입니다" in head
+    assert "NIRVANA 4" in out and "튜터 1" in out and "미분류 1" in out
+    assert out.count("- token ") == 2 and "3편 더 있음" in out and "query" in out
+    assert len(reg.by_token) == 2                 # 보인 논문만 token 등록
+
+    out = call(project="튜터")
+    assert "조건(project '튜터')에 맞는 논문 1편" in out and "전체 5편" in out
+    assert "더 있음" not in out and out.count("- token ") == 1
+
+    assert call(limit=1000).count("- token ") == 5     # 상한 300으로 묶일 뿐 오류 아님
+    assert "전체 5편" in call(query="없는 제목")

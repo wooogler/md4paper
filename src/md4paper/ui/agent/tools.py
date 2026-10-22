@@ -7,8 +7,9 @@
 - `token=None`이면 지금 화면의 논문. 모르는 토큰·열린 논문 없음은 예외 대신 안내 문자열을 돌려준다
   (tool이 예외를 던지면 run 전체가 끊긴다 — 모델이 `list_papers`로 다시 찾게 하는 편이 낫다).
 - 파일 I/O는 동기라 `asyncio.to_thread`로 돌린다(서버 이벤트 루프를 막지 않게).
-- 결과는 각 4000자 상한. 행을 돌려주는 tool은 행 앞에 `[rN]`(다른 논문은 `[tok:rN]`)을 붙이고,
-  돌려준 행을 `deps.cited_rows`에 등록한다 — 답의 인용 마커는 이 집합 안의 것만 칩이 된다.
+- 결과는 각 4000자 상한(목록인 list_papers만 12000자). 행을 돌려주는 tool은 행 앞에 `[rN]`
+  (다른 논문은 `[tok:rN]`)을 붙이고, 돌려준 행을 `deps.cited_rows`에 등록한다 — 답의 인용
+  마커는 이 집합 안의 것만 칩이 된다.
 - 화면을 움직이는 tool(goto_row/open_paper)은 `deps.ui_actions`에 동작을 넣을 뿐이다. SSE 생성기가
   그것을 스트림에 끼워 보내고 브라우저가 실행한다.
 """
@@ -33,6 +34,9 @@ RESULT_MAX = 4000     # tool 결과 하나의 글자 상한
 ROW_CLIP = 900        # 검색 결과에서 한 행의 한쪽(EN/KO) 글자 상한
 READ_ROWS_MAX = 30    # read_rows 한 번에 읽는 행 수 상한
 SEARCH_K_MAX = 15
+LIST_DEFAULT = 100    # list_papers 기본 개수
+LIST_LIMIT_MAX = 300  # list_papers 개수 상한
+LIST_MAX = 12000      # list_papers 결과 글자 상한 — 목록은 한 줄이 짧아 따로 넉넉히 (약 3~4천 토큰)
 
 
 def token_of(root: Path) -> str:
@@ -300,28 +304,32 @@ async def read_highlights(ctx: RunContext[Deps], token: str | None = None) -> st
 
 
 async def list_papers(ctx: RunContext[Deps], query: str | None = None,
-                      project: str | None = None, limit: int = 30) -> str:
+                      project: str | None = None, limit: int = LIST_DEFAULT) -> str:
     """사용자 라이브러리의 논문 목록(최근 수정순)과 각 논문의 token을 돌려준다.
 
     다른 논문을 읽거나(search_paper 등의 token 인자) 열 때(open_paper) 여기서 얻은 token을 쓴다.
+    결과 첫머리에 **라이브러리 전체 편수·조건에 맞는 편수·실제로 보인 편수·컬렉션별 편수**가 있다.
+    "몇 편이냐"는 그 숫자로 답하고, 목록 줄 수를 세지 않는다(목록은 잘릴 수 있다).
+    찾는 논문이 목록에 없으면 query나 project로 좁혀 다시 부른다.
 
     Args:
         query: 제목·저자·학회에 들어 있는 글자로 거르기 (대소문자 무시). 생략하면 전부.
         project: 컬렉션 id 또는 이름으로 거르기. 생략하면 전부.
-        limit: 최대 개수 (기본 30, 최대 100).
+        limit: 최대 개수 (기본 100, 최대 300). 결과 글자 상한에 걸리면 그보다 적게 보인다.
     """
     from md4paper import config, projects
     from md4paper.workdir import recent_workdirs
 
     deps = ctx.deps
     ws = deps.workspace or config.resolve_workspace()
-    limit = max(1, min(int(limit or 30), 100))
+    limit = max(1, min(int(limit or LIST_DEFAULT), LIST_LIMIT_MAX))
     q = (query or "").strip().lower()
     pj = (project or "").strip().lower()
 
-    def work() -> tuple[list[dict], dict[str, str]]:
+    def work() -> tuple[int, list[dict], dict[str, str]]:
         names = {p["id"]: p["name"] for p in projects.all_projects()}
-        rows = recent_workdirs(Path(ws), limit=500)
+        # 상한 없이 다 센다 — 앞 몇백 편에서 자르면 '전체 편수'가 틀린다
+        rows = recent_workdirs(Path(ws), limit=100_000)
         out = []
         for r in rows:
             ids = [i for i in r.get("projects") or [] if i in names]
@@ -332,14 +340,29 @@ async def list_papers(ctx: RunContext[Deps], query: str | None = None,
             if q and q not in hay:
                 continue
             out.append({**r, "projects": ids})
-        return out, names
+        return len(rows), out, names
 
-    rows, names = await asyncio.to_thread(work)
+    total, rows, names = await asyncio.to_thread(work)
     if not rows:
-        return "조건에 맞는 논문이 없습니다."
-    lines = []
+        return (f"조건에 맞는 논문이 없습니다 (라이브러리 전체 {total}편)." if q or pj
+                else "라이브러리에 논문이 없습니다.")
+
+    # 머리 — 모델이 목록 줄 수를 세서 편수를 답하지 않게 숫자를 먼저 못 박는다
+    counts: dict[str, int] = {}
+    loose = 0
+    for r in rows:
+        loose += not r["projects"]
+        for i in r["projects"]:
+            counts[i] = counts.get(i, 0) + 1
+    by_pj = [f"{names[i]} {n}" for i, n in sorted(counts.items(), key=lambda kv: -kv[1])]
+    if loose:
+        by_pj.append(f"미분류 {loose}")
+    cond = ", ".join(b for b in (f"query '{query.strip()}'" if q else "",
+                                 f"project '{project.strip()}'" if pj else "") if b)
+
+    lines: list[str] = []
+    size = 0
     for r in rows[:limit]:
-        tok = deps.register_token(WorkDir(Path(r["root"])))
         authors = ", ".join((r.get("authors") or [])[:2])
         if len(r.get("authors") or []) > 2:
             authors += " 외"
@@ -350,12 +373,28 @@ async def list_papers(ctx: RunContext[Deps], query: str | None = None,
             extra.append("컬렉션: " + ", ".join(names[i] for i in r["projects"]))
         if r.get("has_ko"):
             extra.append("번역 있음")
+        tok = deps.register_token(WorkDir(Path(r["root"])))
         if tok == deps.current_token:
             extra.append("← 지금 열린 논문")
         tail = f" · {' · '.join(extra)}" if extra else ""
-        lines.append(f"- token {tok}: {r.get('title') or r.get('name')}{meta}{tail}")
-    more = f"\n(그 밖에 {len(rows) - limit}편 더 있음)" if len(rows) > limit else ""
-    return _cap(f"논문 {min(len(rows), limit)}편:\n" + "\n".join(lines) + more)
+        line = f"- token {tok}: {r.get('title') or r.get('name')}{meta}{tail}"
+        if size + len(line) + 1 > LIST_MAX - 600 and lines:   # 600 = 머리·꼬리 자리
+            break
+        lines.append(line)
+        size += len(line) + 1
+
+    shown = len(lines)
+    if cond:
+        head = (f"라이브러리 전체 {total}편 중 조건({cond})에 맞는 논문 {len(rows)}편, "
+                f"그중 최근 수정순 {shown}편을 보입니다.")
+    else:
+        head = f"라이브러리 전체 {total}편 중 최근 수정순 {shown}편을 보입니다."
+    head += f"\n컬렉션별 ({'조건에 맞는 논문 기준' if cond else '전체'}): {', '.join(by_pj)}"
+    tail = ""
+    if shown < len(rows):
+        tail = (f"\n\n(목록 밖에 {len(rows) - shown}편 더 있음 — 찾는 논문이 없으면 query(제목·저자·"
+                f"학회 글자)나 project(컬렉션 이름·id)로 좁혀 다시 부르세요.)")
+    return _cap(head + "\n\n" + "\n".join(lines) + tail, LIST_MAX)
 
 
 async def list_projects(ctx: RunContext[Deps]) -> str:
