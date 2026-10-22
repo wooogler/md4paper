@@ -96,7 +96,11 @@ def impact_summary(rows: list[dict]) -> str:
     secs = sum(len(r["stale"]) for r in rows)
     cost = sum(r["est_cost_usd"] for r in rows)
     money = "< $0.01" if 0 < cost < 0.01 else f"≈ ${cost:.2f}"
-    return f"다음 번역 때 다시 번역될 곳: 논문 {len(rows)}편 · 섹션 {secs}개 · {money}"
+    out = f"다음 번역 때 다시 번역될 곳: 논문 {len(rows)}편 · 섹션 {secs}개 · {money}"
+    full = sum(1 for r in rows if r.get("full"))
+    if full:  # 보관된 번역을 통째로 못 써 처음부터 다시 도는 논문 — 비용의 대부분이 여기서 나온다
+        out += f" · 그중 {full}편은 전체 재번역(캐시 못 씀)"
+    return out
 
 
 def open_collection_glossary(state: dict, pid: str, *, on_change: Callable[[], None] | None = None) -> None:

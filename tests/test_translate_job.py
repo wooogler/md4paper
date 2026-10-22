@@ -3,7 +3,8 @@
 - start: jobs 레지스트리에 translate 작업을 올리고, 문(gate)이 두 편까지만 들여보낸다. 기다리는 작업은
   `detail["queued"]`가 켜진다(홈 작업 카드의 '대기 중 · 앞에 n개'). 기다리기는 이벤트 루프에서 —
   스레드를 붙잡지 않는다.
-- plan: 일괄 번역 확인 대화상자의 세 묶음(번역 없음 · 낡은 섹션 있음 · 최신)과 대략 비용.
+- plan: 일괄 번역 확인 대화상자의 네 묶음(번역 없음 · 전체 재번역(캐시 못 씀) · 낡은 섹션 있음 · 최신)과
+  대략 비용.
 """
 
 import asyncio
@@ -137,6 +138,22 @@ def test_plan_buckets_and_estimates(tmp_path):
     assert p["cost_fresh"] > p["cost_stale"] > 0
     assert p["current"][0]["est_cost_usd"] == 0.0 and p["fresh"][0]["model"] == "openai/gpt-6-luna"
     assert not any(x["manual_ko"] for x in p["fresh"] + p["stale"] + p["current"])
+
+
+def test_plan_counts_unusable_cache_as_full_retranslation(tmp_path):
+    cur = _translated(tmp_path, "cur")
+    nocache = _translated(tmp_path, "nocache")
+    nocache.cache_json.unlink()  # 번역은 있는데 보관된 번역이 없다 — 다음 실행이 처음부터 다시 번역
+
+    p = translate_job.plan([cur.root, nocache.root], model_for=lambda wd: "openai/gpt-6-luna")
+    assert [x["root"] for x in p["current"]] == [cur.root]
+    assert [x["root"] for x in p["full"]] == [nocache.root]
+    assert p["stale"] == [] and p["stale_sections"] == 0 and p["cost_stale"] == 0.0  # stale에는 안 넣는다
+    f = p["full"][0]
+    assert 0 < f["sections"] == p["full_sections"]
+    assert 0 < f["chars"] <= len(nocache.en_md.read_text(encoding="utf-8"))
+    assert f["est_cost_usd"] == p["cost_full"] == pytest.approx(translate_job.estimate_usd("gpt-6-luna", f["chars"]))
+    assert p["cost_full"] > 0
 
 
 def test_default_model_follows_last_translation(tmp_path):

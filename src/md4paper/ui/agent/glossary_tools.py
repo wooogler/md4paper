@@ -71,9 +71,14 @@ def _usd(x: float) -> str:
     return f"${x:.2f}" if x >= 0.01 else "$0.01 미만"
 
 
-def _impact_sums(rows: list[dict]) -> tuple[int, int, float]:
-    """impact 표 → (편수, 낡은 섹션 수, 대략 비용 합)."""
-    return len(rows), sum(len(r["stale"]) for r in rows), sum(r["est_cost_usd"] for r in rows)
+def _impact_sums(rows: list[dict]) -> tuple[int, int, float, int]:
+    """impact 표 → (편수, 다시 번역될 섹션 수, 대략 비용 합, 그중 전체 재번역(캐시 못 씀) 편수)."""
+    return (len(rows), sum(len(r["stale"]) for r in rows), sum(r["est_cost_usd"] for r in rows),
+            sum(1 for r in rows if r.get("full")))
+
+
+def _full_note(full: int) -> str:
+    return f" (그중 {full}편은 전체 재번역)" if full else ""
 
 
 # --- 읽기 ---------------------------------------------------------------
@@ -191,7 +196,9 @@ async def translation_impact(ctx: RunContext[Deps], collection: str) -> str:
 
     번역(ko.md)이 있는 소속 논문마다 낡은 섹션 수·원문 글자 수·모델(그 논문을 마지막으로 번역한
     모델)·대략 비용을 적고, 끝에 합계를 적는다. LLM을 부르지 않는 어림이다(시스템 프롬프트·재시도는
-    셈하지 않음). 원문이 바뀐 섹션도 함께 잡힌다(다음 번역에서 어차피 같이 다시 돈다).
+    셈하지 않음). 원문이 바뀐 섹션도 함께 잡힌다(다음 번역에서 어차피 같이 다시 돈다). 보관된
+    번역(캐시)을 통째로 못 쓰는 논문(지난 번역 뒤 논문 용어집·모델·문체가 바뀜, 캐시 파일 없음)은
+    '전체 재번역(캐시 못 씀)'으로 적는다 — 다음 실행이 처음부터 다시 번역해 비용이 크다.
     실제로 다시 번역하지는 않는다.
 
     Args:
@@ -217,17 +224,20 @@ async def translation_impact(ctx: RunContext[Deps], collection: str) -> str:
         tok = deps.register(WorkDir(Path(r["root"])))
         title = " ".join(str(r["title"] or "").split())
         title = title if len(title) <= tools.TITLE_CLIP else title[:tools.TITLE_CLIP].rstrip() + "…"
-        line = (f"- token {tok}: {title} — 낡은 섹션 {len(r['stale'])}개(유닛 {r['units']}, "
-                f"약 {r['chars']:,}자), 모델 {r['model']}, ≈ {_usd(r['est_cost_usd'])}")
+        if r.get("full"):
+            what = f"전체 재번역(캐시 못 씀, 섹션 {len(r['stale'])}개, 약 {r['chars']:,}자)"
+        else:
+            what = f"낡은 섹션 {len(r['stale'])}개(유닛 {r['units']}, 약 {r['chars']:,}자)"
+        line = f"- token {tok}: {title} — {what}, 모델 {r['model']}, ≈ {_usd(r['est_cost_usd'])}"
         if size + len(line) + 1 > LIST_MAX - 600 and lines:
             lines.append(f"…(상한에 걸려 {len(rows) - len(lines)}편 생략 — 합계에는 들어 있음)")
             break
         lines.append(line)
         size += len(line) + 1
-    n, secs, cost = _impact_sums(rows)
+    n, secs, cost, full = _impact_sums(rows)
     head = (f"컬렉션 '{name}' — 지금 컬렉션 용어집을 기준으로 다음 번역 실행 때 다시 번역될 곳 "
             "(LLM 없이 어림한 대략 비용):\n")
-    total = f"\n합계: 논문 {n}편, 낡은 섹션 {secs}개, 대략 {_usd(cost)}"
+    total = f"\n합계: 논문 {n}편{_full_note(full)}, 낡은 섹션 {secs}개, 대략 {_usd(cost)}"
     return tools._cap(head + "\n".join(lines) + total, LIST_MAX)
 
 
@@ -345,9 +355,10 @@ async def write_collection_glossary(ctx: RunContext[Deps], collection: str, entr
     if rows is None:
         msg += " → 영향: 다시 번역될 범위를 세지 못했습니다 (translation_impact로 다시 확인)."
     elif rows:
-        n, secs, cost = _impact_sums(rows)
+        n, secs, cost, full = _impact_sums(rows)
+        some = f"그중 {full}편은 전체 재번역, " if full else ""
         msg += (f" → 영향: 다음 번역 실행 때 논문 {n}편의 섹션 {secs}개가 다시 번역됨 "
-                f"(대략 {_usd(cost)}; 논문별은 translation_impact).")
+                f"({some}대략 {_usd(cost)}; 논문별은 translation_impact).")
     else:
         msg += " → 영향: 다시 번역될 섹션이 없습니다."
     return msg + skip_note + "\n" + RETRANSLATE_HINT

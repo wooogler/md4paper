@@ -340,7 +340,8 @@ def stale_units(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None = No
 
     `stale_section_ids`의 바탕이고, 영향 미리보기(`glossary.impact`)가 낡은 유닛의 원문 글자 수로 비용을
     어림하는 데 쓴다. gloss는 effective 용어집(None이면 이 논문의 것을 읽는다). 번역·캐시가 없거나
-    다음 실행이 캐시를 못 쓰는 경우(옛 키 불일치)는 빈 목록 — 전부 새 번역이라 '낡음'이 아니다.
+    다음 실행이 캐시를 못 쓰는 경우(옛 키 불일치)는 빈 목록 — 원문·용어집이 바뀐 게 아니라 '낡음'이 아니다.
+    그 경우에도 다음 실행은 전부 다시 번역하므로, 비용을 셀 때는 `retranslate_units`를 쓴다.
     """
     if not (wd.ko_md.exists() and wd.cache_json.exists() and wd.en_md.exists()):
         return []
@@ -349,6 +350,26 @@ def stale_units(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None = No
         return []
     return [u for u in _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines())
             if u["translatable"] and u["sids"] and _cached_translation(cache, u) is None]
+
+
+def retranslate_units(wd: WorkDir, manifest: Manifest,
+                      gloss: GlossaryList | None = None) -> tuple[list[dict], bool]:
+    """다음 번역 실행 때 LLM을 다시 부를 유닛들(문서 순)과 full(캐시를 통째로 못 써 전부 다시 도는지).
+
+    `stale_units`와 다른 점: 그쪽은 '원문·용어집이 바뀐 유닛'(뷰어의 '원문 바뀜')이고, 이쪽은 '다음 실행이
+    실제로 다시 번역할 유닛'이다 — 번역(ko.md)은 있는데 저장된 캐시를 못 쓰면(cache.json 없음, 또는 표식
+    없는 옛 파일의 키가 지난 번역의 모델·문체·논문 용어집과 안 맞음 — 그 뒤 논문 용어집을 고쳤거나 모델을
+    바꿈) 원문이 바뀐 게 아니어도 번역 대상 유닛 전부가 다시 돈다 → (전부, True). 영향 미리보기·일괄 번역
+    대화상자·에이전트가 이걸로 비용을 센다 — 그렇지 않으면 그 논문이 '최신'으로 보이고 비용이 0으로 나온다.
+    ko.md(또는 en.md)가 없으면 ([], False) — 그건 '번역 없음'이지 재번역이 아니다(호출측이 따로 센다).
+    그 밖에는 (stale_units, False). gloss는 effective 용어집(None이면 이 논문의 것을 읽는다).
+    """
+    if not (wd.ko_md.exists() and wd.en_md.exists()):
+        return [], False
+    if _stored_cache(wd, manifest, gloss) is None:
+        units = _build_units(wd, manifest, wd.en_md.read_text(encoding="utf-8").splitlines())
+        return [u for u in units if u["translatable"] and u["sids"]], True
+    return stale_units(wd, manifest, gloss), False
 
 
 def stale_section_ids(wd: WorkDir, manifest: Manifest, gloss: GlossaryList | None = None) -> set[str]:

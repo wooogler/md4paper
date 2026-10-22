@@ -78,6 +78,9 @@ def test_load_overview_and_impact_summary(tmp_path):
     assert cgd.impact_summary([]).startswith("낡은 번역 없음")
     line = cgd.impact_summary([{"stale": ["s1", "s2"], "est_cost_usd": 0.5}, {"stale": ["s9"], "est_cost_usd": 0.25}])
     assert line == "다음 번역 때 다시 번역될 곳: 논문 2편 · 섹션 3개 · ≈ $0.75"
+    line = cgd.impact_summary([{"stale": ["s1", "s2"], "est_cost_usd": 0.5, "full": True},
+                               {"stale": ["s9"], "est_cost_usd": 0.25, "full": False}])
+    assert line == "다음 번역 때 다시 번역될 곳: 논문 2편 · 섹션 3개 · ≈ $0.75 · 그중 1편은 전체 재번역(캐시 못 씀)"
 
 
 def test_dialog_entry_points_exist():

@@ -331,14 +331,16 @@ _OUT_RATIO = 1.3        # 한국어 출력 토큰 ≈ 입력 × 1.3 (대략)
 def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | None = None) -> list[dict]:
     """컬렉션 용어집이 바뀌면 어느 논문의 어느 섹션이 다시 번역되고 대략 얼마가 드는지 (LLM 호출 없음).
 
-    소속 논문 중 번역(ko.md)이 있는 것마다 `apply.stale_units`(effective 용어집 반영)로 낡은 유닛을 찾아
-    그 원문 글자 수 → 토큰(입력 ≈ 글자/3.5, 출력 ≈ 입력×1.3) → `PRICING`으로 비용을 어림한다.
+    소속 논문 중 번역(ko.md)이 있는 것마다 `apply.retranslate_units`(effective 용어집 반영)로 다시 번역될
+    유닛을 찾아 그 원문 글자 수 → 토큰(입력 ≈ 글자/3.5, 출력 ≈ 입력×1.3) → `PRICING`으로 비용을 어림한다.
     시스템 프롬프트·재시도·프로바이더 캐시는 셈하지 않는다 — 승인 카드·대화상자가 '대략'을 보여 주는 용도.
-    원문이 바뀐 섹션도 같은 판정에 걸리므로 함께 잡힌다(다음 번역에서 어차피 같이 다시 돈다).
+    원문이 바뀐 섹션도 같은 판정에 걸리므로 함께 잡힌다(다음 번역에서 어차피 같이 다시 돈다). 보관된
+    번역(캐시)을 통째로 못 쓰는 논문(캐시 파일 없음, 지난 번역 뒤 논문 용어집·모델·문체가 바뀐 옛 캐시)은
+    `full=True` — stale은 번역 대상 섹션 전부, chars는 그 유닛 전체(다음 실행이 처음부터 다시 번역한다).
 
     모델: `model_for(wd)`를 주면 그것, 아니면 그 논문을 마지막으로 번역한 모델(`last_translate_model`),
     기록이 없으면 전역 기본. 반환 항목: {root, title, stale(섹션 id, 문서 순), units, chars, model,
-    est_cost_usd}. 낡은 게 없는 논문은 뺀다.
+    est_cost_usd, full}. 다시 번역될 게 없는 논문은 뺀다.
     """
     from md4paper import config, pipeline
     from md4paper.llm.base import Usage, cost_usd
@@ -355,7 +357,7 @@ def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | N
             manifest = manifest_io.load(wd)
         except (OSError, ValueError):
             continue
-        units = apply.stale_units(wd, manifest)
+        units, full = apply.retranslate_units(wd, manifest)
         if not units:
             continue
         sids: list[str] = []
@@ -370,5 +372,5 @@ def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | N
         inp = int(chars / _CHARS_PER_TOKEN)
         cost = cost_usd(model, Usage(input_tokens=inp, output_tokens=int(inp * _OUT_RATIO)))
         out.append({"root": wd.root, "title": paper_title(wd.root), "stale": sids, "units": len(units),
-                    "chars": chars, "model": model, "est_cost_usd": cost})
+                    "chars": chars, "model": model, "est_cost_usd": cost, "full": full})
     return out

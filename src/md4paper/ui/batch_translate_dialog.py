@@ -1,7 +1,7 @@
 """일괄 번역 확인 대화상자 — 홈의 '번역 (N편)'과 컬렉션 용어집의 '낡은 섹션 재번역'이 같이 쓴다.
 
-여러 편을 한꺼번에 번역하면 돈이 든다. 그래서 띄우기 전에 고른 논문을 세 묶음(번역 없음 · 낡은 섹션
-있음 · 최신)으로 세어 대략 비용과 함께 보여 주고, 확인을 받아야 논문마다 번역 작업을 띄운다
+여러 편을 한꺼번에 번역하면 돈이 든다. 그래서 띄우기 전에 고른 논문을 네 묶음(번역 없음 · 전체 재번역
+(캐시 못 씀) · 낡은 섹션 있음 · 최신)으로 세어 대략 비용과 함께 보여 주고, 확인을 받아야 논문마다 번역 작업을 띄운다
 (`translate_job.start` — 동시에 두 편씩, 나머지는 대기). 숫자는 `translate_job.plan`이 센다(LLM 없음).
 
 모델은 논문마다 그 논문을 지난번에 번역한 모델(없으면 전역 기본) — 뷰어 드롭다운 기본값과 같다.
@@ -33,7 +33,9 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
 
     def targets() -> list[dict]:
         p = st["plan"] or {}
-        return [*p.get("fresh", []), *p.get("stale", []), *(p.get("current", []) if st["redo"] else [])]
+        # 전체 재번역(캐시 못 씀)은 기본으로 넣는다 — 낡은 것을 고치려고 누른 것이니(redo 체크와 무관)
+        return [*p.get("fresh", []), *p.get("full", []), *p.get("stale", []),
+                *(p.get("current", []) if st["redo"] else [])]
 
     def launch() -> None:
         started, busy, nokey = 0, [], []
@@ -72,7 +74,7 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
                 ui.spinner(size="sm")
                 ui.label(f"{len(roots)}편 살펴보는 중…").classes("text-sm text-gray-500")
             return
-        fresh, stale, cur, skip = p["fresh"], p["stale"], p["current"], p["skipped"]
+        fresh, full, stale, cur, skip = p["fresh"], p.get("full", []), p["stale"], p["current"], p["skipped"]
 
         def line(icon: str, color: str, text: str, sub: str = "", tip: list[dict] | None = None) -> None:
             with ui.row().classes("items-start gap-2 no-wrap w-full"):
@@ -86,6 +88,11 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
 
         line("fiber_new", "text-primary", f"번역 없음 {len(fresh)}편",
              f"처음부터 번역 {_money(p['cost_fresh'])}" if fresh else "", fresh)
+        if full:
+            line("history", "text-negative",
+                 f"전체 재번역(캐시 못 씀) {len(full)}편 (섹션 {p.get('full_sections', 0)}개)",
+                 "지난 번역 뒤 용어집·모델·문체가 바뀌어 보관된 번역을 못 씁니다 — 처음부터 다시 번역 "
+                 f"{_money(p.get('cost_full', 0.0))}", full)
         line("update", "text-orange-7", f"낡은 섹션 있음 {len(stale)}편 (섹션 {p['stale_sections']}개)",
              f"바뀐 섹션만 다시 번역 {_money(p['cost_stale'])} — 나머지는 지난 번역(캐시)" if stale else "", stale)
         line("check_circle", "text-green-7", f"최신 {len(cur)}편",
@@ -102,7 +109,7 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
             ui.label(f"⚠ 번역문을 직접 고친 {len(manual)}편은 새 결과로 다시 쓰여 고친 내용이 사라집니다.") \
                 .classes("text-xs text-orange-9")
         n = len(targets())
-        total = p["cost_fresh"] + p["cost_stale"]
+        total = p["cost_fresh"] + p.get("cost_full", 0.0) + p["cost_stale"]
         ui.label(f"합계 {n}편 · {_money(total)} (대략 — 원문 글자 수로 어림) · 동시에 "
                  f"{translate_job.gate().limit}편씩").classes("text-xs text-gray-500 q-mt-xs")
         with ui.row().classes("justify-end gap-2 w-full q-mt-sm"):

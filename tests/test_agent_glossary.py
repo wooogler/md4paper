@@ -286,6 +286,15 @@ def test_translation_impact_reports_stale_sections_and_cost(tmp_path):
     assert ctx.deps.wd_for(tok) is not None                      # token이 등록돼 다른 tool로 이어진다
     assert "list_projects" in asyncio.run(translation_impact(ctx, "없음"))
 
+    # 보관된 번역(캐시)이 없으면 낡은 섹션이 아니라 전체 재번역 — '최신'·0원으로 보이지 않게
+    wd.cache_json.unlink()
+    out = asyncio.run(translation_impact(ctx, pid))
+    line = next(ln for ln in out.splitlines() if ln.startswith(f"- token {tok}:"))
+    assert "전체 재번역(캐시 못 씀, 섹션 " in line and "낡은 섹션" not in line and "모델 gpt-5.6-luna" in line
+    assert "합계: 논문 1편 (그중 1편은 전체 재번역)" in out
+    out = asyncio.run(write_collection_glossary(ctx, "Coll", [{"term": "recurrence", "korean": "순환"}]))
+    assert "논문 1편의 섹션" in out and "(그중 1편은 전체 재번역, 대략 $" in out
+
 
 def test_tools_registered_and_system_mentions_them():
     names = {getattr(t, "name", getattr(t, "__name__", "")) for t in TOOLS}

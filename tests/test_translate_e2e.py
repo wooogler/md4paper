@@ -521,6 +521,43 @@ def test_v2_cache_with_edited_paper_glossary_is_not_reused(long_paper):
     assert calls["n"] == before + 3
 
 
+def test_retranslate_units_counts_full_retranslation_when_cache_is_unusable(long_paper):
+    """캐시를 통째로 못 쓰면 stale_units는 빈 목록('원문 바뀜' 아님)이지만 retranslate_units는 전부·full."""
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply, glossary
+
+    wd, _pid = long_paper
+    m = manifest_io.load(wd)
+    assert apply.retranslate_units(wd, m) == ([], False)  # (d) 번역 없음 — 재번역이 아니다
+    calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    assert apply.retranslate_units(wd, m) == ([], False)  # (a) 번역 직후
+    every = [u for u in apply.build_units(wd, m, wd.en_md.read_text(encoding="utf-8").splitlines())
+             if u["translatable"] and u["sids"]]
+    assert len(every) == 3
+
+    # (b) 옛 v2 캐시 + 그 뒤 논문 용어집 변경 → 키 불일치(status.json에 지난 모델 기록이 있다)
+    _plant_v2_cache(wd)
+    glossary.save(GlossaryList(entries=[*glossary.load(wd).entries, _entry("plain", "평범")]), wd)
+    assert apply.stale_units(wd, m) == []  # '원문 바뀜'은 그대로 — 원문이 바뀐 게 아니다
+    units, full = apply.retranslate_units(wd, m)
+    assert full and [u["sids"] for u in units] == [u["sids"] for u in every]
+    before = calls["n"]
+    pipeline.run_translate(wd, fake)
+    assert calls["n"] == before + len(units)  # 실제로도 전부 다시 돈다
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+    # (c) cache.json이 없으면 전부
+    wd.cache_json.unlink()
+    units, full = apply.retranslate_units(wd, m)
+    assert full and len(units) == 3
+    assert apply.stale_units(wd, m) == []
+
+    # (d) ko.md가 없으면 '번역 없음' — 캐시가 없어도 재번역으로 세지 않는다
+    wd.ko_md.unlink()
+    assert apply.retranslate_units(wd, m) == ([], False)
+
+
 def test_unit_hash_is_plain_without_relevant_terms():
     from md4paper.translate.apply import relevant_lines, unit_hash
     from md4paper.workdir import hash_text
@@ -560,3 +597,22 @@ def test_impact_reports_stale_papers_and_rough_cost(long_paper):
     other = glossary.impact(pid, ws, model_for=lambda _wd: "claude-sonnet-5")
     assert other[0]["model"] == "claude-sonnet-5" and other[0]["est_cost_usd"] > row["est_cost_usd"]
     assert glossary.impact("p-없는-컬렉션", ws) == []
+
+
+def test_impact_marks_full_retranslation_when_cache_is_gone(long_paper):
+    from md4paper.translate import glossary
+
+    wd, pid = long_paper
+    ws = wd.root.parent
+    _calls, fake = _counting()
+    pipeline.run_translate(wd, fake)
+    glossary.save_collection(pid, GlossaryList(entries=[_entry("recurrence", "순환")]))
+    assert glossary.impact(pid, ws)[0]["full"] is False  # 낡은 유닛 하나 — 캐시는 쓴다
+
+    wd.cache_json.unlink()
+    rows = glossary.impact(pid, ws)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["full"] is True and row["units"] == 3
+    assert {_sid(wd, t) for t in ("Recurrent Part", "Encoder Part", "Plain Part")} <= set(row["stale"])
+    assert row["chars"] > 3 * 1500  # 유닛 전체 원문

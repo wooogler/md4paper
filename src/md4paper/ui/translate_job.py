@@ -5,8 +5,8 @@
 병렬로 부르므로 편수까지 다 풀면 API 동시 호출이 불어나 속도 제한에 걸린다. 문 앞에서 기다리는 작업은
 `job.detail["queued"]`가 켜져 홈 작업 카드에 '대기 중'으로 보인다.
 
-`plan`은 홈 일괄 번역 확인 대화상자의 숫자다 — 고른 논문을 번역 없음 / 낡은 섹션 있음 / 최신으로 나누고
-대략 비용을 어림한다(LLM 호출 없음; `glossary.impact`와 같은 식).
+`plan`은 홈 일괄 번역 확인 대화상자의 숫자다 — 고른 논문을 번역 없음 / 전체 재번역(캐시 못 씀) / 낡은
+섹션 있음 / 최신으로 나누고 대략 비용을 어림한다(LLM 호출 없음; `glossary.impact`와 같은 식).
 
 nicegui를 import하지 않는다 — 테스트가 asyncio.run으로 바로 돌린다.
 """
@@ -99,24 +99,27 @@ def estimate_usd(model: str, chars: int) -> float:
 
 
 def plan(roots: list[Path | str], model_for: Callable[[WorkDir], str] | None = None) -> dict:
-    """일괄 번역 전 미리보기 — 고른 논문을 세 묶음으로 나누고 대략 비용을 센다 (LLM 호출 없음).
+    """일괄 번역 전 미리보기 — 고른 논문을 네 묶음으로 나누고 대략 비용을 센다 (LLM 호출 없음).
 
     - fresh: 번역(ko.md)이 없다 — en.md 전체 글자로 비용 어림.
+    - full: 번역은 있는데 보관된 번역(캐시)을 통째로 못 쓴다(캐시 파일 없음, 지난 번역 뒤 논문 용어집·
+      모델·문체가 바뀐 옛 캐시) — 다음 실행이 처음부터 다시 번역하므로 번역 대상 유닛 전체 글자로 어림,
+      섹션 수. 원문이 바뀐 게 아니라 stale에는 넣지 않는다(`apply.retranslate_units`).
     - stale: 번역이 있고 낡은 유닛이 있다(원문·용어집이 바뀜) — 낡은 유닛 원문 글자로 어림, 섹션 수.
     - current: 번역이 최신이다 — 기본은 건너뛴다(다시 돌려도 캐시를 써서 비용이 거의 0).
     - skipped: 원문(en.md)·구조가 없어 번역할 수 없다.
 
     model_for(wd) → 'provider/model'(기본: 지난 번역 모델 > 전역 기본). 항목: {root, title, model,
-    manual_ko(번역문을 직접 고쳤는지), chars, est_cost_usd, sections(stale만)}. 합계: cost_fresh,
-    cost_stale, stale_sections.
+    manual_ko(번역문을 직접 고쳤는지), chars, est_cost_usd, sections(full·stale만)}. 합계: cost_fresh,
+    cost_full, full_sections, cost_stale, stale_sections.
     """
     from md4paper.review import manifest as manifest_io
     from md4paper.translate import apply
     from md4paper.workdir import paper_title
 
     pick = model_for or default_model
-    out: dict = {"fresh": [], "stale": [], "current": [], "skipped": [],
-                 "cost_fresh": 0.0, "cost_stale": 0.0, "stale_sections": 0}
+    out: dict = {"fresh": [], "full": [], "stale": [], "current": [], "skipped": [],
+                 "cost_fresh": 0.0, "cost_full": 0.0, "full_sections": 0, "cost_stale": 0.0, "stale_sections": 0}
     for root in roots:
         wd = WorkDir(Path(root))
         item: dict = {"root": wd.root, "title": paper_title(wd.root),
@@ -138,7 +141,7 @@ def plan(roots: list[Path | str], model_for: Callable[[WorkDir], str] | None = N
             out["fresh"].append({**item, "chars": chars, "est_cost_usd": cost})
             out["cost_fresh"] += cost
             continue
-        units = apply.stale_units(wd, manifest)
+        units, full = apply.retranslate_units(wd, manifest)
         if not units:
             out["current"].append({**item, "chars": 0, "est_cost_usd": 0.0})
             continue
@@ -147,7 +150,8 @@ def plan(roots: list[Path | str], model_for: Callable[[WorkDir], str] | None = N
             sids.extend(s for s in u["sids"] if s not in sids)
         chars = sum(len(u["source"]) for u in units)
         cost = estimate_usd(model, chars)
-        out["stale"].append({**item, "chars": chars, "est_cost_usd": cost, "sections": len(sids)})
-        out["cost_stale"] += cost
-        out["stale_sections"] += len(sids)
+        kind = "full" if full else "stale"
+        out[kind].append({**item, "chars": chars, "est_cost_usd": cost, "sections": len(sids)})
+        out[f"cost_{kind}"] += cost
+        out[f"{kind}_sections"] += len(sids)
     return out
