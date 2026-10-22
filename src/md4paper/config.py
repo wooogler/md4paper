@@ -372,6 +372,28 @@ def set_chat_choice(provider: str | None, model: str | None = None) -> None:
     set_section_value("chat", "model", model or DEFAULT_MODELS.get(provider, ""))
 
 
+DEFAULT_AGENT_COST_CAP = 2.0   # USD — 에이전트 세션 하나의 누적 비용 상한 기본값
+
+
+def resolve_agent_cost_cap() -> float:
+    """에이전트 세션 비용 상한(USD): config [agent].session_cost_cap > 2.0. 0이면 상한 없음.
+
+    세션 누적 비용이 이 값에 닿으면 새 턴을 시작하기 전에 멈추고, 사용자가 '계속'을 눌러야
+    (요청에 override) 그 턴만 진행한다. 손으로 고친 문자열("2.5")도 받아들이고 음수는 0으로.
+    """
+    raw = load_config().get("agent", {}).get("session_cost_cap", DEFAULT_AGENT_COST_CAP)
+    try:
+        cap = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_AGENT_COST_CAP
+    return max(0.0, cap)
+
+
+def set_agent_cost_cap(value: float | None) -> None:
+    """세션 비용 상한 저장. None이면 설정을 지워 기본값(2.0)을 따른다."""
+    set_section_value("agent", "session_cost_cap", None if value is None else max(0.0, float(value)))
+
+
 def build_provider(cli_provider: str | None = None, cli_model: str | None = None):
     """설정을 해석해 LLM 프로바이더 인스턴스를 만든다. 키 없으면 오류."""
     from md4paper.llm import get_provider
@@ -419,6 +441,8 @@ def _toml_value(v) -> str:  # noqa: ANN001
         return "true" if v else "false"
     if isinstance(v, int):
         return str(v)
+    if isinstance(v, float):
+        return repr(v)
     if isinstance(v, (list, tuple)):
         return "[" + ", ".join(f'"{_toml_escape(str(x))}"' for x in v) + "]"
     return f'"{_toml_escape(str(v))}"'

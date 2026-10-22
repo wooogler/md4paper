@@ -7,6 +7,9 @@
 `state["current_wd"]`로 폴백하지 않는다(창이 여럿이면 엉뚱한 논문을 읽게 된다). 그러니 app.py는
 `wd_for`로 **폴백 없는** 조회(`state["wd_by_token"].get`)를 넘겨야 한다.
 
+비용: 세션 누적 비용이 `config.resolve_agent_cost_cap()`(기본 $2)에 닿으면 턴을 시작하지 않고
+400 `{"code": "cost_cap"}`. 창이 확인을 받아 `override: true`로 다시 보내면 그 턴만 허용한다.
+
 `build_agent`는 인자 없는 공장 함수다(기본: 설정의 [chat] 모델 + 그 키). 테스트는 FunctionModel
 에이전트를 돌려주는 람다를 끼운다 — 옛 `chat_panel.register_routes`의 build_provider 주입과 같은 꼴.
 """
@@ -65,7 +68,7 @@ def readiness(make: Callable[[], object] | None = None) -> tuple[bool, str]:
 def _detail(s: sessions.Session) -> dict:
     """세션 하나를 창에 그릴 형태로."""
     return {**s.meta(), "paper_tokens": s.paper_tokens, "turns": s.turns,
-            "pending": s.pending, "usage": s.usage}
+            "pending": s.pending, "usage": s.usage, "cost_cap": config.resolve_agent_cost_cap()}
 
 
 def _sse(ev: dict) -> str:
@@ -159,6 +162,15 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
             message = ""
         elif not message:
             return JSONResponse({"error": "질문이 비어 있습니다."}, status_code=400)
+
+        cap = config.resolve_agent_cost_cap()
+        spent = float(s.usage.get("cost_usd") or 0.0)
+        if cap > 0 and spent >= cap and body.get("override") is not True:
+            return JSONResponse(
+                {"error": (f"이 세션의 누적 비용(${spent:.4f})이 상한 ${cap:g}에 닿았습니다. "
+                           "계속하면 이번 질문만 상한을 넘겨 진행합니다."),
+                 "code": "cost_cap", "cost_usd": round(spent, 6), "cost_cap": cap},
+                status_code=400)
 
         try:
             agent = make()

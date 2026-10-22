@@ -71,7 +71,6 @@ class Session:
     conversation: object = field(default_factory=_empty_conversation)  # pydantic_ai.Conversation
     turns: list[dict] = field(default_factory=list)
     usage: dict = field(default_factory=lambda: {"input": 0, "output": 0, "cost_usd": 0.0})
-
     @property
     def pending(self) -> dict | None:
         """승인 대기 중인 tool 호출 — `{"calls": [{id, name, args}]}` 또는 None."""
@@ -269,12 +268,22 @@ def turn_id() -> str:
 # --- 상한 ---------------------------------------------------------------
 
 
-def _user_starts(messages: list) -> list[int]:
-    """사용자 질문으로 시작하는 요청 메시지의 위치들 (턴 경계)."""
+def is_turn_start(message: object) -> bool:
+    """대화를 여기서 잘라도 되는 사용자 질문 메시지인가 — 요청의 **첫 부분**이 사용자 질문.
+
+    승인 대기를 무시하고 새 질문을 보내면 요청 하나가 `[tool 결과(거절), 사용자 질문]`이 된다.
+    그 요청은 앞 응답의 tool 호출에 답하는 것이라 경계가 아니다 — 거기서 자르면 tool 결과만
+    남고 호출이 사라져 공급자 API가 기록을 거부한다(Pydantic AI는 조용히 결과를 버린다).
+    """
     from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-    return [i for i, m in enumerate(messages)
-            if isinstance(m, ModelRequest) and any(isinstance(p, UserPromptPart) for p in m.parts)]
+    return (isinstance(message, ModelRequest) and bool(message.parts)
+            and isinstance(message.parts[0], UserPromptPart))
+
+
+def _user_starts(messages: list) -> list[int]:
+    """사용자 질문으로 시작하는 요청 메시지의 위치들 (턴 경계)."""
+    return [i for i, m in enumerate(messages) if is_turn_start(m)]
 
 
 def trim(session: Session, limit: int | None = None) -> None:

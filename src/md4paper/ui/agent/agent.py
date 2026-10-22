@@ -8,7 +8,10 @@
   표시용 턴을 기록해 저장한다.
 
 턴 사용량 상한(UsageLimits)은 **턴마다** 센다: Pydantic AI는 `conversation=`의 누적 usage에서
-세기 시작하므로, run에는 usage를 비운 대화를 넘기고 끝난 뒤 세션 누적에 더한다.
+세기 시작하므로, run에는 usage를 비운 대화를 넘기고 끝난 뒤 세션 누적에 더한다. 토큰 수 상한은
+두지 않는다 — 요청마다 대화 전체가 들어가 run 안의 입력 토큰 합이 금세 커지므로(8문답 세션의
+tool 4개 턴이 44.8k), 대신 모델에 보내는 기록을 창으로 자르고(`window_messages`) 돈은 세션 비용
+상한(config [agent].session_cost_cap, routes가 턴 전에 확인)으로 묶는다.
 비용은 genai-prices가 아니라 기존 `llm.base.cost_usd`(프로젝트 PRICING)로 — 번역 비용 표시와 같은 표.
 """
 
@@ -18,6 +21,7 @@ import asyncio
 import dataclasses
 import os
 import time
+from dataclasses import replace
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -30,14 +34,17 @@ from pydantic_ai import (  # noqa: E402
     RunContext,
     UsageLimits,
 )
+from pydantic_ai.capabilities import Hooks  # noqa: E402
 from pydantic_ai.exceptions import UsageLimitExceeded  # noqa: E402
 from pydantic_ai.messages import (  # noqa: E402
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    ModelRequest,
     PartDeltaEvent,
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    ToolReturnPart,
 )
 from pydantic_ai.run import AgentRunResultEvent  # noqa: E402
 from pydantic_ai.usage import RunUsage  # noqa: E402
@@ -50,7 +57,12 @@ from md4paper.ui.agent.context import PaperRef, to_prompt  # noqa: E402
 from md4paper.ui.agent.tools import TOOLS, Deps, review_url  # noqa: E402
 from md4paper.workdir import paper_title  # noqa: E402
 
-DEFAULT_LIMITS = UsageLimits(request_limit=12, total_tokens_limit=60_000)
+DEFAULT_LIMITS = UsageLimits(request_limit=12, tool_calls_limit=20)
+HISTORY_TURNS = 8      # 모델에 보내는 최근 사용자 질문 수 (세션 파일에는 전부 남는다)
+FULL_RESULT_TURNS = 2  # 최근 몇 질문의 tool 결과는 줄이지 않는다
+OLD_RESULT_MAX = 1500  # 그보다 앞선 턴의 tool 결과가 이보다 길면 줄인다
+OLD_RESULT_KEEP = 300  # 줄일 때 남기는 앞부분 (어느 논문·무슨 결과였는지 알아볼 만큼)
+OLD_RESULT_NOTE = "…(앞선 턴의 tool 결과, 생략)"
 MEMORY_MAX = 4000      # memory.md를 지시문에 넣는 글자 상한
 SUMMARY_MAX = 200      # tool_result 이벤트 요약 길이
 CITE_TEXT_MAX = 1200   # 턴 기록에 남기는 인용 문단 길이
@@ -114,10 +126,57 @@ async def _dynamic(ctx: RunContext[Deps]) -> str:
     return "\n\n".join(p for p in (memory_text(), to_prompt(sc)) if p)
 
 
+# --- 모델에 보내는 기록 창 ---------------------------------------------
+# Pydantic AI 2.59에는 `Agent(history_processors=…)`가 없다(→ `ProcessHistory` 능력). 그런데
+# ProcessHistory는 처리 결과를 `ctx.messages`(= run의 영속 기록)에 되써서 잘린 기록이 그대로
+# 세션 파일에 저장된다. 그래서 `Hooks(before_model_request=…)`로 **이번 요청에 실을 목록만**
+# 바꾼다 — `request_context.messages`는 요청 전용 얕은 사본이라 새 목록을 대입해도 기록은 그대로다.
+# (append/extend는 기록에도 되써지니 쓰지 않는다. 메시지·부분 객체는 기록과 같은 것이므로 고칠 때는
+# dataclasses.replace로 새로 만든다.)
+
+
+def _shrink(msg: ModelRequest) -> ModelRequest:
+    """긴 tool 결과를 앞부분 + 생략 표시로 줄인 새 요청 (원래 객체는 건드리지 않는다)."""
+    parts = []
+    changed = False
+    for p in msg.parts:
+        if (isinstance(p, ToolReturnPart) and isinstance(p.content, str)
+                and len(p.content) > OLD_RESULT_MAX):
+            p = replace(p, content=p.content[:OLD_RESULT_KEEP].rstrip() + "\n" + OLD_RESULT_NOTE)
+            changed = True
+        parts.append(p)
+    return replace(msg, parts=parts) if changed else msg
+
+
+def window_messages(messages: list, turns: int = HISTORY_TURNS,
+                    keep_full: int = FULL_RESULT_TURNS) -> list:
+    """모델에 보낼 기록 — 최근 `turns`개 사용자 질문만, 그보다 앞선 tool 결과는 줄여서.
+
+    자르는 자리는 사용자 질문 경계(`sessions.is_turn_start`)뿐이다 — tool 호출과 그 결과가
+    갈라지면 공급자가 거부한다. 지금 질문(승인 재개면 승인을 기다리던 호출이 든 턴)은 맨 끝
+    경계 뒤에 통째로 있으므로 잘리지 않는다. 최근 `keep_full`개 질문의 tool 결과는 그대로 둔다.
+    """
+    starts = [i for i, m in enumerate(messages) if sessions.is_turn_start(m)]
+    cut = starts[-turns] if turns > 0 and len(starts) > turns else 0
+    msgs = list(messages[cut:])
+    kept = [i - cut for i in starts if i >= cut]
+    full_from = kept[-keep_full] if keep_full > 0 and len(kept) >= keep_full else 0
+    return [_shrink(m) if i < full_from and isinstance(m, ModelRequest) else m
+            for i, m in enumerate(msgs)]
+
+
+def _window_hook(ctx: RunContext[Deps], request_context):  # noqa: ANN001, ANN202 — ModelRequestContext
+    # 상수는 부를 때 읽는다 (테스트가 HISTORY_TURNS를 바꿔 볼 수 있게)
+    request_context.messages = window_messages(list(request_context.messages),
+                                               HISTORY_TURNS, FULL_RESULT_TURNS)
+    return request_context
+
+
 def make_agent(model) -> Agent[Deps, str | DeferredToolRequests]:  # noqa: ANN001
     """모델(Model 인스턴스)에 tool·지시문을 얹은 Agent. 테스트는 여기에 FunctionModel을 넣는다."""
     return Agent(model, deps_type=Deps, output_type=[str, DeferredToolRequests],
-                 instructions=[SYSTEM, _dynamic], tools=TOOLS)
+                 instructions=[SYSTEM, _dynamic], tools=TOOLS,
+                 capabilities=[Hooks(before_model_request=_window_hook)])
 
 
 def build_model(provider_name: str, model_name: str, api_key: str):  # noqa: ANN201 — Model

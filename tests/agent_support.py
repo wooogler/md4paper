@@ -117,8 +117,9 @@ def tool_returns(messages: list) -> list[str]:
 
 
 def scripted_model(steps: list[Step], model_name: str = "scripted",
-                   seen: list | None = None) -> FunctionModel:
-    """대본대로 움직이는 모델. `seen`을 주면 호출마다 모델이 받은 AgentInfo를 쌓는다."""
+                   seen: list | None = None, received: list | None = None) -> FunctionModel:
+    """대본대로 움직이는 모델. `seen`을 주면 호출마다 모델이 받은 AgentInfo를,
+    `received`를 주면 호출마다 모델이 받은 메시지 목록(기록 창을 거친 뒤)을 쌓는다."""
 
     def pick(messages: list) -> list[tuple[str, dict]] | str:
         step = steps[min(_step_index(messages), len(steps) - 1)]
@@ -137,6 +138,8 @@ def scripted_model(steps: list[Step], model_name: str = "scripted",
     async def stream_function(messages: list, info: AgentInfo):  # noqa: ANN202
         if seen is not None:
             seen.append(info)
+        if received is not None:
+            received.append(list(messages))
         step = pick(messages)
         if isinstance(step, list):
             yield {k: DeltaToolCall(name=n, json_args=json.dumps(a),
