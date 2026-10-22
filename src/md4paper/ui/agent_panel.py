@@ -1063,6 +1063,9 @@ JS = r"""
       q.className = 'ag-q'; q.textContent = t.text || '';
       wrap.appendChild(q);
       apprDone(wrap, t.id);
+      // 승인 뒤 이어 돈 run이 다시 승인 대기로 끝났을 때 그 사이 부른 tool 줄 — 같은 카드가 왜 또
+      // 떴는지(예: 실패한 호출 뒤 다시 시도) 보이게 잠긴 카드 뒤에 둔다
+      (toolsByTurn['u:' + t.id] || []).forEach(function(x){ wrap.appendChild(toolNode(x)); });
       return wrap;
     }
     wrap.className = 'ag-turn ag-bot';
@@ -1436,7 +1439,13 @@ JS = r"""
           return;
         }
         if (L.done && L.done.pending){        // 승인 대기 — 서버 기록(질문 턴·대기 목록)을 다시 읽는다
-          refreshSession();
+          var resumed = (!L.q && L.tools.length) ? L.tools : null;   // 승인 재개가 또 대기로 끝났다
+          refreshSession().then(function(){
+            var k = lastTurnId();
+            if (!resumed || !k) return;
+            toolsByTurn['u:' + k] = (toolsByTurn['u:' + k] || []).concat(resumed);
+            render();
+          });
           return;
         }
         if (L.err && at === sid){            // 서버가 오류 턴을 남겼다 — 기록을 다시 읽어 맞춘다

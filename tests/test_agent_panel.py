@@ -352,6 +352,9 @@ def test_pending_card_locks_into_history_and_send_skips_it():
     assert snd.index("pending = null; decisions = {};") < snd.index("fetch(")
     assert "pending = was;" in snd                       # 409·키 없음·비용 상한 → 카드는 아직 기다린다
     assert "apprDone(wrap, t.id);" in _js_block(JS, "function turnNode(")
+    # 승인 재개가 다시 대기로 끝나면 그 사이 tool 줄을 질문 턴에 남긴다(같은 카드가 또 뜬 까닭)
+    assert "var resumed = (!L.q && L.tools.length) ? L.tools : null;" in snd
+    assert "toolsByTurn['u:' + t.id]" in _js_block(JS, "function turnNode(")
 
 
 def test_pending_keeps_input_open_with_wait_placeholder():
