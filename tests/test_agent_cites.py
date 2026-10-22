@@ -71,3 +71,28 @@ def test_render_escapes_raw_html():
     html = render_html(clean, refs, current=CUR)
     assert "<script>" not in html and "&lt;script&gt;" in html
     assert 'data-row="5"' in html
+
+
+def test_bold_closes_before_korean_particle():
+    """닫는 `**` 안쪽이 문장부호이고 바깥이 조사여도 굵게가 된다 (commonmark는 못 닫는다)."""
+    for src, want in [
+        ('**"Study I"**이 좋다', "<strong>&quot;Study I&quot;</strong>이"),
+        ('앞**"Study"**를', "앞<strong>&quot;Study&quot;</strong>를"),
+        ("**(a)**은 **b**는", "<strong>(a)</strong>은 <strong>b</strong>는"),
+        ("**굵게**이", "<strong>굵게</strong>이"),
+        ('*a"*이', "<em>a&quot;</em>이"),
+    ]:
+        assert want in render_html(src, []), src
+    # 인용 칩 자리가 바로 뒤에 붙어도 닫힌다
+    clean, refs = resolve_citations('**"x"**[[r3]]이', {(CUR, 3)}, current=CUR)
+    html = render_html(clean, refs, current=CUR)
+    assert "<strong>&quot;x&quot;</strong><a class=\"chat-cite\"" in html
+
+
+def test_cjk_emphasis_leaves_code_underscore_and_english_alone():
+    assert "<code>**&quot;x&quot;**이</code>" in render_html('`**"x"**이`', [])
+    fenced = render_html('```\n**"x"**이\n```', [])
+    assert "<strong>" not in fenced and "**&quot;x&quot;**이" in fenced
+    assert "<em>" not in render_html("변수_이름_이다", [])      # `_`는 commonmark 그대로
+    assert "<em>" not in render_html("a * b * c", [])
+    assert "<strong>English</strong> text" in render_html("**English** text", [])
