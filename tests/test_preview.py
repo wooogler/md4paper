@@ -251,3 +251,16 @@ def test_notes_excerpt_strips_markdown_and_truncates(tmp_path):
 
 def test_notes_excerpt_missing(tmp_path):
     assert preview.notes_excerpt(_wd(tmp_path)) == ""
+
+
+def test_abstract_stops_at_italic_front_matter_labels():
+    """앞부분 라벨이 섹션 대신 기울임 문단('*CCS Concepts:* …')이 돼도 초록에 딸려 오지 않는다."""
+    body = "We study how writers ask for help with creative work and what that means for tools. " * 3
+    md = (
+        "# A Paper\n\n# ABSTRACT\n\n" + body.strip() + "\n\n"
+        "*CCS Concepts:* · Human-centered computing → Interactive systems and tools; Empirical studies in HCI.\n\n"
+        "*KEYWORDS*\n\ncreative writing; writing support tools\n\n# 1 INTRODUCTION\n\nIntro text.\n"
+    )
+    got = preview.extract_abstract(md)
+    assert got.startswith("We study how writers")
+    assert "Human-centered" not in got and "creative writing;" not in got

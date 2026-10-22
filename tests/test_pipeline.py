@@ -787,7 +787,7 @@ def test_stale_extract_with_noncharacters_is_redone(wd, tmp_path):
 
 
 def test_acm_front_matter_labels_are_not_flagged_for_review(wd):
-    """CCS Concepts·ACM Reference Format은 번호가 없는 게 정상 — 원래 레벨 그대로, 리뷰 표시 없이."""
+    """CCS Concepts·ACM Reference Format은 섹션이 아니다 — 기울임 라벨 문단, 리뷰 표시 없이."""
     raw = (
         "# A Paper Title\n\n"
         "## CCS Concepts: · Human-centered computing → Interactive systems and tools.\n\n"
@@ -803,5 +803,68 @@ def test_acm_front_matter_labels_are_not_flagged_for_review(wd):
     for label in ("CCS Concepts: · Human-centered computing → Interactive systems and tools.",
                   "ACM Reference Format:"):
         assert by[label].needs_review is False
-        assert by[label].level == 2
+        assert by[label].level == "italic"
     assert by["Design Notes"].needs_review is True
+
+
+def test_front_matter_labels_leave_toc_but_keep_body(wd):
+    """CCS Concepts·Keywords는 목차·섹션 트리에 안 나오고, 라벨과 내용은 본문에 남는다."""
+    from md4paper.assemble.render import render_markdown
+
+    raw = (
+        "# A Paper Title\n\n"
+        "## ABSTRACT\n\nWe study things.\n\n"
+        "## CCS CONCEPTS\n\n· Human-centered computing → Empirical studies in HCI.\n\n"
+        "## KEYWORDS\n\ncreative writing; language models\n\n"
+        "## CCS Concepts: · Human-centered computing → Interactive systems and tools.\n\n"
+        "## ACMReference Format:\n\nAnonymous. 2023. A Paper Title.\n\n"
+        "Author Keywords. Wiki, knowledge management, groupware.\n\n"
+        "# 1 Introduction\n\nBody.\n\n"
+        "## 1.1 Keywords\n\nA numbered section that happens to be called Keywords.\n"
+    )
+    wd.ensure()
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    m = build.build(raw, wd)
+    text, smap, _ = render_markdown(raw, m)
+    toc = [e["text"] for e in smap]
+    assert toc == ["A Paper Title", "ABSTRACT", "1 Introduction", "1.1 Keywords"]
+    assert "*CCS CONCEPTS*\n\n· Human-centered computing → Empirical studies in HCI." in text
+    assert "*KEYWORDS*\n\ncreative writing; language models" in text
+    assert "*CCS Concepts:* · Human-centered computing → Interactive systems and tools." in text
+    assert "*ACMReference Format:*\n\nAnonymous. 2023." in text
+    assert "*Author Keywords.* Wiki, knowledge management, groupware." in text  # run-in 라벨
+    assert "## 1.1 Keywords" in text
+
+
+def test_old_manifest_front_matter_labels_upgrade_on_load(wd):
+    """새 규칙 전에 만든 매니페스트도 다시 열면 앞부분 라벨이 섹션에서 빠진다 (손으로 준 레벨은 유지)."""
+    from md4paper import prefs
+    from md4paper.assemble.render import render_markdown
+
+    raw = (
+        "# A Paper Title\n\n## CCS Concepts\n\n· HCI.\n\n## Keywords\n\nwriting\n\n"
+        "## Index Terms\n\nagents\n\n# 1 Introduction\n\nBody.\n"
+    )
+    wd.ensure()
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    m = build.build(raw, wd)
+    by = {s.text: s for s in m.sections}
+    # 옛 build 결과 흉내: CCS는 기억된 레벨 1(자동 2), Keywords는 자동 1, Index Terms는 손으로 3
+    prefs.remember("CCS Concepts", 1)
+    by["CCS Concepts"].level, by["CCS Concepts"].auto_level = 1, 2
+    by["Keywords"].level = by["Keywords"].auto_level = 1
+    by["Index Terms"].level, by["Index Terms"].auto_level = 3, 2
+    manifest_io.save(m, wd)
+
+    loaded = manifest_io.load(wd)
+    lv = {s.text: s.level for s in loaded.sections}
+    assert lv["CCS Concepts"] == "italic"
+    assert lv["Keywords"] == "italic"
+    assert lv["Index Terms"] == 3  # 사용자 교정은 건드리지 않음
+    assert "level: italic" in wd.sections_yaml.read_text(encoding="utf-8")  # 파일에도 반영
+    _, smap, _ = render_markdown(raw, loaded)
+    assert [e["text"] for e in smap] == ["A Paper Title", "Index Terms", "1 Introduction"]
+    # 두 번째 로드는 바뀌는 게 없다
+    before = wd.sections_yaml.read_text(encoding="utf-8")
+    manifest_io.load(wd)
+    assert wd.sections_yaml.read_text(encoding="utf-8") == before

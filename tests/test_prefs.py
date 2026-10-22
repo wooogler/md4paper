@@ -60,8 +60,8 @@ def test_build_applies_remembered_choice(tmp_path):
 
     ccs = next(s for s in m.sections if s.text == "CCS Concepts")
     assert ccs.level == "drop"  # 기억된 선택 적용
-    # 자동 계산값은 따로 보존 (번호 감지 실패 → 추출기 레벨 ## = 2)
-    assert ccs.auto_level == 2
+    # 자동 계산값은 따로 보존 (앞부분 라벨 → 기울임 문단)
+    assert ccs.auto_level == "italic"
     assert ccs.auto_level != ccs.level  # 교정으로 기록됨
     intro = next(s for s in m.sections if s.text == "1 Introduction")
     assert intro.level == 1  # 기억 없는 헤더는 자동값
@@ -77,3 +77,15 @@ def test_remembered_choice_survives_different_numbering(tmp_path):
     m = build.build(raw, wd)
     ack = next(s for s in m.sections if "Acknowledgments" in s.text)
     assert ack.level == "drop"
+
+
+def test_remembered_heading_level_ignored_for_front_matter_label(tmp_path):
+    """앞부분 라벨에 기억된 '제목 레벨'은 무시 — 섹션으로 되살리지 않는다."""
+    prefs.remember("CCS Concepts", 1)
+    raw = "# Some Paper\n\n## CCS Concepts\n\nsome concepts text\n\n## 1 Introduction\n\nbody\n"
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.ensure()
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    m = build.build(raw, wd)
+    ccs = next(s for s in m.sections if s.text == "CCS Concepts")
+    assert ccs.level == "italic"

@@ -172,8 +172,13 @@ def missing_fields(meta: dict) -> list[str]:
 
 
 def enrich_meta(meta: dict, *, mailto: str | None = None, client=None) -> tuple[dict, list[str]]:  # noqa: ANN001
-    """비어 있는 필드만 채운 meta와 채운 필드 목록. 채울 게 없거나 못 찾으면 (원본, [])."""
-    need = missing_fields(meta)
+    """비어 있는 필드만 채운 meta와 채운 필드 목록. 채울 게 없거나 못 찾으면 (원본, []).
+
+    사용자가 손으로 고친 칸(`user_fields`)은 비어 있어도 채우지 않는다 — 일부러 비운 연도를
+    온라인 값이 되살리면 사용자 수정이 진다. DOI도 같은 규칙.
+    """
+    user = set(meta.get("user_fields") or [])
+    need = [f for f in missing_fields(meta) if f not in user]
     if not need:
         return meta, []
     found = lookup(meta.get("title", ""), mailto=mailto, client=client)
@@ -186,7 +191,7 @@ def enrich_meta(meta: dict, *, mailto: str | None = None, client=None) -> tuple[
             filled.append(field)
     if filled:
         out["meta_source"] = found["source"]
-        if found.get("doi") and not out.get("doi"):
+        if found.get("doi") and not out.get("doi") and "doi" not in user:
             out["doi"] = found["doi"]
     return out, filled
 

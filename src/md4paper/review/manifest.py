@@ -160,7 +160,7 @@ def load(wd: WorkDir) -> Manifest:
 
         author_parts = resolve_author_parts()
 
-    return Manifest(
+    manifest = Manifest(
         title=str(data.get("title", "")),
         citation_parts=parts,
         author_parts=author_parts,
@@ -173,3 +173,31 @@ def load(wd: WorkDir) -> Manifest:
         translate_references=bool(data.get("translate_references", False)),
         sections=sections,
     )
+    if _upgrade_front_matter_labels(manifest.sections):
+        save(manifest, wd)  # 한 번만 고쳐 쓴다 — 이후 재조립 해시도 바뀐 파일 기준
+    return manifest
+
+
+def _upgrade_front_matter_labels(sections: list[ManifestSection]) -> bool:
+    """옛 매니페스트에서 제목 레벨이 붙은 앞부분 라벨(CCS Concepts·Keywords …)을 기울임 문단으로.
+
+    지금 build는 이 라벨들을 섹션으로 만들지 않는다. 그 전에 만든 매니페스트는 자동값이나
+    기억된 레벨(prefs)로 1·2 같은 제목이 됐는데, 그런 항목만 옮긴다 — 자동값이 이미 italic인
+    항목(새 build)이나 사용자가 손으로 다른 레벨을 준 항목은 그대로 둔다.
+    """
+    from md4paper import prefs
+    from md4paper.structure import numbering
+
+    changed = False
+    for s in sections:
+        if s.is_title or not isinstance(s.level, int):
+            continue
+        if not (s.auto_level is None or isinstance(s.auto_level, int)):
+            continue  # 새 build가 정한 자동값(italic 등) — 이후 고른 레벨은 사용자의 뜻
+        if not numbering.is_front_matter_label(s.text):
+            continue
+        if s.level in (s.auto_level, prefs.lookup(s.text)) or s.auto_level is None:
+            s.level = s.auto_level = "italic"
+            s.needs_review = False
+            changed = True
+    return changed

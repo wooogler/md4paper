@@ -2025,29 +2025,19 @@ def _auto_glossary(wd: WorkDir) -> None:
 
 
 def _auto_metadata(wd: WorkDir) -> None:
-    """변환 직후 논문 서지(제목·저자·연도·venue)를 LLM으로 추출·저장 (목록 표시·검색·정렬용)."""
+    """변환 직후 논문 서지(제목·저자·연도·venue)를 LLM으로 추출·저장 (목록 표시·검색·정렬용).
+
+    본체는 `paper_meta.reextract` — 홈의 'AI로 다시 추출'도 같은 함수를 쓴다(사용자가 고친 칸은
+    지킨다). 여기서는 키가 없거나 추출이 실패해도 변환을 막지 않도록 조용히 넘어간다.
+    """
     try:
         provider = config.build_provider()
     except RuntimeError:
         return
     from md4paper import paper_meta
-    from md4paper.review import manifest as manifest_io
 
     try:
-        text = paper_meta.front_text(wd)
-        if not text.strip():
-            return
-        meta = paper_meta.extract(provider, text)
-        if not meta.title:  # 제목이 비면 manifest 제목으로 보완
-            meta.title = manifest_io.load(wd).title
-        if meta.year is None and wd.meta_json.exists():  # front matter에 연도 없으면 PDF 생성일자로 폴백
-            try:
-                src = json.loads(wd.meta_json.read_text(encoding="utf-8")).get("source", "")
-            except (OSError, ValueError):
-                src = ""
-            if src.lower().endswith(".pdf"):
-                meta.year = paper_meta.pdf_year(src)
-        paper_meta.save(wd, meta)
+        paper_meta.reextract(wd, provider)
     except Exception:  # noqa: BLE001
         pass
 
