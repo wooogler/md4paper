@@ -1391,7 +1391,7 @@ JS = r"""
       .then(function(r){
         if (!r.ok) return r.json().then(function(j){
           var er = new Error(j.error || j.detail || ('HTTP ' + r.status));
-          er.code = j.code || ''; throw er;
+          er.code = j.code || ''; er.cap = j.cost_cap; throw er;
         }, function(){ throw new Error('HTTP ' + r.status); });
         live.started = true;
         return readSSE(r, onEvent);
@@ -1407,6 +1407,7 @@ JS = r"""
           }
           if (e.code === 'cost_cap'){          // 경고 줄 + '그래도 계속' — 같은 본문을 override로 다시
             delete body.override;
+            if (sess && e.cap) sess.cost_cap = e.cap;   // 상한을 그새 바꿨어도 머리에 지금 값을
             capRetry = {body: body, msg: m};
           } else {
             errMsg = m;

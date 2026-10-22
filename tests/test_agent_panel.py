@@ -425,7 +425,7 @@ def test_notes_refresh_handler_guards_and_defers_to_conflict_path():
 
 def test_cost_cap_warning_and_override_retry():
     snd = _js_block(JS, "function send(")
-    assert "er.code = j.code || ''" in snd
+    assert "er.code = j.code || ''" in snd and "sess.cost_cap = e.cap" in snd
     assert "e.code === 'cost_cap'" in snd and "capRetry = {body: body, msg: m};" in snd
     assert "body.override = true;" in snd                      # 다시 보낼 때 같은 본문 + override
     cap = _js_block(JS, "function capNode(")
