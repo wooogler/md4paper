@@ -111,12 +111,12 @@ def _ctx(tok: str) -> dict:
     return {"screen": "review", "paper": {"token": tok}}
 
 
-def _app(wd: WorkDir, steps, seen=None, provider=None):  # noqa: ANN001, ANN202
+def _app(wd: WorkDir, steps, seen=None, provider=None, received=None):  # noqa: ANN001, ANN202
     reg = Registry(wd)
     app = FastAPI()
     routes.register_routes(
         app, reg.wd_for, reg.register,
-        build_agent=lambda: make_agent(scripted_model(steps, seen=seen)),
+        build_agent=lambda: make_agent(scripted_model(steps, seen=seen, received=received)),
         build_job_provider=provider or (lambda purpose, w: fake()))
     return app, next(iter(reg.by_token))
 
@@ -169,6 +169,15 @@ def test_plan_refuses_unknown_unticked_and_untranslated(paper, tmp_path):
     assert "아직 번역이 없습니다" in jobtools.plan_retranslate(paper, [method])
 
 
+def test_describe_counts_stale_sections_that_ride_along(paper):
+    intro, method = _sid_of(paper, "1 Introduction"), _sid_of(paper, "2 Method")
+    en = paper.en_md.read_text(encoding="utf-8")
+    paper.en_md.write_text(en.replace("intro encoder uses", "intro encoder now uses"), encoding="utf-8")
+    text = jobtools.describe_retranslate({"section_ids": [method]}, Path(paper.root))
+    # 제목 섹션은 짧아 서론과 한 유닛으로 묶인다 — 그 유닛의 섹션이 모두 낡음으로 잡힌다
+    assert text.endswith("원문이 바뀐 섹션 2개도 함께") and intro not in text
+
+
 # --- 왕복 ------------------------------------------------------------------
 
 
@@ -187,7 +196,8 @@ def test_retranslate_round_trip(paper):
             return "번역 작업을 시작했어요."
         return [("retranslate_sections", {"section_ids": [method]})]
 
-    app, tok = _app(paper, [step], seen=seen)
+    seen_msgs: list = []
+    app, tok = _app(paper, [step], seen=seen, received=seen_msgs)
     with TestClient(app) as client:
         sid = client.post("/agent/sessions").json()["id"]
         events = _turn(client, sid, message="2번째 섹션 다시 번역해 줘", context=_ctx(tok))
@@ -218,15 +228,22 @@ def test_retranslate_round_trip(paper):
 
         # 다음 턴 — 지시문에 끝난 작업이 한 번 실리고 notified가 된다
         seen.clear()
+        seen_msgs.clear()
         _turn(client, sid, message="번역 끝났어?", context=_ctx(tok))
         ins = seen[0].instructions
         assert "## 백그라운드 작업" in ins and "끝남: 번역" in ins and "1개 섹션 다시 번역" in ins
+        asked = seen_msgs[-1][-1].parts[0].content            # 질문 메시지 앞에도 한 번 실린다
+        assert asked[0].startswith("[앱 알림") and "끝남: 번역" in asked[0]
+        assert asked[1] == "번역 끝났어?"
+        assert client.get(f"/agent/sessions/{sid}").json()["turns"][-2]["text"] == "번역 끝났어?"
         detail = client.get(f"/agent/sessions/{sid}").json()
         assert detail["jobs"][0]["notified"] is True
         assert detail["usage"]["cost_usd"] == pytest.approx(cost)  # 다시 더하지 않는다
         seen.clear()
         _turn(client, sid, message="고마워", context=_ctx(tok))
-        assert "## 백그라운드 작업" not in seen[0].instructions     # 한 번만
+        ins = seen[0].instructions
+        assert "새로 끝난 작업" not in ins                          # '알려 주라'는 한 번만
+        assert "이미 알린 작업" in ins and "끝남: 번역" in ins       # 물으면 답할 수 있게 짧게 남는다
 
 
 def test_glossary_round_trip(paper):
@@ -370,7 +387,8 @@ def test_job_notice_lists_running_every_time_and_finished_once():
     assert "진행 중: 번역 ('2 Method' 섹션)" in first and "진행 1/3" in first
     assert "끝남: 용어집 생성" in first and "용어 7개" in first
     again = job_notice(s)
-    assert "용어집" not in again and "진행 중: 번역" in again
+    assert "새로 끝난" not in again and "진행 중: 번역" in again
+    assert "이미 알린 작업" in again and "끝남: 용어집 생성" in again
 
 
 # --- 창(JS) 계약 ----------------------------------------------------------------

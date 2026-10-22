@@ -104,7 +104,9 @@ outline에서), 번역 용어집 다시 만들기(run_glossary). 이 둘은 백�
   사용자가 거절하면 같은 쓰기를 다시 시도하지 말고 거절된 것을 받아들인다.
 - add_highlight의 quote는 read_rows·search_paper로 읽은 그 행의 글을 그대로 복사한다.
 - 비용 작업은 사용자가 분명히 요청할 때만 부른다. 몇 번째 섹션처럼 말하면 outline으로 섹션 id를 찾는다.
-  작업이 끝났는지는 지시문의 '백그라운드 작업' 블록으로 답한다 — 없으면 아직 소식이 없는 것이다."""
+  작업 상태는 지시문 끝의 '백그라운드 작업 — 지금 상태' 블록이 **유일한 최신 정보**다. 대화 기록의 앞선
+  답이나 '작업을 시작했습니다' tool 결과는 그때의 상태일 뿐이니, 블록에 '끝남'이 있으면 끝났다고 답한다.
+  블록이 없으면 이 대화에서 띄운 작업이 없는 것이다."""
 
 
 MEMORY_CUT_NOTE = "…(앞부분 생략)"
@@ -172,23 +174,32 @@ def _job_line(rec: dict) -> str:
     return f"- 끝남: {what} — {paper}. {', '.join(bits)}"
 
 
-def job_notice(session: sessions.Session) -> str:
-    """이번 run의 지시문에 실을 백그라운드 작업 소식 — 도는 작업은 매번, 끝난 작업은 **한 번만**.
+RECENT_JOBS = 5   # 이미 알린 끝난 작업도 최근 몇 개는 지시문에 남긴다
+JOB_NOTE_HEAD = "[앱 알림 — 사용자가 쓴 글이 아님] 이 대화에서 띄운 백그라운드 작업이 끝났다:"
 
-    끝났는데 아직 알리지 않은 기록은 여기 실리면서 `notified=True`가 된다(저장은 run_turn이).
-    사용자가 "번역 끝났어?"라고 물으면 모델이 이 블록으로 답한다.
+
+def job_notice(session: sessions.Session) -> str:
+    """이번 run의 지시문에 실을 백그라운드 작업 소식.
+
+    도는 작업은 매번. 끝났는데 아직 알리지 않은 기록은 '새로 끝남'으로 **한 번** 실리고
+    `notified=True`가 된다(저장은 run_turn이). 이미 알린 것도 최근 몇 개는 짧게 남긴다 — 소식이
+    다른 요청(예: 용어집 만들어 줘)의 턴에 실려 지나간 뒤 "번역 끝났어?"라고 물어도 답할 수 있게.
     """
     fresh = [r for r in session.jobs if r.get("done") and not r.get("notified")]
     running = [r for r in session.jobs if not r.get("done")]
-    if not fresh and not running:
+    seen = [r for r in session.jobs if r.get("done") and r.get("notified")][-RECENT_JOBS:]
+    if not fresh and not running and not seen:
         return ""
-    lines = ["## 백그라운드 작업 (이 대화에서 시작한 것)"]
+    lines = ["## 백그라운드 작업 — 지금 상태 (이 대화에서 시작한 것. 대화 기록의 앞선 답보다 이것이 최신이다)"]
     if fresh:
         lines.append("새로 끝난 작업 — 아직 사용자에게 알리지 않았다. 이번 답에서 짧게 알려 준다:")
         lines += [_job_line(r) for r in fresh]
     if running:
         lines.append("아직 도는 작업:")
         lines += [_job_line(r) for r in running]
+    if seen:
+        lines.append("앞서 끝나 이미 알린 작업 (사용자가 물으면 이것으로 답한다):")
+        lines += [_job_line(r) for r in seen]
     for r in fresh:
         r["notified"] = True
     return "\n".join(lines)
@@ -420,7 +431,13 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
     conv_in = dataclasses.replace(session.conversation, usage=RunUsage())
     _seed_from_turns(session, deps)
     sessions.sync_jobs(session)
+    fresh = [r for r in session.jobs if r.get("done") and not r.get("notified")]
     deps.job_notice = job_notice(session)
+    prompt: str | list[str] | None = text
+    if text and fresh:
+        # 새로 끝난 작업은 이번 질문 메시지 앞에도 싣는다 — 지시문만으로는 모델이 앞 턴의 "아직 알림을
+        # 못 받았다"는 자기 답을 따라가 버렸다(실데이터 확인). 기록에 한 번 남으므로 나중에 물어도 보인다.
+        prompt = [JOB_NOTE_HEAD + "\n" + "\n".join(_job_line(r) for r in fresh), text]
     cur = deps.wd_for(deps.current_token) if deps.current_token else None
     sessions.touch_paper(session, deps.current_token, cur.root if cur is not None else None)
     if text and not session.title:
@@ -433,7 +450,7 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
     after_tool = False
     try:
         async with agent.run_stream_events(
-                text, deps=deps, conversation=conv_in, usage_limits=usage_limits or DEFAULT_LIMITS,
+                prompt, deps=deps, conversation=conv_in, usage_limits=usage_limits or DEFAULT_LIMITS,
                 deferred_tool_results=deferred_tool_results) as events:
             async for ev in events:
                 if isinstance(ev, PartStartEvent) and isinstance(ev.part, TextPart):

@@ -124,6 +124,14 @@ def plan_retranslate(wd: WorkDir, ids: list[str]) -> dict | str:
     return {"ids": ids, "names": [names[i] for i in ids], "affected": affected, "hashes": hashes}
 
 
+def stale_extra(wd: WorkDir, affected: list[str]) -> int:
+    """이번 요청 밖에서 함께 다시 번역될 섹션 수 — 원문이 바뀌어 캐시에 없는 섹션(apply.stale_section_ids)."""
+    from md4paper.review import manifest as manifest_io
+    from md4paper.translate import apply
+
+    return len(apply.stale_section_ids(wd, manifest_io.load(wd)) - set(affected))
+
+
 def invalidate_cache(wd: WorkDir, hashes: list[str]) -> int:
     """번역 캐시에서 그 해시들을 지운다 (키는 그대로) — 다음 번역이 그 유닛만 새로 번역한다. 지운 수."""
     if not wd.cache_json.exists():
@@ -325,6 +333,9 @@ def describe_retranslate(args: dict, root: Path | None) -> str:
     out = f"{_names_text(plan['names'], len(ids))} 재번역 (LLM 비용 발생, {_model_text(translate_choice(wd))})"
     if len(plan["affected"]) > len(ids):
         out += f" · 묶인 이웃 포함 {len(plan['affected'])}개 섹션"
+    stale = stale_extra(wd, plan["affected"])
+    if stale:    # 원문이 바뀌어 캐시가 없는 섹션은 어느 번역 실행이든 함께 다시 번역된다
+        out += f" · 원문이 바뀐 섹션 {stale}개도 함께"
     if wd.load_status().get("manual_edit_ko"):
         out += " · 직접 고친 번역문은 덮어써짐"
     return out
