@@ -423,7 +423,9 @@ async def goto_row(ctx: RunContext[Deps], row: int, token: str | None = None) ->
         return "이 논문에서 읽을 수 있는 본문이 없습니다."
     if not 0 <= int(row) < n:
         return f"행 범위 밖입니다 (r0–r{n - 1})."
-    ctx.deps.ui_actions.put_nowait({"kind": "goto_row", "token": tok, "row": int(row)})
+    # url도 싣는다 — 브라우저는 토큰만으로 다른 논문의 주소(`/review?wd=<경로>`)를 만들 수 없다
+    ctx.deps.ui_actions.put_nowait({"kind": "goto_row", "token": tok, "row": int(row),
+                                    "url": review_url(wd.root)})
     where = "" if tok == ctx.deps.current_token else " (그 논문을 열고)"
     return f"화면을{where} r{int(row)}로 옮겼습니다."
 

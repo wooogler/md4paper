@@ -46,7 +46,7 @@ from md4paper.llm.base import Usage, cost_usd  # noqa: E402
 from md4paper.ui.agent import retrieval, sessions  # noqa: E402
 from md4paper.ui.agent.cites import note_tag, render_html, resolve_citations  # noqa: E402
 from md4paper.ui.agent.context import to_prompt  # noqa: E402
-from md4paper.ui.agent.tools import TOOLS, Deps  # noqa: E402
+from md4paper.ui.agent.tools import TOOLS, Deps, review_url  # noqa: E402
 
 DEFAULT_LIMITS = UsageLimits(request_limit=12, total_tokens_limit=60_000)
 MEMORY_MAX = 4000      # memory.md를 지시문에 넣는 글자 상한
@@ -210,6 +210,7 @@ def _clip(text: str | None) -> str | None:
 def _citations(refs: list, deps: Deps) -> list[dict]:
     """참조 목록 → 턴에 남길 인용 정보 (행 문단 원문·번역, 메모 내용)."""
     papers: dict[str, dict[int, retrieval.Chunk]] = {}
+    urls: dict[str, str] = {}
 
     def rows_of(tok: str) -> dict[int, retrieval.Chunk]:
         if tok not in papers:
@@ -217,17 +218,25 @@ def _citations(refs: list, deps: Deps) -> list[dict]:
             papers[tok] = retrieval.paper(wd).by_row() if wd is not None else {}
         return papers[tok]
 
+    def url_of(tok: str) -> str:
+        """칩이 다른 논문을 가리킬 때 창이 옮겨 갈 주소 (토큰만으로는 경로를 못 만든다)."""
+        if tok and tok not in urls:
+            wd = deps.wd_for(tok)
+            urls[tok] = review_url(wd.root) if wd is not None else ""
+        return urls.get(tok, "")
+
     out = []
     for i, ref in enumerate(refs):
         if isinstance(ref, tuple):
             tok, row = ref
             c = rows_of(tok).get(row)
-            out.append({"n": i + 1, "kind": "row", "token": tok, "row": row,
+            out.append({"n": i + 1, "kind": "row", "token": tok, "row": row, "url": url_of(tok),
                         "heading": c.heading if c else "", "en": _clip(c.en) if c else "",
                         "ko": _clip(c.ko) if c else None})
             continue
         n = deps.note_refs.get(ref, {})
-        out.append({"n": i + 1, "kind": "note", "token": str(n.get("token") or ""),
+        ntok = str(n.get("token") or "")
+        out.append({"n": i + 1, "kind": "note", "token": ntok, "url": url_of(ntok),
                     "id": str(n.get("id") or ref), "row": int(n.get("row") or 0),
                     "side": str(n.get("side") or "en"), "color": str(n.get("color") or "yellow"),
                     "quote": str(n.get("quote") or ""), "note": str(n.get("note") or "")})

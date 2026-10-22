@@ -78,6 +78,8 @@ def test_search_then_cite_renders_chip(tmp_path):
     assert f'data-kind="row" data-token="{tok}" data-row="{row}" data-n="1"' in done["html"]
     assert "999" not in done["html"]
     assert done["citations"][0]["token"] == tok and "interviewed 18" in done["citations"][0]["en"]
+    # 창이 다른 논문의 칩을 눌렀을 때 옮겨 갈 주소 — 토큰만으로는 경로를 못 만든다
+    assert done["citations"][0]["url"] == review_url(wd.root)
     assert done["pending"] is False and done["turn_id"]
 
     back = sessions.load(s.id)
@@ -98,7 +100,7 @@ def test_goto_row_and_open_paper_emit_ui_actions(tmp_path):
     actions = [e["data"] for e in events if e["event"] == "ui_action"]
     # 한 응답의 tool들은 동시에 돌 수 있어 순서는 따지지 않는다
     assert sorted(actions, key=lambda a: a["kind"]) == [
-        {"kind": "goto_row", "token": tok, "row": 3},
+        {"kind": "goto_row", "token": tok, "row": 3, "url": review_url(wd.root)},
         {"kind": "open_paper", "token": otok, "url": review_url(other.root)}]
     assert _names(events).index("ui_action") < _names(events).index("done")
     results = [e["data"]["summary"] for e in events if e["event"] == "tool_result"]
