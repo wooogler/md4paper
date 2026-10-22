@@ -430,8 +430,29 @@ def set_pinned(root: Path, pinned: bool = True) -> bool:
     return True
 
 
-def set_project(root: Path, project_id: str | None) -> bool:
-    """이 논문이 속한 프로젝트를 status.json에 적는다 (None이면 미분류로).
+def _projects_in(status: dict) -> list[str]:
+    """status.json에 적힌 소속 프로젝트 id들 — 순서 유지(첫 항목 = 주 프로젝트), 중복 없음.
+
+    옛 형식(`project` 하나)만 있으면 그 하나로 읽는다. `projects`가 있어도 옛 키 `project`와
+    첫 항목이 어긋나면 **옛 앱이 `project`만 고친 것**이다(설치된 앱과 같은 output/을 함께 쓴다)
+    → 그쪽이 최신이므로 `project` 하나로 읽는다. 없어진 id인지는 여기서 안 본다(호출자가 거른다).
+    """
+    one = str(status.get("project") or "")
+    many = status.get("projects")
+    if not isinstance(many, list):
+        return [one] if one else []
+    ids = list(dict.fromkeys(str(x) for x in many if x))
+    if (ids[0] if ids else "") != one:
+        return [one] if one else []
+    return ids
+
+
+def set_projects(root: Path, project_ids) -> bool:  # noqa: ANN001 — iterable[str]
+    """이 논문이 속한 프로젝트들을 status.json에 적는다 (빈 목록이면 미분류로).
+
+    논문 하나가 여러 프로젝트에 속할 수 있다 — 첫 항목이 주 프로젝트(이름 규칙·자동 저장처럼
+    논문에 걸리는 설정을 따를 곳, §projects). 새 키 `projects`와 함께 옛 키 `project`(첫 항목)도 쓴다:
+    설치된 앱(옛 코드)이 같은 output/을 읽으므로 그쪽에서도 주 프로젝트로는 보이게.
 
     프로젝트 id를 논문 쪽에 두는 이유: 목록을 훑을 때 한 번에 읽히고(status.json은 작다),
     프로젝트 설정 파일이 사라지거나 손으로 지워져도 논문이 사라지지 않는다.
@@ -440,12 +461,15 @@ def set_project(root: Path, project_id: str | None) -> bool:
     wd = WorkDir(Path(root))
     if not wd.root.is_dir():
         return False
+    ids = list(dict.fromkeys(str(x) for x in (project_ids or []) if x))
     try:
         before = wd.root.stat()
         status = wd.load_status()
-        if project_id:
-            status["project"] = str(project_id)
+        if ids:
+            status["projects"] = ids
+            status["project"] = ids[0]
         else:
+            status.pop("projects", None)
             status.pop("project", None)
         wd.save_status(status)
         try:
@@ -457,12 +481,39 @@ def set_project(root: Path, project_id: str | None) -> bool:
     return True
 
 
-def project_of(root: Path) -> str:
-    """이 논문에 적힌 프로젝트 id (없으면 빈 문자열). 없어진 프로젝트인지까지는 안 본다."""
+def projects_of(root: Path) -> list[str]:
+    """이 논문에 적힌 프로젝트 id들 (첫 항목 = 주 프로젝트). 없어진 프로젝트인지까지는 안 본다."""
     try:
-        return str(WorkDir(Path(root)).load_status().get("project") or "")
+        return _projects_in(WorkDir(Path(root)).load_status())
     except (OSError, ValueError):
-        return ""
+        return []
+
+
+def add_to_project(root: Path, project_id: str) -> bool:
+    """프로젝트에 **더하기** — 이미 속한 곳은 그대로, 새 프로젝트는 뒤에 붙는다(주 프로젝트 유지)."""
+    ids = projects_of(root)
+    if project_id in ids:
+        return Path(root).is_dir()
+    return set_projects(root, [*ids, project_id])
+
+
+def remove_from_project(root: Path, project_id: str) -> bool:
+    """프로젝트에서 **빼기** — 다른 소속은 그대로. 주 프로젝트를 빼면 다음 항목이 주가 된다."""
+    ids = projects_of(root)
+    if project_id not in ids:
+        return Path(root).is_dir()
+    return set_projects(root, [i for i in ids if i != project_id])
+
+
+def set_project(root: Path, project_id: str | None) -> bool:
+    """이 논문을 프로젝트 **하나에만** 두기 (None이면 미분류로) — 단일 소속 시절 API의 호환 래퍼."""
+    return set_projects(root, [project_id] if project_id else [])
+
+
+def project_of(root: Path) -> str:
+    """이 논문의 주 프로젝트 id (소속의 첫 항목, 없으면 빈 문자열). 없어진 프로젝트인지까지는 안 본다."""
+    ids = projects_of(root)
+    return ids[0] if ids else ""
 
 
 def is_pinned(root: Path) -> bool:
@@ -501,7 +552,8 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
     """작업 폴더에서 유효한 .md4 작업 디렉토리를 최근 수정순으로.
 
     반환 항목: {name, root(Path), title, authors, year, venue, has_ko, opened, hidden, pinned,
-    project, mtime}
+    projects, project, mtime} — `projects`는 소속 id 목록(첫 항목 = 주 프로젝트), `project`는 그
+    첫 항목(옛 호출자용). 둘 다 정규화 전이라 없어진 id는 호출자가 `projects.normalize_many`로 거른다.
     서지(authors/year/venue)는 paper_meta.json(LLM 추출)이 있으면 채우고, 없으면 빈 값.
     사용자가 숨긴 논문(status.json의 hidden)은 include_hidden일 때만 포함한다.
     고정한 논문(pinned)은 최근 limit 편 밖으로 밀려나도 목록에 남는다 — 고정의 뜻이 그것이다.
@@ -529,14 +581,14 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
                 pass
         opened = hidden = False
         pinned_at = 0.0
-        project = ""
+        member_of: list[str] = []
         st_path = md4 / "status.json"
         if st_path.exists():
             try:
                 st = json.loads(st_path.read_text(encoding="utf-8"))
                 opened, hidden = bool(st.get("opened_at")), bool(st.get("hidden"))
                 pinned_at = float(st.get("pinned_at") or 0.0)
-                project = str(st.get("project") or "")
+                member_of = _projects_in(st)
             except (OSError, ValueError, TypeError):
                 pass
         if hidden and not include_hidden:
@@ -553,7 +605,8 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
             "hidden": hidden,  # 사용자가 목록에서 감춘 논문 (파일은 그대로)
             "pinned": bool(pinned_at),  # 사용자가 위에 고정한 논문
             "pinned_at": pinned_at,     # 고정한 순서 (탭·칩 정렬용)
-            "project": project,         # 속한 프로젝트 id ("" = 미분류; 없어진 id는 UI가 미분류로)
+            "projects": member_of,      # 속한 프로젝트 id들 ([] = 미분류; 없어진 id는 호출자가 거른다)
+            "project": member_of[0] if member_of else "",  # 주 프로젝트 (옛 호출자용)
             "mtime": md4.stat().st_mtime,
         })
     found.sort(key=lambda d: d["mtime"], reverse=True)

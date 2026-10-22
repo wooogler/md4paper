@@ -151,11 +151,11 @@ def upscale(wd: WorkDir, pdf: Path) -> dict:
     new_by_digest = {_digest(f): png for f, png in new_png.items()}
 
     targets = [wd.out_images]
-    project = library.project_of(wd)
-    for which in library.WHICH:
-        d = library.dir_for(which, project)
-        if d is not None:
-            targets.append(d / "images" / wd.root.stem)
+    for project in library.export_targets(wd):  # 폴더 가진 소속 프로젝트마다 사본이 있다
+        for which in library.WHICH:
+            d = library.dir_for(which, project)
+            if d is not None:
+                targets.append(d / "images" / wd.root.stem)
     for d in dict.fromkeys(targets):  # 영어·한국어가 같은 폴더면 한 번만
         if not d.is_dir():
             continue

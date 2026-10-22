@@ -174,15 +174,21 @@ def _echo_layout(root) -> None:  # noqa: ANN001 — Path | str
     click.echo(f"  BibTeX: {spots['en'] / BIB_NAME}")
 
 
+def _in_project(row: dict, pid: str) -> bool:
+    """목록 행이 그 프로젝트에 속하는지 — 빈 문자열이면 미분류(없는 id를 거른 뒤 소속이 비었는지)."""
+    ids = projects.normalize_many(row.get("projects"))
+    return pid in ids if pid else not ids
+
+
 def _paper_counts() -> dict[str, int]:
-    """{프로젝트 id: 논문 수} — 미분류는 빈 문자열 키. 없어진 배정은 미분류로 센다."""
+    """{프로젝트 id: 논문 수} — 미분류는 빈 문자열 키. 여러 프로젝트에 속한 논문은 각각 센다."""
     from md4paper.workdir import recent_workdirs
 
     counts: dict[str, int] = {}
     rows = recent_workdirs(config.resolve_workspace(), limit=100_000, include_hidden=True)
     for row in rows:
-        pid = projects.normalize(row.get("project"))
-        counts[pid] = counts.get(pid, 0) + 1
+        for pid in projects.normalize_many(row.get("projects")) or [""]:
+            counts[pid] = counts.get(pid, 0) + 1
     return counts
 
 
@@ -191,7 +197,7 @@ def _project_roots(pid: str) -> list[Path]:
     from md4paper.workdir import recent_workdirs
 
     rows = recent_workdirs(config.resolve_workspace(), limit=100_000, include_hidden=True)
-    return [r["root"] for r in rows if projects.normalize(r.get("project")) == pid]
+    return [r["root"] for r in rows if _in_project(r, pid)]
 
 
 @cli.group("project", invoke_without_command=True)
@@ -238,20 +244,17 @@ def project_add(name: str, root: Path | None) -> None:
 @click.argument("name_or_id")
 @click.option("--yes", is_flag=True, help="확인 없이 삭제")
 def project_rm(name_or_id: str, yes: bool) -> None:
-    """프로젝트 삭제 — 그 논문들은 미분류가 된다. 폴더·파일은 그대로 둔다."""
-    from md4paper.workdir import set_project
-
+    """프로젝트 삭제 — 그 논문들에서 이 프로젝트만 뗀다(다른 소속은 그대로). 폴더·파일은 그대로 둔다."""
     proj = _find_project(name_or_id)
     roots = _project_roots(proj["id"])
     if not yes:
-        click.echo(f"'{proj['name']}' 삭제 — 논문 {len(roots)}편이 미분류가 됩니다 "
-                   "(폴더·파일은 그대로).")
+        click.echo(f"'{proj['name']}' 삭제 — 논문 {len(roots)}편이 이 프로젝트에서 빠집니다 "
+                   "(다른 프로젝트 소속·폴더·파일은 그대로).")
         if not click.confirm("계속할까요?", default=False):
             click.echo("취소됨.")
             return
-    cleared = sum(1 for root in roots if set_project(root, None))
-    projects.delete(proj["id"])
-    click.echo(f"삭제됨: {proj['name']} — 논문 {cleared}편 배정 해제")
+    projects.delete(proj["id"], config.resolve_workspace())
+    click.echo(f"삭제됨: {proj['name']} — 논문 {len(roots)}편 배정 해제")
     click.echo("폴더와 그 안의 파일은 지우지 않았습니다 — 필요하면 직접 정리하세요.")
 
 
@@ -362,8 +365,9 @@ def project_use(name_or_id: str | None, pick_none: bool, pick_all: bool) -> None
 @click.argument("workdirs", nargs=-1, required=True,
                 type=click.Path(exists=True, file_okay=False, path_type=Path))
 def project_assign(name_or_id: str, workdirs: tuple[Path, ...]) -> None:
-    """논문(.md4 폴더)을 그 프로젝트로 옮긴다 — 저장 위치 사본도 새 자리로 따라간다.
+    """논문(.md4 폴더)을 그 프로젝트 하나로 옮긴다 — 저장 위치 사본도 새 자리로 따라간다.
 
+    다른 소속이 있었다면 함께 정리된다(여러 프로젝트에 두기는 홈 화면에서).
     NAME_OR_ID에 'none'(미분류)을 주면 배정을 해제한다.
     """
     from md4paper import library
@@ -373,9 +377,9 @@ def project_assign(name_or_id: str, workdirs: tuple[Path, ...]) -> None:
     moved = files = 0
     for path in workdirs:
         wd = WorkDir(path)
-        before = library.project_of(wd)
+        before = library.projects_of(wd)
         written = library.reassign(wd, pid)
-        if library.project_of(wd) == before:
+        if library.projects_of(wd) == before:
             click.echo(f"  {path.stem}: 이미 {label}")
             continue
         moved += 1
@@ -499,7 +503,7 @@ def bib_cmd(project_ref: str | None, do_all: bool) -> None:
         else:
             picked = projects.assign_target()  # 고른 게 실제 프로젝트일 때만, 아니면 미분류
         label = projects.name_of(picked)
-        rows = [r for r in rows if projects.normalize(r.get("project")) == picked]
+        rows = [r for r in rows if _in_project(r, picked)]
     if not rows:
         click.echo(f"{label}에 속한 논문이 없습니다.")
         return
@@ -508,13 +512,15 @@ def bib_cmd(project_ref: str | None, do_all: bool) -> None:
     done = skipped = 0
     written: list[Path] = []  # 프로젝트마다 .bib가 달라 여러 곳이 될 수 있다 (순서 유지)
     for row in rows:
-        out = library.export_bib(WorkDir(row["root"]))
-        if out is None:
+        wd = WorkDir(row["root"])
+        # 여러 프로젝트에 속한 논문은 폴더를 가진 소속마다 .bib가 있다
+        outs = [out for dest in library.export_targets(wd)
+                if (out := library.export_bib(wd, dest)) is not None]
+        if not outs:
             skipped += 1
             continue
         done += 1
-        if out not in written:
-            written.append(out)
+        written += [out for out in outs if out not in written]
     click.echo(f"{done}편 반영" + (f" · {skipped}편 건너뜀 (서지 정보 없음)" if skipped else ""))
     for path in written:
         click.echo(f"  {path} — 항목 {len(bibtex.keys_in(path))}개")

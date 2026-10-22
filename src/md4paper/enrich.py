@@ -262,8 +262,10 @@ def project_roots(project: str | None = None, workspace=None) -> list:  # noqa: 
             ("" if picked == projects.NONE else picked)
     if project == ALL:
         return [r["root"] for r in rows]
-    want = "" if project in ("", projects.NONE) else projects.normalize(project)
-    return [r["root"] for r in rows if projects.normalize(r.get("project")) == want]
+    if project in ("", projects.NONE):  # 미분류 = 없는 id를 거른 뒤 소속이 빈 논문
+        return [r["root"] for r in rows if not projects.normalize_many(r.get("projects"))]
+    # 여러 프로젝트에 속한 논문은 그 어느 프로젝트를 골라도 범위에 든다
+    return [r["root"] for r in rows if project in projects.normalize_many(r.get("projects"))]
 
 
 class Stopped(Exception):
