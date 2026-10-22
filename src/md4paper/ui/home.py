@@ -34,7 +34,9 @@ import time
 from pathlib import Path
 
 from md4paper import config, library, projects
-from md4paper.ui import desktop, find_bar, jobs, scroll_memory, settings_dialog, spa, update_banner
+from md4paper.ui import (
+    agent_panel, desktop, find_bar, jobs, scroll_memory, settings_dialog, spa, update_banner,
+)
 from md4paper.workdir import WorkDir
 
 # 카드를 사이드바로 끌 때 dataTransfer에 싣는 형식 — 파일 끌기('Files')와 섞이지 않게 따로 둔다
@@ -354,8 +356,10 @@ def build_home(state: dict) -> None:
     spa.add_css(settings_dialog.CSS)
     spa.add_body_html(_EXTLINK_HTML)  # 바깥 링크는 새 창(앱 창이면 시스템 브라우저)으로
     spa.add_body_html(_DRAG_HTML)
+    spa.add_body_html(f"<script>{agent_panel.init_js(None)}</script>")  # 에이전트 창: 지금 연 논문 없음
     # 논문 화면에서 열어 둔 서랍·툴팁(본문 밖 오버레이라 화면을 갈아 끼워도 남는다)은 홈에서 닫는다
-    ui.run_javascript("document.querySelectorAll('#md-anno-panel.open, #md-chat-panel.open')"
+    # (에이전트 창은 닫지 않는다 — 논문을 가로지르는 대화라 홈에서도 이어 쓴다)
+    ui.run_javascript("document.querySelectorAll('#md-anno-panel.open')"
                       ".forEach(function(e){ e.classList.remove('open'); });"
                       "var t = document.getElementById('md-cite-tip'); if (t) t.style.opacity = '0';"
                       "document.documentElement.classList.remove('md4-filedrag');")

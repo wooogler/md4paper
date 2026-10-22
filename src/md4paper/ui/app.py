@@ -17,7 +17,7 @@ from md4paper import config, formula_fix, library, projects
 from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
-    annotations, chat_panel, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, mdrender, reanchor,
+    agent_panel, annotations, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, mdrender, reanchor,
     scroll_memory, sentpair, spa, tabstore, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
@@ -372,7 +372,7 @@ mark.md-anno.md-anno-flash { animation: mdAnnoFlash 1.3s ease-out; }
   background: #fff; color: inherit; outline: none; }
 #md-anno-pop textarea:focus { border-color: #2383e2; }
 
-/* 오른쪽 목록 서랍 — 챗봇 서랍과 같은 규칙: 본문을 덮지 않고 오른쪽을 차지한다.
+/* 오른쪽 목록 서랍 — 에이전트 창과 같은 규칙: 본문을 덮지 않고 오른쪽을 차지한다.
    (--ma-top은 헤더를 실제로 재서 넣는다. 헤더 높이가 고정이 아니라 상수로 두면 탭 라벨을 가린다.) */
 :root { --ma-w: 360px; --ma-top: 50px; }
 #md-anno-panel { position: fixed; top: var(--ma-top); right: 0; bottom: 0; width: var(--ma-w); z-index: 9000;
@@ -924,7 +924,7 @@ _ANNO_HTML = """
     }
     afterScroll(function(){ openPop(id); });
   });
-  // 'open'은 여러 경로에서 붙었다 뗀다(버튼·✕·Esc·챗봇 서랍이 열릴 때). 한 곳에서 관찰해
+  // 'open'은 여러 경로에서 붙었다 뗀다(버튼·✕·Esc·에이전트 창이 열릴 때). 한 곳에서 관찰해
   // body 클래스를 맞춰야 본문 자리 비우기가 어느 경로로 닫아도 따라온다.
   function syncBody(){ document.body.classList.toggle('ma-open', panel.classList.contains('open')); }
   function syncTop(){
@@ -2408,6 +2408,11 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
             .tooltip("논문 열기 — 변환된 논문을 골라 새 탭으로")
         with ui.row().classes("items-center gap-0 no-wrap md4-tabtools"):
             jobs_menu()
+            if here_key is None:  # 홈 — 에이전트 창 여는 단추 (뷰어는 캔버스 툴바의 forum 단추가 맡는다)
+                ui.button(icon="forum", color=None, on_click=lambda: ui.run_javascript(
+                    "window.__md4Agent && window.__md4Agent.toggle()")) \
+                    .props("flat dense round size=sm text-color=white").classes("md4-agentbtn") \
+                    .tooltip("에이전트 — 라이브러리의 논문을 찾아 읽고 답합니다")
             if tools is not None:
                 tools()
 
@@ -2964,9 +2969,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ui.notify(msg, type="positive")
 
     ui.on("md4-fx-apply", on_formula_apply)
-    spa.add_css(chat_panel.CSS)  # 뷰어 챗봇 서랍 — 질문 → 정렬 문단 근거 답변
-    spa.add_body_html(f"<script>{chat_panel.init_js(tok, *chat_panel.readiness())}</script>")
-    spa.add_body_html(chat_panel.HTML)
+    spa.add_body_html(f"<script>{agent_panel.init_js(tok)}</script>")  # 에이전트 창(셸에 붙음)에 지금 논문을 알린다
 
     def push_cite_tips() -> None:
         """참고문헌을 (재)파싱한 뒤 클라이언트 툴팁 맵을 갱신한다."""
@@ -3753,8 +3756,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
                 .tooltip("하이라이트 · 메모 목록 — 드래그하면 그 자리에, 문장을 더블클릭하면 원문·번역 양쪽에")
             ui.button(icon="forum", on_click=lambda: ui.run_javascript(
-                "window.__mdChatTogglePanel && window.__mdChatTogglePanel()")).props(
-                "flat dense round color=grey-7").tooltip("논문에 질문하기 — 답의 근거 문단을 원문·번역으로 확인")
+                "window.__md4Agent && window.__md4Agent.toggle()")).props(
+                "flat dense round color=grey-7").tooltip("에이전트 — 이 논문·라이브러리에 묻고, 근거 문단으로 이동")
             ui.space()
             library_button()
             # 내보내기는 메뉴 하나로 — 세 단추가 툴바 폭을 먹던 것을 접는다. 형식 선택도 같은 메뉴 안에.
@@ -5336,7 +5339,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     with chip_slot:  # 헤더 상태 칩 — 패널보다 먼저 그린다(번역 중에 돌아온 화면은 패널을 짓다가 칩을 갱신한다)
         status_chip()
 
-    # md4-steps: 챗봇·메모 서랍이 열리면 이 폭이 줄어 본문이 덮이지 않는다 (§chat_panel.CSS)
+    # md4-body: 에이전트 창·메모 서랍이 열리면 이 폭이 줄어 본문이 덮이지 않는다 (§agent_panel.CSS)
     with ui.row().classes("w-full no-wrap gap-0 md4-steps md4-body"):
         with ui.column().classes("md4-rail gap-0"):
             rail()
@@ -5659,7 +5662,14 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         saved = annotations.save(cur, body.get("items"), backup=bool(body.get("repaired")))
         return {"ok": True, "count": len(saved)}
 
-    chat_panel.register_routes(fastapi_app, _wd_for)  # 뷰어 챗봇 — /chat/{token}
+    # 에이전트 창 — /agent/... (세션·SSE 턴·모델). 모르는 토큰은 404여야 하므로 current_wd로
+    # 폴백하는 _wd_for가 아니라 등록부만 본다(창이 여럿이면 엉뚱한 논문을 읽게 된다).
+    from md4paper.ui.agent import routes as agent_routes
+
+    agent_routes.register_routes(
+        fastapi_app, wd_for=lambda t: state["wd_by_token"].get(t),
+        register_token=lambda w: (_register_wd(w), wd_token(w.root))[1],
+        workspace=lambda: state["upload_dir"])
     formula_pop.register_routes(fastapi_app, _wd_for)
     figure_crop.register_routes(fastapi_app, _wd_for)  # 그림 영역 다시 지정 — /figure/{token}/{name}  # 수식 원본 크롭·다시 생성 — /formula/{token}/{id}
     fastapi_app.add_static_files(CREPE_URL, CREPE_DIR)  # 메모 패널 위지윅 편집기 번들
@@ -5694,6 +5704,9 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     def shell() -> None:
         ui.add_head_html(spa.HEAD_HTML + _PREPAINT_HTML)
         spa.make_header()
+        # 에이전트 창 — 셸에 붙어 화면을 갈아 끼워도 대화가 남는다. 하위 화면보다 **먼저** 넣어야
+        # 첫 화면(뷰어·홈)이 부르는 setPaper가 이미 떠 있는 창에 닿는다.
+        agent_panel.install(state)
         # w-full: 없으면 sub_pages 상자가 내용 폭으로 줄어(큰 화면에서 1275px) 변환·번역 탭 splitter가 좁아진다
         ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view}).classes("w-full")
         update_banner.install(state)  # 새 버전 알림 — 셸에 붙어 탭을 옮겨도 남는다
