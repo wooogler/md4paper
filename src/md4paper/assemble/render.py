@@ -12,6 +12,7 @@ import shutil
 
 from md4paper.assemble import figures
 from md4paper.ir import Flavor, Manifest
+from md4paper.structure import numbering
 from md4paper.workdir import WorkDir
 
 # 베어 파일명 이미지 링크(경로/URL 아님)를 images/ 로 접두 — marker가 짝 못 지은 이미지 링크 수정
@@ -132,7 +133,9 @@ def render_markdown(raw_md: str, manifest: Manifest) -> tuple[str, list[dict], d
         elif level == "merge-up":
             pass  # 헤더 제거 — 본문에 흡수
         elif level == "italic":
-            out_lines.append(f"*{sec.text}*")  # 헤더 아님 → 이탤릭 문단
+            # 헤더 아님 → 이탤릭 문단. 라벨에 내용이 붙은 앞부분 줄은 라벨만 기울인다
+            label, rest = numbering.split_front_matter_label(sec.text)
+            out_lines.append(f"*{label}* {rest}" if rest else f"*{sec.text}*")
         elif level == "skip":
             out_lines.append(sec.text)  # 헤더 아님 → 일반 문단
         else:

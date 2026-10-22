@@ -104,3 +104,14 @@ def test_front_matter_labels():
     assert numbering.is_front_matter_label("Index Terms—Agents, preferences")
     assert not numbering.is_front_matter_label("Keyword Extraction for Search")  # 본문 제목
     assert not numbering.is_front_matter_label("Design Implications")
+    assert numbering.is_front_matter_label("ACMReference Format:")  # 추출기가 공백을 잃은 판
+    assert numbering.is_front_matter_label("KEYWORDS")
+    assert numbering.is_front_matter_label("ACM Classification Keywords")
+    assert numbering.is_front_matter_label("Categories and Subject Descriptors")
+    assert not numbering.is_front_matter_label("8.3 Keywords")  # 번호 붙은 본문 절
+
+
+def test_split_front_matter_label():
+    assert numbering.split_front_matter_label("CCS Concepts: · HCI → Systems.") == ("CCS Concepts:", "· HCI → Systems.")
+    assert numbering.split_front_matter_label("KEYWORDS") == ("KEYWORDS", "")
+    assert numbering.split_front_matter_label("Design Notes") == ("Design Notes", "")

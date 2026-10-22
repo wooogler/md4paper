@@ -25,6 +25,7 @@ _RULES_VERSION = 1
 _ABSTRACT_CAP = 2500  # 여러 문단짜리 초록을 이어 붙일 때 상한(자)
 _MIN_ABSTRACT = 150  # '가장 긴 문단'이 이보다 짧으면 초록이 아니라고 본다
 _THUMB_MAX = 900  # PDF 1쪽 썸네일의 긴 변 상한(px)
+USER_SRC = "user"  # 초록 출처 표지 — 사용자가 손으로 고쳤다(md가 바뀌어도 다시 뽑지 않는다)
 
 # 번호 매긴 절 헤딩: '# 1 Introduction', '# 1. 서론', '## 1', '# I. INTRODUCTION'
 _NUM_HEAD = re.compile(r"^#{1,6}\s+(?:\d+|[IVX]+)\.?(?:\s|$)")
@@ -46,7 +47,7 @@ _ABS_LEAD = re.compile(
     r"|^(?-i:(?:Abstract|ABSTRACT)\s+(?=[A-Z]))", re.I)  # 'Abstract The …'(구두점 없이 붙은 표시)
 # 머리말 '목록류' 문단(헤딩·굵은 글씨·맨 글자 모두) — 헤딩이면 그 아래 문단까지 건너뛴다
 _META = re.compile(
-    r"^(?:#{1,6}\s*|\*\*)?\s*(?:acm reference format|ccs concepts|categories and subject descriptors|"
+    r"^(?:#{1,6}\s*|\*{1,2}|_{1,2})?\s*(?:acm reference format|ccs concepts|categories and subject descriptors|"
     r"keywords?|index terms|general terms|additional key words|author keywords|"
     r"키워드|주제어|핵심어|ccs\s*개념|acm\s*참고\s*형식)", re.I)
 # 저작권·식별자·게재 정보 문단 (문단 머리에서만 본다 — 초록 끝에 붙은 저작권 한 줄 때문에 초록을 버리지 않게)
@@ -152,7 +153,7 @@ def extract_abstract(md: str) -> str:
     # 2) 표시가 없으면 가장 긴 평문 문단 (쪽 나눔으로 쪼개진 문단은 다시 잇는다)
     best, run, skip = "", "", False
     for b in region:
-        if _is_heading(b):
+        if _is_heading(b) or (_META.match(b) and len(b) < 60):  # 기울임 라벨 문단('*CCS Concepts*')도 헤딩처럼
             skip = bool(_META.match(b))  # 키워드·CCS 헤딩 아래 문단은 건너뛴다
             run = ""
             continue
@@ -264,14 +265,17 @@ def abstract_of(wd: WorkDir, lang: str = "en") -> str:
 
     결과는 `<wd.root>/preview.json`에 `abstract`(en) / `abstract_ko`(ko)로 캐시하고, 원본 md의
     수정시각·크기가 그대로면 캐시를 돌려준다. 못 찾은 결과("")도 캐시한다(매번 다시 뒤지지 않게).
+    사용자가 고친 초록(`set_abstract`, 출처 표지 "user")은 md가 바뀌어도, 없어도 그대로 돌려준다.
     """
     md = wd.ko_md if lang == "ko" else wd.en_md
     key = "abstract_ko" if lang == "ko" else "abstract"
+    cache = _load_cache(wd)
+    if cache.get(f"{key}_src") == USER_SRC and isinstance(cache.get(key), str):
+        return cache[key]  # 사용자 수정이 이긴다 — md 표지보다 먼저 본다
     try:
         sig = _signature(md)
     except OSError:
         return ""  # md 없음
-    cache = _load_cache(wd)
     if cache.get(f"{key}_src") == sig and isinstance(cache.get(key), str):
         return cache[key]
     try:
@@ -283,6 +287,21 @@ def abstract_of(wd: WorkDir, lang: str = "en") -> str:
     if wd.root.is_dir():
         _save_cache(wd, cache)
     return text
+
+
+def set_abstract(wd: WorkDir, lang: str, text: str) -> None:
+    """초록을 사용자 값으로 고정 — preview.json의 `abstract`(en)/`abstract_ko`(ko)에 쓰고 출처를 "user"로.
+
+    빈 문자열도 그대로 사용자 값이다(엉뚱한 문단이 뽑혀 일부러 지운 경우 다시 살아나지 않게).
+    폴더 수정시각은 되돌린다(`_save_cache`) — 초록을 고쳤다고 목록 맨 위로 튀지 않게.
+    """
+    if lang not in ("en", "ko"):
+        raise ValueError(f"초록 언어는 en·ko 중 하나여야 합니다: {lang!r}")
+    key = "abstract_ko" if lang == "ko" else "abstract"
+    cache = _load_cache(wd)
+    cache[key] = str(text or "").strip()
+    cache[f"{key}_src"] = USER_SRC
+    _save_cache(wd, cache)
 
 
 # --- 대표 이미지 ---------------------------------------------------------------
