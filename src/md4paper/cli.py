@@ -445,6 +445,144 @@ def project_export(name_or_id: str) -> None:
             click.echo(f"  {_KIND_LABEL[which]}: {d}")
 
 
+_POLICIES = ("translate", "transliterate", "keep", "병기-first-use")
+
+
+def _parse_set(spec: str):  # noqa: ANN202 — GlossaryEntry
+    """`--set "term=korean[:policy]"` 한 개 → GlossaryEntry. 번역어에 ':'가 들어갈 수 있어 맨 끝 ':' 뒤가
+    처리 방식 이름일 때만 policy로 뗀다."""
+    from md4paper.ir import GlossaryEntry
+
+    term, eq, rest = spec.partition("=")
+    if not eq or not term.strip():
+        raise click.BadParameter(f"'{spec}' — term=korean[:policy] 형식이어야 합니다", param_hint="--set")
+    korean, policy = rest, "translate"
+    head, colon, tail = rest.rpartition(":")
+    if colon and tail.strip() in _POLICIES:
+        korean, policy = head, tail.strip()
+    return GlossaryEntry(term=term.strip(), korean=korean.strip(), policy=policy)
+
+
+@project_group.command("glossary")
+@click.argument("name_or_id")
+@click.option("--conflicts", "show_conflicts", is_flag=True,
+              help="소속 논문 용어집에서 번역어·처리 방식이 어긋난 용어 (변이·편수)")
+@click.option("--shared", "show_shared", is_flag=True, help="어긋나지 않고 2편 이상이 같이 쓰는 용어 (올릴 후보)")
+@click.option("--impact", "show_impact", is_flag=True,
+              help="다음 번역 때 다시 번역될 논문·섹션·대략 비용")
+@click.option("--edit", "edit", is_flag=True, help="$EDITOR로 컬렉션 용어집 YAML 편집")
+@click.option("--set", "sets", multiple=True, metavar="TERM=KOREAN[:POLICY]",
+              help="항목 넣기(여러 번 가능) — 같은 용어가 있으면 그 자리에서 바꾼다")
+def project_glossary(name_or_id: str, show_conflicts: bool, show_shared: bool, show_impact: bool,
+                     edit: bool, sets: tuple[str, ...]) -> None:
+    """컬렉션 용어집 — 소속 논문 모두에 논문 용어집보다 우선 적용되는 용어 목록.
+
+    \b
+    옵션 없이 부르면 지금 용어집을 보여 준다. 고치면 그 용어가 나오는 섹션만 '원문 바뀜'이 되어
+    다음 `md4paper translate`(또는 웹 UI 번역) 때 다시 번역된다.
+    \b
+      --conflicts  논문들이 어긋나게 쓴 용어      --shared  같이 쓰는 용어
+      --impact     다시 번역될 곳·대략 비용       --edit    $EDITOR로 편집
+      --set "mental model=정신 모형:translate"  (여러 번 가능)
+    """
+    from md4paper.ir import GlossaryList
+    from md4paper.translate import glossary
+    from md4paper.workdir import paper_title
+
+    proj = _find_project(name_or_id)
+    pid, label = proj["id"], proj["name"]
+    ws = config.resolve_workspace()
+
+    if sets:
+        entries = list(glossary.load_collection(pid).entries)
+        at = {glossary.term_key(e.term): i for i, e in enumerate(entries)}
+        added = changed = 0
+        for spec in sets:
+            e = _parse_set(spec)
+            key = glossary.term_key(e.term)
+            if key in at:
+                entries[at[key]] = e
+                changed += 1
+            else:
+                at[key] = len(entries)
+                entries.append(e)
+                added += 1
+        glossary.save_collection(pid, GlossaryList(entries=entries))
+        click.echo(f"{label} 용어집: 추가 {added} · 바꿈 {changed} → {glossary.collection_path(pid)}")
+    if edit:
+        _edit_collection_glossary(pid)
+
+    if show_conflicts:
+        by_paper = glossary.collection_entries_by_paper(pid, ws)
+        items = glossary.conflicts(by_paper)
+        have = {glossary.term_key(e.term): e for e in glossary.load_collection(pid).entries}
+        click.echo(f"{label}: 용어집이 있는 논문 {len(by_paper)}편 · 어긋난 용어 {len(items)}개")
+        for c in items:
+            cur = have.get(c.key)
+            mark = click.style(f"  ✓ {cur.korean} ({cur.policy})", fg="green") if cur else ""
+            click.echo(f"{c.term}  [{c.paper_count}편]{mark}")
+            for v in c.variants:
+                click.echo(f"    {v.korean or '(빈 칸)'} ({v.policy}) · {len(v.papers)}편")
+    if show_shared:
+        items = glossary.shared(glossary.collection_entries_by_paper(pid, ws))
+        click.echo(f"{label}: 2편 이상이 같은 번역어로 쓰는 용어 {len(items)}개")
+        for term, korean, policy, papers in items:
+            click.echo(f"  {term} → {korean} ({policy}) · {len(papers)}편")
+    if show_impact:
+        rows = glossary.impact(pid, ws)
+        if not rows:
+            click.echo(f"{label}: 낡은 번역 없음 — 다시 번역될 곳이 없습니다.")
+        for r in rows:
+            click.echo(f"  {paper_title(r['root'])[:60]} · 섹션 {len(r['stale'])}개 · {r['model']} "
+                       f"· ≈ ${r['est_cost_usd']:.3f}")
+        if rows:
+            secs = sum(len(r["stale"]) for r in rows)
+            cost = sum(r["est_cost_usd"] for r in rows)
+            click.echo(f"합계: 논문 {len(rows)}편 · 섹션 {secs}개 · ≈ ${cost:.2f} (대략)")
+            click.echo("다시 번역: 논문마다 `md4paper translate <논문>.md4 --yes` (바뀐 섹션만 새로 번역)")
+
+    if not (sets or edit or show_conflicts or show_shared or show_impact):
+        entries = glossary.load_collection(pid).entries
+        click.echo(f"{label} 용어집 ({len(entries)}개) — 소속 논문 번역에 논문 용어집보다 우선")
+        for e in entries:
+            click.echo(f"  {e.term} → {e.korean} ({e.policy})")
+        if not entries:
+            click.echo("  (비어 있음)")
+            arg = _as_arg(label)
+            click.echo(f"충돌 보기: md4paper collection glossary {arg} --conflicts · "
+                       f'넣기: --set "term=번역어[:policy]" · 편집: --edit')
+
+
+def _edit_collection_glossary(pid: str) -> None:
+    """컬렉션 용어집 click.edit 라운드트립 — 저장 시 YAML을 읽어 보고, 실패하면 다시 연다(_edit_manifest 방식)."""
+    import tempfile
+
+    from md4paper.ir import GlossaryList
+    from md4paper.translate import glossary
+
+    path = glossary.collection_path(pid)
+    text = path.read_text(encoding="utf-8") if path.exists() else glossary.to_yaml(
+        GlossaryList(entries=[]), header=glossary._COLLECTION_HEADER)  # noqa: SLF001 — 같은 머리 주석
+    while True:
+        edited = click.edit(text, extension=".yaml")
+        if edited is None:
+            click.echo("변경 없음.")
+            return
+        try:
+            with tempfile.TemporaryDirectory() as tmp:  # 저장 전에 읽혀지는지 — 깨진 YAML로 덮지 않게
+                probe = Path(tmp) / "probe.yaml"
+                probe.write_text(edited, encoding="utf-8")
+                gloss = glossary.load_path(probe)
+        except Exception as e:  # noqa: BLE001 — 검증 오류를 주석으로 보여주고 재오픈
+            text = f"# ⚠ 읽기 실패: {e}\n# 위 오류를 고치고 다시 저장하세요.\n" + edited
+            if not click.confirm("YAML을 읽지 못했습니다. 다시 편집할까요?", default=True):
+                return
+            continue
+        glossary.save_collection(pid, gloss)
+        click.echo(f"저장됨: {len(gloss.entries)}개 → {path}")
+        return
+
+
 @cli.command("library")
 @click.option("--root", "root_dir", type=click.Path(path_type=Path), default=None,
               help="공통 저장 위치를 폴더 하나로 정리 (en은 루트, 번역은 ko/, PDF는 pdf/)")

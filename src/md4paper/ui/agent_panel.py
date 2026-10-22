@@ -25,6 +25,7 @@ PANEL_ID = "md4-agent"           # body 직속 서랍 id — spa.add_body_html�
 PANEL_Z = 9000                   # 메모 서랍(#md-anno-panel)과 같은 층 — 둘은 번갈아 열린다
 NAV_EVENT = "md4-agent-nav"      # JS → 서버: SPA 화면 이동 요청 (JS는 ui.sub_pages 이동을 직접 못 한다)
 NOTES_REFRESH_EVENT = "md4-notes-refresh"   # JS → 서버: 에이전트가 메모 파일을 고쳤다 — 뷰어 메모 패널
+GLOSSARY_REFRESH_EVENT = "md4-glossary-refresh"   # JS → 서버: 컬렉션 용어집이 바뀌었다 — 뷰어 용어집·원문 바뀜
                                             # (app.py notes_panel)이 파일을 다시 읽어 편집기를 맞춘다
 ANNO_RELOAD_API = "__mdAnnoReload"          # 뷰어 하이라이트 스크립트(app.py)가 내놓는 다시 칠하기 함수
 
@@ -1308,12 +1309,18 @@ JS = r"""
       if (a.token && a.token === paper && onReview()) return;   // 이미 그 논문
       nav(a.url);
     } else if (a.kind === 'refresh'){
-      refreshView(a.what, a.token);
+      refreshView(a.what, a.token, a.collection);
     }
   }
   // 쓰기 tool이 파일을 고친 뒤 — 지금 화면이 그것을 보여 주고 있으면 다시 그린다.
   // 메모·하이라이트는 지금 뷰어의 논문일 때만(다른 논문이면 열 때 새로 읽으므로 할 일이 없다).
-  function refreshView(what, tok){
+  function refreshView(what, tok, coll){
+    if (what === 'glossary'){
+      // 컬렉션 용어집 — 논문 token이 없다(컬렉션 단위). 뷰어면 서버가 그 논문의 컬렉션인지 보고 용어집 표·
+      // '원문 바뀜'을 다시 그린다. 홈은 할 일이 없다(용어집 대화상자는 열 때 파일을 읽는다)
+      if (onReview() && typeof emitEvent === 'function') emitEvent('md4-glossary-refresh', {collection: coll || ''});
+      return;
+    }
     if (what === 'library'){
       // 홈의 목록·컬렉션 칩은 서버가 짓는다 — 본문(sub_pages)만 다시 짓게 한다. 같은 주소로 가는
       // ui.navigate.to는 sub_pages가 '이미 그 화면'으로 보고 다시 짓지 않아 refresh 표시를 붙인다

@@ -733,3 +733,63 @@ def test_save_notes_conflict_and_trash(ctrl):
     with pytest.raises(notes.Conflict):
         ctrl.save_notes("#", expect=st)
     assert ctrl.notes() == "외부 편집\n"
+
+
+# --- 컬렉션 용어집 (주 컬렉션 용어집 · effective) ---
+
+@pytest.fixture
+def _coll_config(tmp_path, monkeypatch):
+    """컬렉션 용어집은 CONFIG_DIR/glossary에 쌓인다 — 테스트 사이로 새지 않게 tmp로."""
+    from md4paper import config, projects
+
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / "cfg")
+    (tmp_path / "cfg").mkdir()
+    monkeypatch.setattr(projects, "PROJECTS_PATH", tmp_path / "cfg" / "projects.json")
+
+
+def test_collection_and_effective_glossary(ctrl, _coll_config):
+    from md4paper import projects, workdir
+    from md4paper.ir import GlossaryEntry, GlossaryList
+    from md4paper.translate import glossary
+
+    ctrl.save_glossary([GlossaryEntry(term="encoder", korean="인코더"), GlossaryEntry(term="decoder", korean="디코더")])
+    assert ctrl.collection_id() == "" and ctrl.collection_glossary() == []  # 미분류 — 컬렉션 없음
+    pid = projects.create("NIRVANA")["id"]
+    workdir.set_projects(ctrl.wd.root, [pid])
+    glossary.save_collection(pid, GlossaryList(entries=[GlossaryEntry(term="Encoder", korean="부호기")]))
+    assert ctrl.collection_id() == pid
+    assert [(e.term, e.korean) for e in ctrl.collection_glossary()] == [("Encoder", "부호기")]
+    entries, origin = ctrl.effective_glossary()
+    assert [(e.term, e.korean) for e in entries] == [("Encoder", "부호기"), ("decoder", "디코더")]
+    assert origin == {"encoder": "collection", "decoder": "paper"}
+    assert [e.korean for e in ctrl.glossary_entries()] == ["인코더", "디코더"]  # 논문 용어집 파일은 그대로
+
+
+def test_formula_fix_rekeys_cache_with_effective_glossary(tmp_path, _coll_config):
+    """수식 하나를 고쳐도 용어가 든 유닛의 번역이 그대로 이어진다 — 캐시 키를 effective 용어집으로 옮겨서.
+
+    유닛 해시는 '원문 + 그 원문에 나오는 용어집 줄'이다. rekey_cache에 용어집을 안 넘기면 평문 해시로 찾다
+    못 찾아, 그 섹션이 '원문 바뀜'으로 남아 다음 번역에 비용이 든다.
+    """
+    import json
+
+    from md4paper.ir import GlossaryEntry
+    from md4paper.llm import FakeProvider
+
+    src = tmp_path / "paper.md"
+    src.write_text("# A Paper\n\n## 1 Intro\n\nWe define the score.\n\n$$a + b \\tag{1}$$\n\nThen the rest.\n",
+                   encoding="utf-8")
+    wd = WorkDir(tmp_path / "paper.md4")
+    pipeline.convert(src, wd)
+    wd.extract_images.mkdir(parents=True, exist_ok=True)
+    (wd.extract_images / "formula-01.png").write_bytes(b"\x89PNG fake")
+    wd.formulas_json.write_text(json.dumps([{"id": "formula-01", "file": "formula-01.png", "page": 3,
+                                             "orig": "a + b", "number": "1", "latex": "a + b",
+                                             "kind": "display"}]), encoding="utf-8")
+    c = UIController(wd)
+    c.save_glossary([GlossaryEntry(term="score", korean="점수")])  # 수식이 든 유닛에 나오는 용어
+    c.translate(FakeProvider(complete_fn=lambda s, u: u, model="fake-tr"), "해라체")
+    assert c.stale_sections() == set()
+    res = c.apply_formula("formula-01", "a - b", "display")
+    assert res["ko"] and res["cache_moved"] >= 1
+    assert c.stale_sections() == set()

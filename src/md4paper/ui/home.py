@@ -35,7 +35,8 @@ from pathlib import Path
 
 from md4paper import config, library, projects
 from md4paper.ui import (
-    agent_panel, desktop, find_bar, jobs, scroll_memory, settings_dialog, spa, update_banner,
+    agent_panel, batch_translate_dialog, collection_glossary_dialog, desktop, find_bar, jobs, scroll_memory,
+    settings_dialog, spa, translate_job, update_banner,
 )
 from md4paper.workdir import WorkDir
 
@@ -494,6 +495,18 @@ def build_home(state: dict) -> None:
         with host:
             settings_dialog.open_project_dialog(state, pid, saved, on_delete=confirm_delete_project)
 
+    def show_jobs() -> None:
+        """방금 띄운 작업 카드를 바로 그린다 — poll이 다음 틱에 다시 그리도록 '보이는 중'으로 표시해 둔다
+        (캐시로 금방 끝난 작업이면 poll이 busy도 shown도 아니라고 보고 '번역 중' 카드를 남겨 둔다)."""
+        poll_state["shown"] = True
+        queue_panel.refresh()
+
+    def open_collection_glossary(pid: str) -> None:
+        """컬렉션 용어집 대화상자 — 닫으면 목록을 다시 맞춘다(재번역을 띄웠으면 작업 카드가 보이게)."""
+        with host:
+            collection_glossary_dialog.open_collection_glossary(
+                state, pid, on_change=lambda: (refresh_views(), show_jobs()))
+
     def rename_project(pid: str) -> None:
         def save() -> None:
             if not projects.rename(pid, inp.value):
@@ -741,14 +754,48 @@ def build_home(state: dict) -> None:
         selected.clear()
         pick["bulk"] = False
         recent_list.refresh()
+        head.refresh()
         preview_pane.refresh()
         sync_preview()
+
+    def selectable_roots() -> list[str]:
+        """'전체 선택'이 고를 논문 — 지금 범위·검색어로 목록에 보이는 카드(숨긴 논문은 보기를 켜도 뺀다)."""
+        return [str(r["root"]) for r in visible_rows() if not r["hidden"]]
+
+    def toggle_select_all() -> None:
+        """보이는 논문을 한꺼번에 체크 — 이미 다 체크돼 있으면 그것들만 푼다(다른 범위에서 고른 것은 그대로)."""
+        roots = selectable_roots()
+        if roots and all(rt in selected for rt in roots):
+            selected.difference_update(roots)
+        else:
+            selected.update(roots)
+        pick["bulk"] = bool(selected)
+        # 카드마다 체크박스 값을 바꾸면 on_change가 카드 수만큼 미리보기를 다시 그린다 — 목록을 한 번에 다시 그린다
+        recent_list.refresh()
+        head.refresh()
+        sync_preview()
+        preview_pane.refresh()
+
+    def translate_selection() -> None:
+        roots = sorted(selected)
+        if not roots:
+            ui.notify("선택된 논문이 없습니다.", type="warning")
+            return
+
+        def started(n: int) -> None:
+            show_jobs()
+            if n:
+                clear_selection()
+
+        with host:
+            batch_translate_dialog.open_batch_translate(roots, on_started=started)
 
     def toggle_sel(root: str, on: bool) -> None:
         selected.add(root) if on else selected.discard(root)
         pick["bulk"] = bool(selected)  # 체크 = 일괄 선택 → 미리보기 자리가 일괄 동작 칸으로
         sync_preview()
         preview_pane.refresh()
+        head.refresh()  # '전체 선택' 단추 글자(선택/해제)
 
     def set_export_target(value: str) -> None:
         config.set_section_value("output", "export_target", value)
@@ -795,6 +842,7 @@ def build_home(state: dict) -> None:
                     ui.menu_item("이름 바꾸기", on_click=lambda _, p=value: rename_project(p)).props("dense")
                     ui.menu_item("폴더 정하기…", on_click=lambda _, p=value: pick_project_folder(p)).props("dense")
                     ui.menu_item("설정…", on_click=lambda _, p=value: edit_project(p)).props("dense")
+                    ui.menu_item("용어집…", on_click=lambda _, p=value: open_collection_glossary(p)).props("dense")
                     ui.separator()
                     ui.menu_item("컬렉션 삭제", on_click=lambda _, p=value: confirm_delete_project(p)) \
                         .props("dense").classes("text-negative")
@@ -839,6 +887,14 @@ def build_home(state: dict) -> None:
         with ui.row().classes("items-baseline gap-2 no-wrap w-full"):
             ui.label(scope_label()).classes("md4-htitle truncate min-w-0")
             ui.label(f"{n}편").classes("md4-hcount shrink-0")
+            roots = selectable_roots()
+            if roots:
+                every = all(rt in selected for rt in roots)
+                ui.button("선택 해제" if every else "전체 선택", icon="deselect" if every else "select_all",
+                          color=None, on_click=toggle_select_all) \
+                    .props("flat dense no-caps size=sm").classes("text-grey-7 shrink-0") \
+                    .tooltip(f"지금 목록에 보이는 {len(roots)}편을 한꺼번에 " + ("풀기" if every else "체크")
+                             + " — 일괄 동작(번역·zip·컬렉션)은 오른쪽 칸에")
         if s not in (projects.ALL, projects.NONE):
             root = projects.root_of(s)
             with ui.row().classes("items-center gap-1 no-wrap w-full"):
@@ -888,6 +944,7 @@ def build_home(state: dict) -> None:
         view["show_hidden"] = not view["show_hidden"]
         more_menu.refresh()
         recent_list.refresh()
+        head.refresh()
 
     # ===== 오른쪽 — 큐 · 목록 =====
     @ui.refreshable
@@ -896,15 +953,30 @@ def build_home(state: dict) -> None:
         running_jobs = jobs.running()
         if running_jobs:  # 논문 화면에서 띄운 번역 등 — 화면을 떠나도 서버에서 계속 돈다
             ui.label("백그라운드 작업").classes("md4-listcap")
+            # 일괄 번역은 수십 편이 문 앞에서 기다린다 — 대기 카드는 앞쪽 몇 개만, 나머지는 한 줄로 센다
+            waiting = [j for j in running_jobs if j.detail.get("queued")]
+            hidden_waits = {id(j) for j in waiting[5:]}
             for j in running_jobs:
+                if id(j) in hidden_waits:
+                    continue
                 pct = f" {int(j.fraction * 100)}%" if j.total else ""
+                queued = bool(j.detail.get("queued"))  # 동시 실행 문(translate_job.gate) 앞에서 기다리는 중
+                if queued:
+                    n_ahead = translate_job.ahead(j)
+                    sub = f"{j.label} 대기 중" + (f" · 앞에 {n_ahead}개" if n_ahead > 0 else "") + " · 눌러서 열기"
+                else:
+                    sub = f"{j.label} 중…{pct} · 눌러서 열기"
                 with ui.card().classes("w-full q-pa-sm cursor-pointer").on(
                         "click", lambda _, r=j.root: ui.navigate.to(_review_url(Path(r)))):
                     with ui.row().classes("items-center w-full no-wrap gap-2"):
-                        ui.icon("autorenew", size="20px").classes("text-primary md4-spin")
+                        ui.icon("schedule" if queued else "autorenew", size="20px") \
+                            .classes("text-grey-6" if queued else "text-primary md4-spin")
                         with ui.column().classes("gap-0 flex-grow min-w-0"):
                             ui.label(j.title or Path(j.root).stem).classes("text-sm truncate w-full")
-                            ui.label(f"{j.label} 중…{pct} · 눌러서 열기").classes("text-xs text-gray-400")
+                            ui.label(sub).classes("text-xs text-gray-400")
+            if hidden_waits:
+                ui.label(f"외 {len(hidden_waits)}편 번역 대기 중 — 동시에 {translate_job.gate().limit}편씩 차례로 돕니다") \
+                    .classes("text-xs text-gray-400 q-px-sm")
         if not q:
             return
         ui.label("변환 중").classes("md4-listcap")
@@ -1432,6 +1504,9 @@ def build_home(state: dict) -> None:
                     ui.label(f"외 {len(rows) - 8}편").classes("md4-pv-sel")
             ui.label("일괄 동작").classes("md4-panel-title q-mt-sm")
             with ui.column().classes("md4-pv-bulk gap-1 w-full"):
+                ui.button(f"번역 ({n}편)", icon="translate", on_click=translate_selection) \
+                    .props("outline dense no-caps color=secondary") \
+                    .tooltip("번역이 없거나 낡은 논문을 번역합니다 — 띄우기 전에 편수·대략 비용을 확인합니다")
                 ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")) \
                     .props("outline dense no-caps")
                 ui.button("한국어 zip", icon="download", on_click=lambda: download_bulk("ko")) \
@@ -1545,6 +1620,7 @@ def build_home(state: dict) -> None:
                 def on_search(e) -> None:  # noqa: ANN001
                     view["q"] = e.value or ""
                     recent_list.refresh()
+                    head.refresh()  # '전체 선택'은 검색으로 걸러진 카드만 고른다
 
                 def on_sort(e) -> None:  # noqa: ANN001
                     view["sort"] = e.value

@@ -18,7 +18,7 @@ from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
     agent_panel, annotations, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, mdrender, reanchor,
-    scroll_memory, sentpair, spa, tabstore, update_banner,
+    scroll_memory, sentpair, spa, tabstore, translate_job, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir, left_panel, paper_title, set_left_panel, set_project
@@ -3869,18 +3869,38 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ui.notify("대소문자만 다른 중복 용어를 합쳤습니다.", type="info")
         ctrl.save_glossary([GlossaryEntry(**d) for d in gloss_entries if d["term"].strip()])
 
+    # 주 컬렉션 용어집 — 용어집 시트 위 구역에 읽기 전용으로만 보인다. gloss_entries(= glossary.yaml로 통째로
+    # 저장되는 목록)에는 절대 넣지 않는다: 섞으면 첫 blur에 컬렉션 항목이 논문 용어집으로 새어 들어간다.
+    coll_view: dict = {"pid": ctrl.collection_id(), "entries": ctrl.collection_glossary()}
+
+    def coll_keys() -> set[str]:
+        from md4paper.translate.glossary import term_key
+
+        return {term_key(e.term) for e in coll_view["entries"]}
+
     @ui.refreshable
     def gloss_rows() -> None:
+        from md4paper.translate.glossary import term_key
+
+        over = coll_keys()  # 컬렉션에 같은 용어가 있으면 이 논문 행은 번역에 안 쓰인다
+        if coll_view["pid"]:
+            n = sum(1 for d in gloss_entries if d["term"].strip())
+            ui.label(f"이 논문 용어집 ({n})").classes("text-sm font-medium q-mt-xs")
         if not gloss_entries:
             ui.label("용어집이 비어 있습니다 — 변환 시 자동 생성됩니다. '행 추가'나 왼쪽 '용어 추가'로 채우세요.") \
                 .classes("text-sm text-gray-400")
         for i, d in enumerate(gloss_entries):
-            with ui.row().classes("items-center gap-2 w-full"):
+            shadowed = bool(d["term"].strip()) and term_key(d["term"]) in over
+            strike = ' input-style="text-decoration:line-through"' if shadowed else ""
+            row = ui.row().classes("items-center gap-2 w-full")
+            if shadowed:
+                row.style("opacity:.5").tooltip("컬렉션 용어집이 우선합니다")
+            with row:
                 ui.input(placeholder="원어", value=d["term"]).bind_value(d, "term") \
-                    .on("blur", lambda: gloss_autosave()).props("dense outlined").classes("w-40")
+                    .on("blur", lambda: gloss_autosave()).props("dense outlined" + strike).classes("w-40")
                 ui.icon("arrow_forward").classes("text-gray-400")
                 ui.input(placeholder="번역어", value=d["korean"]).bind_value(d, "korean") \
-                    .on("blur", lambda: gloss_autosave()).props("dense outlined").classes("w-40")
+                    .on("blur", lambda: gloss_autosave()).props("dense outlined" + strike).classes("w-40")
                 ui.select(_POLICY, value=d["policy"]).bind_value(d, "policy") \
                     .on("update:model-value", lambda: gloss_autosave()).props("dense outlined").classes("w-44")
                 ui.button(icon="delete", on_click=lambda _, idx=i: (
@@ -4015,28 +4035,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 return
             style = ctrl.manifest.korean_style
 
-            # 워커 스레드에서 화면 없이 완결된다 — 탭을 옮겨 이 페이지가 사라져도 번역·저장은 끝까지 간다.
-            def work(job: jobs.Job) -> dict:
-                def on_progress(d: int, t: int, status: dict) -> None:
-                    job.progress(d, t)
-                    job.detail["status"] = status
-
-                summary = ctrl.translate(prov, style, on_progress)
-                saved = library.auto_export(ctrl.wd)  # 저장 위치로 자동 저장
-                msg = f"번역 완료 (≈${summary['cost_usd']:.4f})"
-                if saved:
-                    msg += f" · 저장 위치에 {len(saved)}개 파일 저장"
-                if summary.get("passthrough"):
-                    msg += f" · {summary['passthrough']}개 섹션은 아래 표시(구조 검증 실패)"
-                if summary.get("kept"):
-                    msg += f" · 체크 해제 {summary['kept']}개 구간은 지난 번역 유지"
-                job.message = msg
-                return summary
-
             if jobs.is_running(ctrl.wd.root, "reconvert"):
                 ui.notify("다시 변환하는 중에는 번역할 수 없습니다 — 끝난 뒤 다시 눌러 주세요.", type="info")
                 return
-            job = jobs.start(ctrl.wd.root, "translate", "번역", work, title=_title)
+            # 워커 스레드에서 화면 없이 완결된다 — 탭을 옮겨 이 페이지가 사라져도 번역·저장은 끝까지 간다.
+            # 홈 일괄 번역과 같은 작업 함수·같은 동시 실행 문을 쓴다(§translate_job).
+            job = translate_job.start(ctrl.wd, prov, title=_title, style=style)
             if job is None:
                 ui.notify("이 논문은 이미 번역 중입니다.", type="info")
                 return
@@ -4060,7 +4064,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 if job.running:
                     bar.value = job.fraction
                     prog_lbl.text = (f"번역 중… {job.done}/{t} 섹션 ({int(job.fraction * 100)}%) · 병렬 처리 "
-                                     "· 다른 탭으로 옮겨도 계속됩니다" if t else "번역 준비 중…")
+                                     "· 다른 탭으로 옮겨도 계속됩니다" if t else
+                                     f"대기 중 — 다른 번역이 끝나면 시작합니다 (동시에 {translate_job.gate().limit}편까지)"
+                                     if job.detail.get("queued") else "번역 준비 중…")
                     update_tree_status()  # 섹션 트리 아이템에 진행중/완료 아이콘 반영
                     return
                 timer.deactivate()
@@ -4144,6 +4150,62 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     "어긋나서 그 섹션은 영어를 그대로 뒀습니다. 재번역해도 계속 실패하면 표·수식이 복잡한 섹션이니 "
                     "번역 후 뷰어에서 직접 손봐도 됩니다.").classes("text-xs text-gray-500")
 
+        def after_collection_change() -> None:
+            """컬렉션 용어집이 바뀌었다(대화상자를 닫았거나 에이전트가 썼다) — 위 구역·취소선·단추 글자·원문 바뀜."""
+            coll_view.update(pid=ctrl.collection_id(), entries=ctrl.collection_glossary())
+            coll_rows.refresh()
+            gloss_rows.refresh()
+            gloss_open_btn.refresh()
+            refresh_staleness()  # 바뀐 용어가 나오는 섹션은 '원문 바뀜'이 된다
+
+        coll_host = ui.element("div").style("display:none")  # 컬렉션 용어집 대화상자 자리 (refreshable 밖)
+
+        def open_collection_dialog() -> None:
+            from md4paper.ui import collection_glossary_dialog
+
+            with coll_host:
+                collection_glossary_dialog.open_collection_glossary(
+                    state, coll_view["pid"], on_change=after_collection_change)
+
+        @ui.refreshable
+        def coll_rows() -> None:
+            """용어집 시트 위 구역 — 주 컬렉션 용어집(읽기 전용). 미분류 논문이면 그리지 않는다."""
+            pid, entries = coll_view["pid"], coll_view["entries"]
+            if not pid:
+                return
+            name = projects.name_of(pid)
+            with ui.column().classes("w-full gap-1 q-pa-sm").style(
+                    "background:#f4f8fd; border:1px solid #d6e6f8; border-radius:8px"):
+                with ui.row().classes("items-center w-full no-wrap gap-2"):
+                    ui.icon("folder_special", color="primary", size="18px")
+                    ui.label(f"컬렉션 '{name}' 용어집 ({len(entries)}) — 이 논문 용어집보다 우선"
+                             if entries else f"컬렉션 '{name}' 용어집 — 아직 없음") \
+                        .classes("text-sm font-medium min-w-0")
+                    ui.space()
+                    ui.button("컬렉션 용어집 열기…", icon="open_in_new", on_click=open_collection_dialog) \
+                        .props("flat dense no-caps color=primary").classes("shrink-0") \
+                        .tooltip("소속 논문 모두에 적용되는 용어집 — 논문들이 어긋나게 쓴 번역어를 여기서 통일합니다")
+                if not entries:
+                    ui.label("소속 논문들의 용어집에서 어긋난 번역어를 골라 통일하면 이 논문 번역에도 적용됩니다.") \
+                        .classes("text-xs text-gray-500")
+                    return
+                with ui.column().classes("w-full gap-0 md4-scroll").style("max-height:28vh; overflow-y:auto"):
+                    for e in entries:
+                        with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                            ui.label(e.term).classes("text-sm w-40 shrink-0 truncate").tooltip(e.term)
+                            ui.icon("arrow_forward", size="14px").classes("text-gray-400")
+                            ui.label(f"{e.korean or '(빈 칸)'} · {_POLICY.get(e.policy, e.policy)}") \
+                                .classes("text-sm text-gray-700 truncate min-w-0")
+
+        def on_glossary_refresh(e) -> None:  # noqa: ANN001 — GenericEventArguments
+            """에이전트가 컬렉션 용어집을 썼다 — 이 논문의 주 컬렉션이면 다시 그린다.
+
+            ui.on은 창 단위로 쌓이므로(화면을 갈아 끼워도 옛 핸들러가 남는다) 지워진 화면이면 그냥 둔다."""
+            args = e.args if isinstance(e.args, dict) else {}
+            if gloss_dialog.is_deleted or (args.get("collection") or "") != ctrl.collection_id():
+                return
+            after_collection_change()
+
         # 용어집 표는 넓다(원어·번역어·처리 방식) — 좁은 패널 대신 캔버스 위에 시트로 띄운다.
         # 번역 전에 한 번 집중해서 보는 단계라 상시 탭보다 이 편이 맞다.
         with ui.dialog() as gloss_dialog, ui.card().classes("gap-2").style(
@@ -4158,16 +4220,21 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ui.markdown(
                 "변환할 때 **Abstract·Introduction 본문과 모든 섹션 제목**에서 핵심 용어를 자동으로 뽑아 만듭니다. "
                 "번역 전에 한국어 표기와 처리 방식(번역 / 음역 / 원문 유지 / 첫 등장 시 병기)을 검토·수정하세요. "
-                "고친 내용은 바로 저장됩니다."
+                "고친 내용은 바로 저장됩니다.\n\n"
+                "컬렉션 용어집의 항목은 여기서 못 고칩니다 — 컬렉션 용어집에서 고치면 소속 논문 전체에 적용됩니다."
             ).classes("text-xs text-gray-600")
             with ui.column().classes("w-full gap-1 md4-scroll").style("overflow-y:auto; min-height:0"):
+                coll_rows()
                 gloss_rows()
         gloss_dialog.on("hide", lambda: gloss_open_btn.refresh())
+        ui.on(agent_panel.GLOSSARY_REFRESH_EVENT, on_glossary_refresh)
 
         @ui.refreshable
         def gloss_open_btn() -> None:
             n = sum(1 for d in gloss_entries if d["term"].strip())
-            ui.button(f"용어집 검토 ({n})", icon="menu_book", on_click=gloss_dialog.open) \
+            n_coll = len(coll_view["entries"])
+            label = f"용어집 검토 ({n} + 컬렉션 {n_coll})" if n_coll else f"용어집 검토 ({n})"
+            ui.button(label, icon="menu_book", on_click=gloss_dialog.open) \
                 .props("outline no-caps color=primary").tooltip("번역에 쓸 용어집을 표로 검토·수정")
 
         with ui.column().classes("w-full gap-2"):

@@ -403,6 +403,7 @@ class UIController:
                        patch) -> dict:  # noqa: ANN001
         """원천을 바꾼 뒤 — en.md(재조립 또는 그 자리만) · ko.md 같은 자리 · 번역 캐시 키 옮기기."""
         from md4paper import formula_fix, pipeline
+        from md4paper.translate import glossary
         from md4paper.translate.apply import _build_units
 
         if self.has_manual_edit():
@@ -430,7 +431,10 @@ class UIController:
                 sources = [u["source"] for u in units] + [
                     t for u in units for _sid, t in (u.get("sections") or [])]
                 chunks = stored.setdefault("chunks", {})
-                moved = formula_fix.rekey_cache(chunks, sources, en_before, en_at, en_old, new_text)
+                # 캐시는 유닛 해시(원문 + 그 원문에 나오는 용어집 줄)로 찾는다 — 번역 때와 같은 effective
+                # 용어집을 넘겨야 용어가 든 유닛도 옮겨진다(안 넘기면 그 섹션이 '원문 바뀜'으로 남아 재번역 비용)
+                moved = formula_fix.rekey_cache(chunks, sources, en_before, en_at, en_old, new_text,
+                                                gloss=glossary.effective(self.wd)[0])
                 if moved:
                     self.wd.cache_json.write_text(
                         json.dumps(stored, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -611,6 +615,25 @@ class UIController:
         from md4paper.translate import glossary
 
         return glossary.load(self.wd).entries if self.wd.glossary_yaml.exists() else []
+
+    def collection_id(self) -> str:
+        """이 논문의 주 컬렉션 id(소속 첫 항목) — 미분류면 빈 문자열. 컬렉션 용어집은 이 컬렉션 것만 걸린다."""
+        from md4paper import library
+
+        return library.project_of(self.wd)
+
+    def collection_glossary(self) -> list[GlossaryEntry]:
+        """주 컬렉션 용어집 항목 — 번역 때 논문 용어집보다 우선한다. 미분류이거나 아직 없으면 빈 목록."""
+        from md4paper.translate import glossary
+
+        return glossary.load_collection(self.collection_id()).entries
+
+    def effective_glossary(self) -> tuple[list[GlossaryEntry], dict[str, str]]:
+        """번역에 실제로 쓰는 용어집(논문 위에 컬렉션 덮어쓰기)과 term_key → "paper"|"collection"."""
+        from md4paper.translate import glossary
+
+        gloss, origin = glossary.effective(self.wd)
+        return gloss.entries, origin
 
     def save_glossary(self, entries: list[GlossaryEntry]) -> None:
         from md4paper.translate import glossary

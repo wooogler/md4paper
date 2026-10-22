@@ -116,6 +116,19 @@ def resolve_translate_workers() -> int:
     return max(1, min(n, 12))
 
 
+def resolve_translate_batch_workers() -> int:
+    """논문 단위로 동시에 도는 번역 작업 수 (config [translate].batch_workers, 기본 2). 1~8로 제한.
+
+    홈에서 여러 편을 한꺼번에 번역할 때 쓴다 — 한 편 안에서도 섹션을 `workers`개씩 병렬로 부르므로
+    편수까지 다 풀면 API 동시 호출이 편수 × workers로 불어나 속도 제한에 걸린다.
+    """
+    cfg = load_config()
+    try:
+        n = int(cfg.get("translate", {}).get("batch_workers", 2))
+    except (TypeError, ValueError):
+        n = 2
+    return max(1, min(n, 8))
+
 
 def resolve_runin_mode() -> str:
     return load_config().get("structure", {}).get("runin_headings", "off")

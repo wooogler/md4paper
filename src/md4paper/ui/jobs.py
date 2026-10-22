@@ -11,6 +11,10 @@ NiceGUI 이벤트 핸들러는 그 페이지(클라이언트)에 묶여 있다. 
 work 안에서 하고, 화면 갱신만 페이지가 한다.
 
 논문(root)·종류(kind)마다 하나씩만 돈다 — 같은 논문의 번역을 두 창에서 동시에 누르면 둘째는 거절된다.
+
+여러 논문의 같은 일을 한꺼번에 띄울 때(홈의 일괄 번역)는 `Gate`로 동시에 도는 수를 묶는다. 기다리기는
+이벤트 루프에서 한다 — 작업 함수 첫머리에서 세마포어를 잡게 하면 기다리는 작업마다 기본 스레드 풀
+(cpu+4개)의 스레드를 하나씩 붙잡아, 80편을 띄우면 풀이 막혀 다른 작업(레이아웃·참고문헌…)까지 선다.
 """
 
 from __future__ import annotations
@@ -86,12 +90,47 @@ def unseen_finished(root: Path | str) -> list[Job]:
     return [j for j in _JOBS.values() if j.root == k and not j.running and not j.seen]
 
 
+class Gate:
+    """동시 실행 상한 — 자리가 날 때까지 이벤트 루프에서 기다리고, 먼저 온 작업부터 들어간다.
+
+    기다리는 동안 `job.detail["queued"] = True`(들어가면 지운다) — 홈 작업 카드가 '대기 중'으로 보인다.
+    상태는 이벤트 루프 스레드에서만 바뀌므로 잠금이 없다. asyncio.Semaphore를 쓰지 않는 이유: 처음 다툴
+    때 루프에 묶여, 루프를 새로 띄우는 테스트(asyncio.run)를 거듭하면 '다른 루프'로 깨진다.
+    """
+
+    _POLL_S = 0.2
+
+    def __init__(self, limit: int) -> None:
+        self.limit = max(1, int(limit))
+        self.active = 0
+        self.waiting: list[Job] = []
+
+    def ahead(self, job: Job) -> int:
+        """이 작업 앞에 기다리는 작업 수 — 기다리는 중이 아니면 -1."""
+        return self.waiting.index(job) if job in self.waiting else -1
+
+    async def enter(self, job: Job) -> None:
+        self.waiting.append(job)
+        try:
+            while self.active >= self.limit or self.waiting[0] is not job:
+                job.detail["queued"] = True
+                await asyncio.sleep(self._POLL_S)
+        finally:
+            self.waiting.remove(job)
+            job.detail.pop("queued", None)
+        self.active += 1
+
+    def leave(self) -> None:
+        self.active = max(0, self.active - 1)
+
+
 def start(root: Path | str, kind: str, label: str, work: Callable[[Job], Any],
-          title: str = "") -> Job | None:
+          title: str = "", gate: Gate | None = None) -> Job | None:
     """작업을 백그라운드로 띄운다. 같은 논문·종류가 이미 돌고 있으면 None.
 
     work(job)는 워커 스레드에서 돈다 — job.progress()로 진행을, job.message로 완료 문구를 남기고,
-    반환값은 job.result가 된다. 이벤트 루프 안(UI 핸들러)에서 불러야 한다.
+    반환값은 job.result가 된다. 이벤트 루프 안(UI 핸들러)에서 불러야 한다. gate를 주면 자리가 날 때까지
+    기다렸다가 돈다(기다리는 동안도 '도는 중' — 같은 논문을 또 띄우면 거절된다).
     """
     _prune()
     k = (_key(root), kind)
@@ -100,19 +139,25 @@ def start(root: Path | str, kind: str, label: str, work: Callable[[Job], Any],
         return None
     job = Job(root=k[0], kind=kind, label=label, title=title)
     _JOBS[k] = job
-    task = asyncio.get_running_loop().create_task(_run(job, work), name=f"md4paper {kind} {k[0]}")
+    task = asyncio.get_running_loop().create_task(_run(job, work, gate), name=f"md4paper {kind} {k[0]}")
     _TASKS.add(task)
     task.add_done_callback(_TASKS.discard)
     return job
 
 
-async def _run(job: Job, work: Callable[[Job], Any]) -> None:
+async def _run(job: Job, work: Callable[[Job], Any], gate: Gate | None = None) -> None:
+    entered = False
     try:
+        if gate is not None:
+            await gate.enter(job)
+            entered = True
         job.result = await asyncio.to_thread(work, job)
         job.status = "done"
     except Exception as ex:  # noqa: BLE001 — API 오류 등은 그대로 화면에 보여 준다
         job.status, job.error = "failed", str(ex) or type(ex).__name__
     finally:
+        if entered:
+            gate.leave()
         job.finished = time.time()
 
 
