@@ -34,6 +34,7 @@ RESULT_MAX = 4000     # tool 결과 하나의 글자 상한
 ROW_CLIP = 900        # 검색 결과에서 한 행의 한쪽(EN/KO) 글자 상한
 READ_ROWS_MAX = 30    # read_rows 한 번에 읽는 행 수 상한
 SEARCH_K_MAX = 15
+TITLE_CLIP = 60       # 결과 첫 줄의 논문 제목 상한 (요약 200자 안에 행 번호가 남게)
 LIST_DEFAULT = 100    # list_papers 기본 개수
 LIST_LIMIT_MAX = 300  # list_papers 개수 상한
 LIST_MAX = 12000      # list_papers 결과 글자 상한 — 목록은 한 줄이 짧아 따로 넉넉히 (약 3~4천 토큰)
@@ -85,6 +86,16 @@ def _resolve(deps: Deps, token: str | None) -> tuple[str, WorkDir] | str:
     if wd is None:
         return (f"알 수 없는 논문 token입니다: {tok}. list_papers로 token을 다시 확인하세요.")
     return tok, wd
+
+
+async def _paper_line(deps: Deps, tok: str, wd: WorkDir) -> str:
+    """결과 첫 줄 — 어느 논문을 읽었는지. 모델이 '이 논문'을 맞게 골랐는지 스스로 확인하게."""
+    from md4paper.workdir import paper_title
+
+    title = " ".join((await asyncio.to_thread(paper_title, Path(wd.root))).split())
+    title = title if len(title) <= TITLE_CLIP else title[:TITLE_CLIP].rstrip() + "…"
+    where = "지금 화면의 논문" if tok == deps.current_token else f"다른 논문, token {tok}"
+    return f"논문: {title} ({where})\n"
 
 
 def _note_desc(n: dict) -> str:
@@ -163,7 +174,8 @@ async def search_paper(ctx: RunContext[Deps], query: str, token: str | None = No
     found = await asyncio.to_thread(work)
     if not found:
         return "이 논문에서 읽을 수 있는 본문이 없습니다 (변환이 끝나지 않았을 수 있음)."
-    return _pack_rows(ctx.deps, tok, found, ROW_CLIP, f"검색 결과 {len(found)}개 (관련도 순):")
+    head = await _paper_line(ctx.deps, tok, wd)
+    return _pack_rows(ctx.deps, tok, found, ROW_CLIP, f"{head}검색 결과 {len(found)}개 (관련도 순):")
 
 
 async def read_rows(ctx: RunContext[Deps], start: int, end: int | None = None,
@@ -192,8 +204,9 @@ async def read_rows(ctx: RunContext[Deps], start: int, end: int | None = None,
     if not picked:
         return f"행 범위 밖입니다. 이 논문의 행은 r0–r{len(chunks) - 1}입니다." if chunks \
             else "이 논문에서 읽을 수 있는 본문이 없습니다."
+    head = await _paper_line(ctx.deps, tok, wd)
     return _pack_rows(ctx.deps, tok, picked, RESULT_MAX,
-                      f"r{lo}–r{picked[-1].row} (전체 r0–r{len(chunks) - 1}):")
+                      f"{head}r{lo}–r{picked[-1].row} (전체 r0–r{len(chunks) - 1}):")
 
 
 async def outline(ctx: RunContext[Deps], token: str | None = None) -> str:
@@ -213,7 +226,8 @@ async def outline(ctx: RunContext[Deps], token: str | None = None) -> str:
              f"{c.heading}" for c in chunks if c.head_level]
     if not lines:
         return "목차(헤더)를 찾지 못했습니다." if chunks else "이 논문에서 읽을 수 있는 본문이 없습니다."
-    return _cap(f"목차 (전체 r0–r{len(chunks) - 1}):\n" + "\n".join(lines))
+    head = await _paper_line(ctx.deps, tok, wd)
+    return _cap(f"{head}목차 (전체 r0–r{len(chunks) - 1}):\n" + "\n".join(lines))
 
 
 # --- 메모·하이라이트 ----------------------------------------------------

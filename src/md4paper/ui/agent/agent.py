@@ -19,6 +19,7 @@ import dataclasses
 import os
 import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")   # pydantic_ai import 전에 (Logfire 배너 끔)
 
@@ -45,8 +46,9 @@ from md4paper import config  # noqa: E402
 from md4paper.llm.base import Usage, cost_usd  # noqa: E402
 from md4paper.ui.agent import retrieval, sessions  # noqa: E402
 from md4paper.ui.agent.cites import note_tag, render_html, resolve_citations  # noqa: E402
-from md4paper.ui.agent.context import to_prompt  # noqa: E402
+from md4paper.ui.agent.context import PaperRef, to_prompt  # noqa: E402
 from md4paper.ui.agent.tools import TOOLS, Deps, review_url  # noqa: E402
+from md4paper.workdir import paper_title  # noqa: E402
 
 DEFAULT_LIMITS = UsageLimits(request_limit=12, total_tokens_limit=60_000)
 MEMORY_MAX = 4000      # memory.md를 지시문에 넣는 글자 상한
@@ -72,6 +74,9 @@ SYSTEM = """너는 md4paper의 논문 읽기 도우미다. 사용자는 PDF를 �
 - 사용자가 쓴 언어로 답한다 (한국어로 물으면 한국어로).
 - 간결하게. 마크다운을 쓸 수 있고 수식은 `$...$`로 쓴다.
 - "이 문단", "선택한 문장", "여기" 같은 말은 아래 '현재 화면' 블록으로 해석한다.
+- "이 논문"은 언제나 '현재 화면' 블록의 열린 논문이다. 화면의 논문은 턴마다 바뀔 수 있다 —
+  화면이 바뀌었으면 새 논문이 '이 논문'이니, 앞 턴에서 열거나 다룬 논문과 혼동하지 말고
+  지금 논문을 읽을 때는 token 인자를 비운다. tool 결과 첫 줄의 논문 제목으로 맞는지 확인한다.
 - 화면에 열린 논문이 없으면(홈) list_papers로 찾고, 다른 논문은 tool에 token을 넘긴다.
 - 논문이 몇 편인지는 list_papers·list_projects 결과 첫머리의 숫자로 답한다. 목록은 잘려 있을 수
   있으니 목록 줄 수를 세지 않는다.
@@ -91,9 +96,22 @@ def memory_text() -> str:
     return "## 사용자에 대해 기억해 둔 것 (memory.md)\n" + text
 
 
-def _dynamic(ctx: RunContext[Deps]) -> str:
-    """턴마다 다시 만드는 지시문 — 메모리 + 현재 화면. 기록에 쌓이지 않고 매 run 새로 붙는다."""
-    return "\n\n".join(p for p in (memory_text(), to_prompt(ctx.deps.ctx)) if p)
+async def _dynamic(ctx: RunContext[Deps]) -> str:
+    """턴마다 다시 만드는 지시문 — 메모리 + 현재 화면. 기록에 쌓이지 않고 매 run 새로 붙는다.
+
+    화면 맥락에 논문 제목이 없으면(구버전 클라이언트 등) 서버가 채운다 — '이 논문'을 token과
+    제목 둘 다로 못 박아야 모델이 앞 턴의 논문과 헷갈리지 않는다. 채운 것은 deps.ctx에 남겨
+    같은 run의 다음 요청에서 다시 읽지 않는다.
+    """
+    deps = ctx.deps
+    sc = deps.ctx
+    tok = deps.current_token
+    if tok and not (sc.paper and (sc.paper.title or "").strip()):
+        wd = deps.wd_for(tok)
+        if wd is not None:
+            title = await asyncio.to_thread(paper_title, Path(wd.root))
+            deps.ctx = sc = sc.model_copy(update={"paper": PaperRef(token=tok, title=title)})
+    return "\n\n".join(p for p in (memory_text(), to_prompt(sc)) if p)
 
 
 def make_agent(model) -> Agent[Deps, str | DeferredToolRequests]:  # noqa: ANN001

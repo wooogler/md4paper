@@ -105,9 +105,14 @@ def to_prompt(ctx: ScreenContext | None) -> str:
     if ctx.screen:
         lines.append(f"- 화면: {_SCREEN_KO.get(ctx.screen, ctx.screen)}")
     if ctx.paper and (ctx.paper.token or ctx.paper.title):
-        title = (ctx.paper.title or "").strip()[:120]
-        tok = f" (token {ctx.paper.token}, 인용은 [[rN]])" if ctx.paper.token else ""
-        lines.append(f"- 열린 논문: {title or '(제목 없음)'}{tok}")
+        title = (ctx.paper.title or "").strip()[:120] or "(제목 없음)"
+        if ctx.paper.token:
+            # 앞 턴에서 다룬 논문의 token을 대화 기록에서 집어 쓰는 일이 있었다 — 지금 것을 못 박는다
+            lines.append(f"- 열린 논문 = '이 논문': {title} (token {ctx.paper.token}). '이 논문'·"
+                         "'여기'는 이 논문이다 — tool의 token 인자를 비우면 이 논문을 읽고, "
+                         "인용은 [[rN]].")
+        else:
+            lines.append(f"- 열린 논문: {title}")
     if ctx.lang:
         lines.append(f"- 보기: {_LANG_KO.get(ctx.lang, ctx.lang)}")
     if ctx.visible_rows:

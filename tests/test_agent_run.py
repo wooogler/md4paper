@@ -289,3 +289,31 @@ def test_list_papers_header_counts_whole_library(tmp_path):
 
     assert call(limit=1000).count("- token ") == 5     # 상한 300으로 묶일 뿐 오류 아님
     assert "전체 5편" in call(query="없는 제목")
+
+
+def test_switching_paper_rebinds_this_paper(tmp_path):
+    """앞 턴과 다른 논문을 열고 '이 논문'을 물으면 지시문·tool이 새 논문을 가리킨다.
+
+    화면 맥락에 제목이 없어도(구버전 클라이언트) 서버가 채워 token과 제목을 둘 다 적는다.
+    """
+    a = make_wd(tmp_path, "a", title="Bespoke Bots")
+    b = make_wd(tmp_path, "b", title="Tutor Survey")
+    reg = Registry(a, b)
+    tok_a, tok_b = list(reg.by_token)
+    s = sessions.create()
+    seen: list = []
+    first = make_agent(scripted_model([[("outline", {})], "목차예요."], seen=seen))
+    assert _run(first, s, "이 논문 목차", _deps(reg, tok_a))[-1]["event"] == "done"
+    ins_a = seen[-1].instructions
+    assert tok_a in ins_a and "Bespoke Bots" in ins_a and "'이 논문'" in ins_a
+
+    seen.clear()
+    second = make_agent(scripted_model([[("search_paper", {"query": "instructors"})], "네."],
+                                       seen=seen))
+    events = _run(second, s, "이 논문은 몇 명을 인터뷰했어?", _deps(reg, tok_b))
+    ins_b = seen[0].instructions
+    assert tok_b in ins_b and "Tutor Survey" in ins_b
+    assert tok_a not in ins_b and "Bespoke Bots" not in ins_b
+    assert "앞 턴에서 열거나 다룬 논문과 혼동하지" in ins_b           # 고정 지시문
+    result = next(e["data"]["summary"] for e in events if e["event"] == "tool_result")
+    assert result.startswith("논문: Tutor Survey (지금 화면의 논문)") and "[r" in result

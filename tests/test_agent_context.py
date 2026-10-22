@@ -29,6 +29,8 @@ def test_full_context_renders_korean_block():
     text = to_prompt(ctx)
     assert text.startswith("## 현재 화면")
     assert "논문 뷰어" in text and "Bespoke Bots" in text and "0123456789ab" in text
+    assert "'이 논문': Bespoke Bots (token 0123456789ab)" in text
+    assert "token 인자를 비우면 이 논문" in text
     assert "r12–r14, r20" in text and "맨 위 r12" in text
     assert '"We interviewed 18 instructors"' in text and "원문 r13" in text
     assert "정리" in text and "튜터 서베이" in text and "toc" in text
