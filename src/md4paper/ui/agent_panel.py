@@ -13,6 +13,11 @@
 - 인용 칩은 여러 논문을 가리킬 수 있다. 지금 논문이면 그 행으로, 다른 논문이면 그 논문을 연 뒤
   행으로 간다(가는 길은 sessionStorage에 남기고 도착한 뷰어의 setPaper가 소비한다).
 
+- 비용 tool(재번역·용어집)이 띄운 백그라운드 작업은 그 턴 뒤에 ⏳ 진행 줄로 그리고, 미완료가 있는
+  동안만 `GET /agent/sessions/{sid}/jobs`를 3초마다 불러 ✅/❌ 완료 줄로 바꾼다. ko.md 다시 그리기와
+  완료 알림(토스트)은 이 창이 하지 않는다 — 작업을 띄울 때 `watch_job` 동작으로 뷰어 번역 패널에
+  붙여 두면 뷰어가 자기 작업처럼 다시 그리고 알린다(다른 화면에 있으면 헤더 탭 줄이 알린다).
+
 메모 서랍(`#md-anno-panel`)과 같은 자리·같은 시각 언어를 쓰고 둘은 번갈아 열린다. '읽던 자리로'
 알약(칩 점프로 잃은 자리 되돌리기)은 옛 서랍에서 그대로 옮겨 왔다.
 """
@@ -26,6 +31,9 @@ PANEL_Z = 9000                   # 메모 서랍(#md-anno-panel)과 같은 층 �
 NAV_EVENT = "md4-agent-nav"      # JS → 서버: SPA 화면 이동 요청 (JS는 ui.sub_pages 이동을 직접 못 한다)
 NOTES_REFRESH_EVENT = "md4-notes-refresh"   # JS → 서버: 에이전트가 메모 파일을 고쳤다 — 뷰어 메모 패널
                                             # (app.py notes_panel)이 파일을 다시 읽어 편집기를 맞춘다
+WATCH_JOB_EVENT = "md4-agent-watch-job"     # JS → 서버: 에이전트가 이 논문에 번역·용어집 작업을 띄웠다 —
+                                            # 뷰어 번역 패널(app.py)이 자기 작업처럼 진행 바를 붙인다
+JOB_POLL_MS = 3000                          # 미완료 작업이 있는 동안 GET …/jobs 간격 (JS의 JOB_POLL_MS)
 ANNO_RELOAD_API = "__mdAnnoReload"          # 뷰어 하이라이트 스크립트(app.py)가 내놓는 다시 칠하기 함수
 
 # '읽던 자리로' 되돌리기 알약 — 아래 CSS/HTML/JS 문자열과 이 상수가 한 짝이다(테스트가 대조한다).
@@ -193,6 +201,11 @@ a.chat-cite-note:hover { background: #f7cf60; }
 .ag-appr-s.skip { background: #ecebe8; color: #6b6862; }
 .ag-appr-all { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; padding-top: 6px;
   border-top: 1px solid #ecdcae; }
+/* 백그라운드 작업 줄 — 비용 tool이 띄운 번역·용어집. 도는 동안 ⏳, 끝나면 ✅/❌ */
+.ag-job { font-size: 11.5px; line-height: 1.55; margin: 2px 0 8px; padding: 5px 9px; border-radius: 8px;
+  border: 1px solid #dfe8f3; background: #f5f9fe; color: #3d5a7a; overflow-wrap: anywhere; }
+.ag-job.ok { border-color: #d3e7d3; background: #f3faf3; color: #2f6f2f; }
+.ag-job.fail { border-color: rgba(179,38,30,.3); background: rgba(179,38,30,.06); color: #b3261e; }
 /* 비용 상한 경고 — 턴 시작 전에 서버가 막았다. '그래도 계속'은 같은 요청을 override로 다시 보낸다 */
 .ag-cap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border: 1px solid #e8c66a;
   background: #fffaf0; border-radius: 10px; padding: 7px 10px; font-size: 11.5px; line-height: 1.55;
@@ -291,6 +304,9 @@ a.chat-cite-note:hover { background: #f7cf60; }
   .ag-appr-s.no { background: #3a2220; color: #f0a39b; }
   .ag-appr-s.skip { background: #2c2c2c; color: #a0a0a0; }
   .ag-cost.over { color: #f0a39b; }
+  .ag-job { background: #1e2733; border-color: #2f4560; color: #8fbcf0; }
+  .ag-job.ok { background: #1f2a20; border-color: #34503a; color: #8fd18f; }
+  .ag-job.fail { background: #2e1f1e; border-color: #5a2f2b; color: #f0a39b; }
   a.chat-cite.ag-far { background: #1f1f1f; color: #5a96e6; border-color: #5a96e6; }
   :root { --mjb-ring: #a9a69f; }
   #md-jump-back { background: #262626; border-color: #3a3a3a; color: #d4d4d4;
@@ -368,6 +384,9 @@ JS = r"""
   var toolsByTurn = {};      // 턴 id → 그 답을 만들며 부른 tool 줄 (이 창이 떠 있는 동안만)
   var decisions = {};        // 승인 카드 — tool_call id → true/false (모든 호출에 답이 모이면 보낸다)
   var apprByTurn = {};       // 턴 id → 그 턴 뒤에서 끝난 승인 카드들 [{calls, decisions, skipped}] (잠김)
+  var jobs = [];             // 세션의 백그라운드 작업 기록 (서버 sessions.jobs 그대로)
+  var jobTimer = null;       // 미완료 작업 폴링 타이머 — 미완료가 없으면 멈춘다
+  var JOB_POLL_MS = 3000;
   var capRetry = null;       // 비용 상한으로 막힌 요청 {body, msg} — '그래도 계속'이 override를 더해 다시 보낸다
   var PH_IDLE = input.placeholder;
   var PH_WAIT = '승인을 기다리는 중 — 그냥 보내면 건너뜁니다';
@@ -874,7 +893,65 @@ JS = r"""
     sess = d; sid = d.id; lsSet(LS_SESSION, sid);
     turns = d.turns || []; pending = d.pending || null; decisions = {};   // 다시 열면 대기 카드도 되살아난다
     live = null; errMsg = null;
+    setJobs(d.jobs || []);
     render();
+  }
+
+  // ---- 백그라운드 작업 (비용 tool) ----
+  // 서버가 레지스트리와 대조해 채운 기록을 받아 그리기만 한다. 미완료가 있는 동안만 폴링한다.
+  function jobsPending(){ return jobs.some(function(j){ return !j.done; }); }
+  function setJobs(js){
+    jobs = js || [];
+    if (jobsPending()){ if (!jobTimer) jobTimer = setTimeout(pollJobs, JOB_POLL_MS); }
+    else if (jobTimer){ clearTimeout(jobTimer); jobTimer = null; }
+  }
+  function pollJobs(){
+    jobTimer = null;
+    if (!sid || !jobsPending()) return;
+    var at = sid;
+    api('GET', '/agent/sessions/' + encodeURIComponent(at) + '/jobs').then(function(j){
+      if (at !== sid) return;
+      var before = {};
+      jobs.forEach(function(x){ before[x.id] = x.done; });
+      if (sess && j.usage) sess.usage = j.usage;          // 끝난 작업 비용이 세션 누적에 들어온다
+      setJobs(j.jobs || []);
+      var changed = jobs.some(function(x){ return x.done !== before[x.id]; });
+      if (changed){ if (!live) render(); else renderHead(); }   // 답이 흐르는 중이면 머리(비용)만
+      else if (!live) jobs.forEach(function(x){ if (!x.done) paintJob(x); });  // 진행 숫자만
+    }).catch(function(){ if (!jobTimer && at === sid) jobTimer = setTimeout(pollJobs, JOB_POLL_MS * 2); });
+  }
+  function money(v){ return '$' + Number(v || 0).toFixed(4); }
+  function jobText(j){
+    var what = j.kind === 'glossary' ? '용어집' : '번역';
+    if (!j.done){
+      var p = j.progress || [0, 0], prog = p[1] ? ' ' + p[0] + '/' + p[1] : '';
+      return '⏳ ' + (j.kind === 'glossary' ? '용어집 만드는 중…' : '번역 중 — ' + (j.detail || '') + '…') + prog;
+    }
+    if (j.status !== 'done') return '❌ ' + what + ' 실패: ' + (j.error || '알 수 없는 오류');
+    var r = j.result || {};
+    if (j.kind === 'glossary') return '✅ 용어집 완료: ' + (r.entries || 0) + '개 항목, ' + money(r.cost_usd);
+    return '✅ 번역 완료: ' + (r.sections || 0) + '개 섹션, ' + money(r.cost_usd)
+      + (r.failed ? ' · ' + r.failed + '개 구간은 영어 유지(구조 검증 실패)' : '');
+  }
+  function jobNode(j){
+    var d = document.createElement('div');
+    d.className = 'ag-job' + (j.done ? (j.status === 'done' ? ' ok' : ' fail') : '');
+    d.setAttribute('data-job', j.id);
+    d.textContent = jobText(j);
+    d.title = (j.title ? '‘' + j.title + '’ — ' : '') + (j.message || j.label || '')
+      + (j.model ? '\n모델 ' + j.model : '');
+    return d;
+  }
+  function paintJob(j){
+    var el = list.querySelector('.ag-job[data-job="' + j.id + '"]');
+    if (el) el.textContent = jobText(j);
+  }
+  function jobsAfter(id, used){            // 그 턴 뒤에 그릴 작업 줄
+    var frag = document.createDocumentFragment();
+    jobs.forEach(function(j){
+      if (j.turn_id === id && !used[j.id]){ used[j.id] = true; frag.appendChild(jobNode(j)); }
+    });
+    return frag;
   }
   function loadList(){
     return api('GET', '/agent/sessions').then(function(j){ sessList = j.sessions || []; return sessList; });
@@ -995,10 +1072,12 @@ JS = r"""
     list_papers: '논문 목록', list_projects: '컬렉션 목록', get_bibtex: 'BibTeX',
     goto_row: '행으로 이동', open_paper: '논문 열기',
     write_note: '메모 쓰기', add_highlight: '하이라이트 추가',
-    set_project_membership: '컬렉션 소속 바꾸기', remember: '기억하기'};
+    set_project_membership: '컬렉션 소속 바꾸기', remember: '기억하기',
+    retranslate_sections: '섹션 재번역', run_glossary: '용어집 만들기'};
   // 승인 카드의 아이콘 — Material Icons 글꼴(NiceGUI가 싣는다)의 이름
   var TOOL_ICON = {write_note: 'edit_note', add_highlight: 'border_color',
-    set_project_membership: 'bookmark_add', remember: 'psychology'};
+    set_project_membership: 'bookmark_add', remember: 'psychology',
+    retranslate_sections: 'translate', run_glossary: 'menu_book'};
   function argsText(args){
     if (!args || typeof args !== 'object') return args ? String(args) : '';
     return Object.keys(args).map(function(k){
@@ -1259,7 +1338,10 @@ JS = r"""
         + '\n답 속 숫자 칩을 누르면 근거 문단(노란 칩은 메모)으로 이동합니다.';
       list.appendChild(em);
     }
-    turns.forEach(function(t){ list.appendChild(turnNode(t)); });
+    var used = {};
+    turns.forEach(function(t){ list.appendChild(turnNode(t)); list.appendChild(jobsAfter(t.id, used)); });
+    // 턴을 못 찾은 작업(이 창이 붙인 임시 턴 id 등)은 끝에
+    jobs.forEach(function(j){ if (!used[j.id]) list.appendChild(jobNode(j)); });
     if (live) list.appendChild(liveNode());
     else { liveText = null; liveTools = null; }
     if (pending) list.appendChild(approvalNode(pending, true));   // 진행 중 말풍선 아래에
@@ -1309,6 +1391,12 @@ JS = r"""
       nav(a.url);
     } else if (a.kind === 'refresh'){
       refreshView(a.what, a.token);
+    } else if (a.kind === 'watch_job'){
+      // 비용 tool이 작업을 띄웠다 — 그 논문의 뷰어면 번역 패널이 붙어 진행 바·다시 그리기·완료 알림을
+      // 맡는다(app.py on_agent_job). 다른 화면이면 할 일이 없다: 헤더 탭 줄이 끝날 때 알리고,
+      // 그 논문을 다시 열면 뷰어가 도는 작업에 붙거나 새 ko.md로 지어진다.
+      if (a.token && a.token === paper && onReview() && typeof emitEvent === 'function')
+        emitEvent('md4-agent-watch-job', {token: a.token, job: a.job});
     }
   }
   // 쓰기 tool이 파일을 고친 뒤 — 지금 화면이 그것을 보여 주고 있으면 다시 그린다.
@@ -1433,6 +1521,7 @@ JS = r"""
                       model: modelInfo.model                // 서버 model_label과 같은 '제공사:모델'
                         ? (modelInfo.provider ? modelInfo.provider + ':' : '') + modelInfo.model : ''});
           if (sess){ sess.usage = sess.usage || {}; sess.usage.cost_usd = L.done.session_cost_usd; }
+          if (L.done.jobs) setJobs(L.done.jobs);   // 이 턴이 띄운 작업 — 미완료면 폴링이 시작된다
           live = null;
           render();
           loadList().then(renderHead).catch(function(){});   // 첫 질문이 세션 제목이 된다

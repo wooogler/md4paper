@@ -4192,6 +4192,27 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if jobs.is_running(ctrl.wd.root, "terms"):
             attach_terms(jobs.get(ctrl.wd.root, "terms"))
 
+        def on_agent_job(e) -> None:  # noqa: ANN001
+            """에이전트가 이 논문에 번역·용어집 작업을 띄웠다 — 여기서 시작한 것처럼 붙는다. 진행 바,
+            끝나면 캔버스·목차·툴바 다시 그리기(용어집이면 표 다시 읽기)와 완료 알림은 attach_*가 한다."""
+            args = e.args if isinstance(e.args, dict) else {}
+            if args.get("token") != tok or bar.is_deleted:
+                return  # 다른 논문, 또는 화면을 갈아 끼우며 남은 옛 핸들러 (ui.on은 창 단위로 쌓인다)
+            kind = args.get("job")
+            job = jobs.get(ctrl.wd.root, kind) if kind in ("translate", "terms") else None
+            if job is None:
+                return
+            if kind == "translate" and not translate_state["active"]:
+                translate_state.update(status={}, done=0, total=0, failures={})
+                failure_panel.refresh()
+                stale_panel.refresh()
+                attach_translate(job)
+            elif kind == "terms":
+                with bar.parent_slot:  # 타이머를 이 패널의 고정 영역에 단다 (attach_translate와 같은 까닭)
+                    attach_terms(job)
+
+        ui.on(agent_panel.WATCH_JOB_EVENT, on_agent_job)
+
     def _sec_page0(sid: str) -> int | None:
         # 섹션 자체 페이지가 없으면(run-in 헤더 등은 headings.json에 없어 page가 비어 있음)
         # 문서 순서상 '직전에 페이지가 있는 섹션'으로 근사한다 — 나란히 보기의 스크롤 싱크가
