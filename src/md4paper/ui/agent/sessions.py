@@ -82,6 +82,10 @@ class Session:
     # 승인을 기다리는 호출이 생길 때 화면에 열려 있던 논문. 승인은 사용자가 다른 논문으로 옮긴
     # 뒤에 올 수 있으므로, token 없이 불린 쓰기 tool은 재개 때 이 논문에 쓴다(지금 화면이 아니라).
     pending_token: str | None = None
+    # 비용 tool이 띄운 백그라운드 작업 — `{id, kind, job_kind, token, root, label, title, detail,
+    # started, done, status, progress, result, error, message, notified, turn_id, …}`.
+    # 결과는 `sync_jobs`가 서버의 작업 레지스트리(ui/jobs.py)와 대조해 채운다.
+    jobs: list[dict] = field(default_factory=list)
 
     @property
     def pending(self) -> dict | None:
@@ -97,8 +101,11 @@ class Session:
         calls = []
         for p in [*req.approvals, *req.calls]:
             args = p.args_as_dict()
+            # 그 호출이 쓸 논문 — token 인자, 없으면 승인을 요청한 때 화면의 논문 (재개 때와 같은 규칙)
+            tok = str(args.get("token") or "").strip() or self.pending_token
             calls.append({"id": p.tool_call_id, "name": p.tool_name, "args": args,
-                          "description": describe_call(p.tool_name, args)})
+                          "description": describe_call(p.tool_name, args,
+                                                       self.papers.get(tok) if tok else None)})
         return {"calls": calls, "token": self.pending_token} if calls else None
 
     def meta(self) -> dict:
@@ -120,7 +127,7 @@ def _to_dict(s: Session) -> dict:
     return {"version": VERSION, "id": s.id, "title": s.title, "created": s.created,
             "updated": s.updated, "model": s.model, "paper_tokens": s.paper_tokens,
             "papers": s.papers, "conversation": conv, "turns": s.turns, "usage": s.usage,
-            "pending_token": s.pending_token}
+            "pending_token": s.pending_token, "jobs": s.jobs}
 
 
 def _from_dict(data: dict) -> Session:
@@ -144,6 +151,7 @@ def _from_dict(data: dict) -> Session:
         usage={"input": int(usage.get("input") or 0), "output": int(usage.get("output") or 0),
                "cost_usd": float(usage.get("cost_usd") or 0.0)},
         pending_token=str(data.get("pending_token") or "") or None,
+        jobs=[j for j in (data.get("jobs") or []) if isinstance(j, dict) and j.get("id")],
     )
 
 
@@ -342,3 +350,68 @@ def trim(session: Session, limit: int | None = None) -> None:
     users = [i for i, t in enumerate(session.turns) if t.get("role") == "user"]
     if len(users) > limit:
         session.turns = session.turns[users[len(users) - limit]:]
+
+
+# --- 백그라운드 작업 ----------------------------------------------------
+# 비용 tool(jobtools)이 띄운 작업은 서버 메모리의 레지스트리(ui/jobs.py)에만 진행·결과가 있다.
+# 세션 기록은 (논문, 종류, 시작 시각)으로 그 작업을 다시 찾아 상태를 옮겨 적는다. 레지스트리는 끝난
+# 작업을 한 시간 뒤 잊고 서버를 다시 켜면 비므로, 못 찾은 미완료 기록은 '알 수 없음'으로 닫는다.
+
+MAX_JOBS = 50             # 세션에 남기는 작업 기록 상한 (오래된 것부터 버린다)
+LOST_JOB = "서버가 다시 시작됐거나 오래돼 작업 결과를 알 수 없습니다."
+
+
+def _job_result(rec: dict, job) -> dict:  # noqa: ANN001 — ui.jobs.Job
+    """레지스트리 작업 결과 → 세션에 남길 짧은 요약 (번역: 섹션 수·비용, 용어집: 항목 수·비용)."""
+    res = job.result
+    if rec.get("kind") == "translate" and isinstance(res, dict):
+        return {"sections": int(res.get("sections") or len(rec.get("sections") or [])),
+                "translated": int(res.get("ok", 0)) + int(res.get("retried", 0)),
+                "failed": int(res.get("passthrough", 0)),
+                "cost_usd": round(float(res.get("cost_usd") or 0.0), 6)}
+    if rec.get("kind") == "glossary":
+        return {"entries": int(res or 0),
+                "cost_usd": round(float(job.detail.get("cost_usd") or 0.0), 6)}
+    return {"cost_usd": 0.0}
+
+
+def sync_jobs(session: Session) -> list[dict]:
+    """미완료 작업 기록을 레지스트리와 맞춘다 (저장은 호출자가). 이번에 끝난 기록들을 돌려준다.
+
+    진행(progress)은 매번 옮겨 적지만 '바뀜'으로 치지 않는다 — 폴링마다 세션 파일을 다시 쓰지 않게.
+    끝나는 순간(done false→true) 결과 비용을 세션 누적 비용에 **한 번** 더한다. 같은 세션을 두 곳
+    (턴·폴링)이 각자 읽어 고쳐도, 늦게 저장한 쪽이 이 전이를 자기 사본에서 다시 하므로 한 번만 남는다.
+    """
+    from md4paper.ui import jobs as registry
+
+    finished: list[dict] = []
+    for rec in session.jobs:
+        if rec.get("done"):
+            continue
+        job = registry.get(rec.get("root") or "", rec.get("job_kind") or rec.get("kind") or "")
+        if job is None or abs(float(job.started) - float(rec.get("started") or 0)) > 1e-3:
+            rec.update(done=True, status="failed", error=LOST_JOB)
+            finished.append(rec)
+            continue
+        rec["progress"] = [int(job.done), int(job.total)]
+        if job.running:
+            continue
+        rec.update(done=True, status=job.status, message=job.message or "")
+        if job.status == "done":
+            rec["result"] = _job_result(rec, job)
+            cost = float(rec["result"].get("cost_usd") or 0.0)
+            if cost:
+                session.usage["cost_usd"] = round(float(session.usage.get("cost_usd") or 0.0) + cost, 6)
+        else:
+            rec["error"] = job.error or "알 수 없는 오류"
+        finished.append(rec)
+    return finished
+
+
+def add_jobs(session: Session, records: list[dict], turn_id: str | None) -> None:
+    """run이 띄운 작업 기록을 세션에 붙인다 — 어느 턴 뒤에 그릴지(turn_id)를 적어서."""
+    for rec in records:
+        rec["turn_id"] = turn_id
+        session.jobs.append(rec)
+    if len(session.jobs) > MAX_JOBS:
+        session.jobs = session.jobs[-MAX_JOBS:]

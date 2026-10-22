@@ -19,6 +19,10 @@
 비용: 세션 누적 비용이 `config.resolve_agent_cost_cap()`(기본 $2)에 닿으면 턴을 시작하지 않고
 400 `{"code": "cost_cap"}`. 창이 확인을 받아 `override: true`로 다시 보내면 그 턴만 허용한다.
 
+작업: 비용 tool(jobtools)이 띄운 번역·용어집 작업은 세션 `jobs`에 남는다. `GET …/{sid}/jobs`가
+레지스트리와 대조해 끝난 것의 결과(번역: 섹션 수·비용, 용어집: 항목 수·비용)를 채워 돌려준다 — 창은
+미완료 작업이 있는 동안만 3초마다 부른다. 끝난 작업 비용은 세션 누적 비용에 들어가 상한 판정에도 쓰인다.
+
 `build_agent`는 인자 없는 공장 함수다(기본: 설정의 [chat] 모델 + 그 키). 테스트는 FunctionModel
 에이전트를 돌려주는 람다를 끼운다 — 옛 `chat_panel.register_routes`의 build_provider 주입과 같은 꼴.
 """
@@ -79,7 +83,15 @@ def readiness(make: Callable[[], object] | None = None) -> tuple[bool, str]:
 def _detail(s: sessions.Session) -> dict:
     """세션 하나를 창에 그릴 형태로."""
     return {**s.meta(), "paper_tokens": s.paper_tokens, "turns": s.turns,
-            "pending": s.pending, "usage": s.usage, "cost_cap": config.resolve_agent_cost_cap()}
+            "pending": s.pending, "usage": s.usage, "cost_cap": config.resolve_agent_cost_cap(),
+            "jobs": s.jobs}
+
+
+def _synced(s: sessions.Session) -> sessions.Session:
+    """작업 기록을 레지스트리와 맞추고, 끝난 것이 있으면 저장한다."""
+    if sessions.sync_jobs(s):
+        sessions.save(s)
+    return s
 
 
 def _reregister(s: sessions.Session, wd_for: Callable[[str], WorkDir | None],
@@ -103,13 +115,16 @@ def _sse(ev: dict) -> str:
 def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noqa: ANN001
                     register_token: Callable[[WorkDir], str],
                     build_agent: Callable[[], object] | None = None,
-                    workspace: Callable[[], Path] | None = None) -> None:
+                    workspace: Callable[[], Path] | None = None,
+                    build_job_provider: Callable | None = None) -> None:
     """`/agent/...` 라우트 등록.
 
     wd_for: 토큰 → WorkDir (모르면 None; 폴백 금지).
     register_token: WorkDir → 토큰 (list_papers가 찾은 논문을 wd_for로 다시 찾을 수 있게 등록).
     build_agent: 인자 없는 에이전트 공장 (기본: `agent.default_agent`).
     workspace: list_papers가 훑을 작업 폴더를 돌려주는 함수 (기본: config 작업 폴더).
+    build_job_provider: 비용 tool의 LLM 공장 `(purpose, WorkDir) → Provider`
+        (기본: `jobtools.default_job_provider` — 앱의 번역 설정). 테스트는 FakeProvider를 끼운다.
     """
     from fastapi.responses import JSONResponse, StreamingResponse
     from pydantic import ValidationError
@@ -150,8 +165,13 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
         return _detail(sessions.create(title=title))
 
     @fastapi_app.get("/agent/sessions/{sid}")
-    def _get(sid: str):  # noqa: ANN202 — 세션 본문 (턴·승인 대기·사용량)
-        return _detail(_load_or_404(sid))
+    def _get(sid: str):  # noqa: ANN202 — 세션 본문 (턴·승인 대기·사용량·작업)
+        return _detail(_synced(_load_or_404(sid)))
+
+    @fastapi_app.get("/agent/sessions/{sid}/jobs")
+    def _jobs(sid: str):  # noqa: ANN202 — 세션이 띄운 백그라운드 작업 (레지스트리와 대조해 갱신)
+        s = _synced(_load_or_404(sid))
+        return {"jobs": s.jobs, "usage": s.usage, "cost_cap": config.resolve_agent_cost_cap()}
 
     @fastapi_app.patch("/agent/sessions/{sid}")
     def _rename(sid: str, body: dict):  # noqa: ANN202 — 이름 바꾸기
@@ -171,6 +191,7 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
         s = await asyncio.to_thread(sessions.load, sid)
         if s is None:
             raise HTTPException(status_code=404)
+        await asyncio.to_thread(_synced, s)    # 끝난 작업 비용까지 넣고 상한을 본다
         # 화면 token 검사보다 먼저 — 재시작 직후 화면의 논문도 이 표로 되살아난다
         await asyncio.to_thread(_reregister, s, wd_for, register_token)
         body = body or {}
@@ -226,7 +247,8 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
             _BUSY[sid] = time.time()
 
         deps = Deps(wd_for=wd_for, current_token=tok, ctx=ctx, register_token=register_token,
-                    workspace=workspace() if workspace else None)
+                    workspace=workspace() if workspace else None,
+                    build_job_provider=build_job_provider)
 
         async def stream():  # noqa: ANN202
             try:

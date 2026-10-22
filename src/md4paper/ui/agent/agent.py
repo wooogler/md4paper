@@ -32,6 +32,7 @@ from pydantic_ai import (  # noqa: E402
     DeferredToolRequests,
     DeferredToolResults,
     RunContext,
+    Tool,
     UsageLimits,
 )
 from pydantic_ai.capabilities import Hooks  # noqa: E402
@@ -51,10 +52,12 @@ from pydantic_ai.usage import RunUsage  # noqa: E402
 
 from md4paper import config  # noqa: E402
 from md4paper.llm.base import Usage, cost_usd  # noqa: E402
-from md4paper.ui.agent import retrieval, sessions  # noqa: E402
+from md4paper.ui.agent import jobtools, retrieval, sessions  # noqa: E402
 from md4paper.ui.agent.cites import note_tag, render_html, resolve_citations  # noqa: E402
 from md4paper.ui.agent.context import PaperRef, to_prompt  # noqa: E402
 from md4paper.ui.agent.tools import TOOLS, Deps, review_url  # noqa: E402
+
+COST_TOOLS = [Tool(fn, requires_approval=True) for fn in jobtools.TOOLS]
 from md4paper.workdir import paper_title  # noqa: E402
 
 DEFAULT_LIMITS = UsageLimits(request_limit=12, tool_calls_limit=20)
@@ -75,6 +78,8 @@ SYSTEM = """너는 md4paper의 논문 읽기 도우미다. 사용자는 PDF를 �
 (list_papers, list_projects), BibTeX(get_bibtex), 사용자 화면 옮기기(goto_row, open_paper).
 쓰기(사용자가 승인해야 실행됨): 메모 탭에 쓰기(write_note), 하이라이트 긋기(add_highlight),
 논문을 컬렉션에 넣고 빼기(set_project_membership), 사용자에 대해 기억하기(remember).
+LLM 비용이 드는 작업(사용자가 승인해야 실행됨): 섹션 다시 번역하기(retranslate_sections — 섹션 id는
+outline에서), 번역 용어집 다시 만들기(run_glossary). 이 둘은 백그라운드로 돌고 tool은 바로 돌아온다.
 
 규칙:
 - 논문 내용에 관한 답은 **tool로 읽은 문단에만** 근거한다. 읽지 않은 내용은 추측하지 말고,
@@ -97,7 +102,9 @@ SYSTEM = """너는 md4paper의 논문 읽기 도우미다. 사용자는 PDF를 �
 - 화면 이동(goto_row, open_paper)은 사용자가 보여 달라고 하거나 이동을 원할 때만 한다.
 - 쓰기 tool은 사용자가 그렇게 해 달라고 할 때만 부른다. 부르면 사용자에게 승인 카드가 뜬다.
   사용자가 거절하면 같은 쓰기를 다시 시도하지 말고 거절된 것을 받아들인다.
-- add_highlight의 quote는 read_rows·search_paper로 읽은 그 행의 글을 그대로 복사한다."""
+- add_highlight의 quote는 read_rows·search_paper로 읽은 그 행의 글을 그대로 복사한다.
+- 비용 작업은 사용자가 분명히 요청할 때만 부른다. 몇 번째 섹션처럼 말하면 outline으로 섹션 id를 찾는다.
+  작업이 끝났는지는 지시문의 '백그라운드 작업' 블록으로 답한다 — 없으면 아직 소식이 없는 것이다."""
 
 
 MEMORY_CUT_NOTE = "…(앞부분 생략)"
@@ -140,7 +147,51 @@ async def _dynamic(ctx: RunContext[Deps]) -> str:
         if wd is not None:
             title = await asyncio.to_thread(paper_title, Path(wd.root))
             deps.ctx = sc = sc.model_copy(update={"paper": PaperRef(token=tok, title=title)})
-    return "\n\n".join(p for p in (memory_text(), to_prompt(sc)) if p)
+    return "\n\n".join(p for p in (memory_text(), to_prompt(sc), deps.job_notice) if p)
+
+
+def _job_line(rec: dict) -> str:
+    """작업 기록 한 줄 — 지시문용."""
+    what = f"{rec.get('label') or rec.get('kind')} ({rec.get('detail') or ''})".replace(" ()", "")
+    paper = f"논문 '{(rec.get('title') or '')[:60]}', token {rec.get('token')}"
+    if not rec.get("done"):
+        d, t = (rec.get("progress") or [0, 0])[:2]
+        prog = f", 진행 {d}/{t}" if t else ""
+        return f"- 진행 중: {what} — {paper}{prog}"
+    if rec.get("status") != "done":
+        return f"- 실패: {what} — {paper}. 오류: {rec.get('error') or '알 수 없음'}"
+    res = rec.get("result") or {}
+    bits = []
+    if rec.get("kind") == "translate":
+        bits.append(f"{res.get('sections', 0)}개 섹션 다시 번역")
+        if res.get("failed"):
+            bits.append(f"{res['failed']}개 구간은 구조 검증 실패로 영어 유지")
+    elif rec.get("kind") == "glossary":
+        bits.append(f"용어 {res.get('entries', 0)}개")
+    bits.append(f"비용 ${float(res.get('cost_usd') or 0):.4f}")
+    return f"- 끝남: {what} — {paper}. {', '.join(bits)}"
+
+
+def job_notice(session: sessions.Session) -> str:
+    """이번 run의 지시문에 실을 백그라운드 작업 소식 — 도는 작업은 매번, 끝난 작업은 **한 번만**.
+
+    끝났는데 아직 알리지 않은 기록은 여기 실리면서 `notified=True`가 된다(저장은 run_turn이).
+    사용자가 "번역 끝났어?"라고 물으면 모델이 이 블록으로 답한다.
+    """
+    fresh = [r for r in session.jobs if r.get("done") and not r.get("notified")]
+    running = [r for r in session.jobs if not r.get("done")]
+    if not fresh and not running:
+        return ""
+    lines = ["## 백그라운드 작업 (이 대화에서 시작한 것)"]
+    if fresh:
+        lines.append("새로 끝난 작업 — 아직 사용자에게 알리지 않았다. 이번 답에서 짧게 알려 준다:")
+        lines += [_job_line(r) for r in fresh]
+    if running:
+        lines.append("아직 도는 작업:")
+        lines += [_job_line(r) for r in running]
+    for r in fresh:
+        r["notified"] = True
+    return "\n".join(lines)
 
 
 # --- 모델에 보내는 기록 창 ---------------------------------------------
@@ -192,7 +243,7 @@ def _window_hook(ctx: RunContext[Deps], request_context):  # noqa: ANN001, ANN20
 def make_agent(model) -> Agent[Deps, str | DeferredToolRequests]:  # noqa: ANN001
     """모델(Model 인스턴스)에 tool·지시문을 얹은 Agent. 테스트는 여기에 FunctionModel을 넣는다."""
     return Agent(model, deps_type=Deps, output_type=[str, DeferredToolRequests],
-                 instructions=[SYSTEM, _dynamic], tools=TOOLS,
+                 instructions=[SYSTEM, _dynamic], tools=[*TOOLS, *COST_TOOLS],
                  capabilities=[Hooks(before_model_request=_window_hook)])
 
 
@@ -297,6 +348,18 @@ def _seed_from_turns(session: sessions.Session, deps: Deps) -> None:
                 deps.cited_rows.add((tok, int(c.get("row") or 0)))
 
 
+def _finish_jobs(session: sessions.Session, deps: Deps, turn_id: str | None) -> None:
+    """이번 run이 띄운 작업을 세션에 붙이고 레지스트리와 맞춘다 (저장 직전에 부른다).
+
+    turn_id가 없으면(오류·승인 대기로 끝남) 지금 마지막 턴 뒤에 그린다.
+    """
+    if deps.jobs:
+        last = session.turns[-1]["id"] if session.turns else None
+        sessions.add_jobs(session, deps.jobs, turn_id or last)
+        deps.jobs = []
+    sessions.sync_jobs(session)
+
+
 def _clip(text: str | None) -> str | None:
     if text is None:
         return None
@@ -346,7 +409,7 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
     """한 턴(또는 승인 뒤 재개)을 돌리며 SSE 이벤트 dict를 낸다. 끝나면 세션을 저장한다.
 
     이벤트: text{delta} · tool_call{id,name,args} · tool_result{id,summary} · ui_action{kind,…}
-    · approval_needed{calls} · done{turn_id,html,citations,usage,cost_usd,session_cost_usd,pending}
+    · approval_needed{calls} · done{turn_id,html,citations,usage,cost_usd,session_cost_usd,pending,jobs}
     · error{message}. 오류가 나면 error 하나로 끝나고 done은 오지 않는다.
     """
     text = (user_text or "").strip() or None
@@ -356,6 +419,8 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
     # 턴 상한을 이번 run만으로 세도록 usage를 비운 대화를 넘긴다 (끝나고 누적에 더한다)
     conv_in = dataclasses.replace(session.conversation, usage=RunUsage())
     _seed_from_turns(session, deps)
+    sessions.sync_jobs(session)
+    deps.job_notice = job_notice(session)
     cur = deps.wd_for(deps.current_token) if deps.current_token else None
     sessions.touch_paper(session, deps.current_token, cur.root if cur is not None else None)
     if text and not session.title:
@@ -402,6 +467,8 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
             session.turns.append({"id": sessions.turn_id(), "ts": time.time(),
                                   "role": "assistant", "text": "", "html": "", "citations": [],
                                   "usage": None, "cost_usd": 0.0, "model": label, "error": msg})
+        if user_turn or deps.jobs:    # 오류 전에 띄운 작업도 기록에 남긴다 (안 남기면 소식이 끊긴다)
+            _finish_jobs(session, deps, None)
             sessions.remember_papers(session, deps.papers)
             await asyncio.to_thread(sessions.save, session)
         yield _event("error", {"message": msg})
@@ -425,12 +492,14 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
     if isinstance(output, DeferredToolRequests):
         # token 없이 부른 쓰기는 승인 뒤에도 이 논문에 쓴다 (routes가 재개 때 metadata로 넘긴다)
         session.pending_token = deps.current_token
+        _finish_jobs(session, deps, None)
         sessions.remember_papers(session, deps.papers)
         await asyncio.to_thread(sessions.save, session)
         yield _event("approval_needed", session.pending or {"calls": []})
         yield _event("done", {"turn_id": None, "html": "", "citations": [], "usage": turn_usage,
                               "cost_usd": round(cost, 6),
-                              "session_cost_usd": session.usage["cost_usd"], "pending": True})
+                              "session_cost_usd": session.usage["cost_usd"], "pending": True,
+                              "jobs": session.jobs})
         return
 
     clean, refs = resolve_citations(str(output or ""), deps.cited_rows, deps.cited_notes,
@@ -442,8 +511,10 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
             "cost_usd": round(cost, 6), "model": label}
     session.turns.append(turn)
     session.pending_token = None
+    _finish_jobs(session, deps, turn["id"])
     sessions.remember_papers(session, deps.papers)
     await asyncio.to_thread(sessions.save, session)
     yield _event("done", {"turn_id": turn["id"], "html": html, "citations": citations,
                           "usage": turn_usage, "cost_usd": turn["cost_usd"],
-                          "session_cost_usd": session.usage["cost_usd"], "pending": False})
+                          "session_cost_usd": session.usage["cost_usd"], "pending": False,
+                          "jobs": session.jobs})

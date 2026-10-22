@@ -51,8 +51,10 @@ def _context_tail(text: str, max_chars: int = _TAIL_CHARS) -> str:
     return tail[m.end():] if m else tail
 
 
-def _build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict]:
+def build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict]:
     """en.md를 섹션 단위 유닛으로. 각 유닛: {sids, translatable, source}.
+
+    공개 접합부 — 에이전트의 섹션 재번역(ui/agent/jobtools)이 어느 유닛의 캐시를 지울지 고를 때 쓴다.
 
     섹션별 translate 플래그를 따르고, 참고문헌은 translate_references가 꺼져 있으면 제외.
     작은 번역 섹션은 인접끼리 병합(멤버 sid 보존), 큰 섹션은 문단 경계로 파트 분할(각 파트가 같은 sid).
@@ -197,7 +199,16 @@ def _remember(cache: dict[str, str], u: dict, translated: str) -> None:
                 cache[hash_text(text)] = piece
 
 
-def _unit_hashes(u: dict) -> set[str]:
+_build_units = build_units   # 옛 이름 (controller가 쓴다)
+
+
+def unit_hashes(u: dict, gloss=None) -> set[str]:  # noqa: ANN001 — GlossaryList | None
+    """유닛의 캐시 키들 — 유닛 원문 해시 + 섹션 조각 해시(병합 유닛이면 조각별로도 저장되므로).
+
+    공개 접합부: 에이전트의 섹션 재번역이 이 키들을 cache.json에서 지워 '그 유닛만 다시'를 만든다.
+    gloss는 지금 쓰지 않는다 — 다른 브랜치가 용어집 반영 해시로 바꿀 접합부다(이름·인자를 유지할 것).
+    조각 해시를 빼면 병합 유닛은 유닛 해시를 지워도 조각으로 캐시에 걸려 다시 번역되지 않는다.
+    """
     return {hash_text(u["source"]), *(hash_text(t) for _s, t in (u.get("sections") or []))}
 
 
@@ -355,7 +366,7 @@ def run_translate(
     wd.ko_md.write_text(ko, encoding="utf-8")
     # 캐시는 합친다 — 이번에 안 쓴 항목도 지금 문서에 그 원문이 남아 있으면 보관(체크를 풀었다가
     # 다시 켜도 비용 없이 돌아온다). 원문이 사라진 항목만 버린다.
-    current: set[str] = set().union(*(_unit_hashes(u) for u in units)) if units else set()
+    current: set[str] = set().union(*(unit_hashes(u, gloss) for u in units)) if units else set()
     merged = {h: t for h, t in {**cache, **new_cache}.items() if h in current}
     wd.cache_json.write_text(
         json.dumps({"key": cache_key, "chunks": merged}, ensure_ascii=False, indent=2),
