@@ -414,7 +414,9 @@ def validate_provider_key(provider: str, model: str, key: str) -> tuple[bool, st
         return False, "키가 비어 있습니다."
     try:
         prov = get_provider(provider, api_key=key, model=model)
-        prov.complete("You are a connection test.", "ping", max_tokens=1)
+        # 16: OpenAI Responses API는 max_output_tokens < 16을 400으로 거절한다 — 1이면 키가 맞아도
+        # 연결 테스트가 늘 실패로 보였다. Anthropic·Gemini는 16도 그대로 받는다.
+        prov.complete("You are a connection test.", "ping", max_tokens=16)
     except Exception as e:  # noqa: BLE001 — SDK별 예외를 그대로 사용자에게 요약
         msg = str(e).strip().splitlines()[0] if str(e).strip() else e.__class__.__name__
         return False, msg[:200]
