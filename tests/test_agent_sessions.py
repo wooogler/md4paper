@@ -111,6 +111,32 @@ def test_conversation_roundtrip_with_usage_and_pending():
     assert sessions.list_sessions()[0]["last_paper"] == "0123456789ab"
 
 
+def test_papers_map_roundtrip_and_old_files_without_it(tmp_path, monkeypatch):
+    s = sessions.create()
+    sessions.touch_paper(s, "0123456789ab", tmp_path / "a.md4")
+    sessions.touch_paper(s, "fedcba987654")                  # 경로를 모르면 목록만 갱신
+    sessions.remember_papers(s, {"aaaaaaaaaaaa": tmp_path / "b.md4", "": tmp_path / "x"})
+    sessions.save(s)
+    back = sessions.load(s.id)
+    assert back.papers == {"0123456789ab": str((tmp_path / "a.md4").resolve()),
+                           "aaaaaaaaaaaa": str((tmp_path / "b.md4").resolve())}
+    assert back.paper_tokens == ["0123456789ab", "fedcba987654"]
+
+    # 옛 세션 파일 — paper_tokens만 있고 papers가 없다
+    path = sessions.sessions_dir() / f"{s.id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    del data["papers"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    old = sessions.load(s.id)
+    assert old.papers == {} and old.paper_tokens == ["0123456789ab", "fedcba987654"]
+
+    # 상한을 넘으면 오래된 것부터 버리고, 다시 본 것은 뒤(최근)로 간다
+    monkeypatch.setattr(sessions, "MAX_PAPERS", 2)
+    sessions.remember_papers(old, {"t1": tmp_path / "1", "t2": tmp_path / "2"})
+    sessions.remember_papers(old, {"t1": tmp_path / "1", "t3": tmp_path / "3"})
+    assert list(old.papers) == ["t1", "t3"]
+
+
 def test_trim_cuts_whole_turns_at_user_boundaries(monkeypatch):
     s = sessions.create()
     msgs = []

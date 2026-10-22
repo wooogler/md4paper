@@ -356,7 +356,8 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
     # 턴 상한을 이번 run만으로 세도록 usage를 비운 대화를 넘긴다 (끝나고 누적에 더한다)
     conv_in = dataclasses.replace(session.conversation, usage=RunUsage())
     _seed_from_turns(session, deps)
-    sessions.touch_paper(session, deps.current_token)
+    cur = deps.wd_for(deps.current_token) if deps.current_token else None
+    sessions.touch_paper(session, deps.current_token, cur.root if cur is not None else None)
     if text and not session.title:
         session.title = sessions.default_title(text)
     user_turn = ({"id": sessions.turn_id(), "ts": time.time(), "role": "user", "text": text,
@@ -401,6 +402,7 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
             session.turns.append({"id": sessions.turn_id(), "ts": time.time(),
                                   "role": "assistant", "text": "", "html": "", "citations": [],
                                   "usage": None, "cost_usd": 0.0, "model": label, "error": msg})
+            sessions.remember_papers(session, deps.papers)
             await asyncio.to_thread(sessions.save, session)
         yield _event("error", {"message": msg})
         return
@@ -423,6 +425,7 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
     if isinstance(output, DeferredToolRequests):
         # token 없이 부른 쓰기는 승인 뒤에도 이 논문에 쓴다 (routes가 재개 때 metadata로 넘긴다)
         session.pending_token = deps.current_token
+        sessions.remember_papers(session, deps.papers)
         await asyncio.to_thread(sessions.save, session)
         yield _event("approval_needed", session.pending or {"calls": []})
         yield _event("done", {"turn_id": None, "html": "", "citations": [], "usage": turn_usage,
@@ -439,6 +442,7 @@ async def run_turn(agent: Agent, session: sessions.Session, user_text: str | Non
             "cost_usd": round(cost, 6), "model": label}
     session.turns.append(turn)
     session.pending_token = None
+    sessions.remember_papers(session, deps.papers)
     await asyncio.to_thread(sessions.save, session)
     yield _event("done", {"turn_id": turn["id"], "html": html, "citations": citations,
                           "usage": turn_usage, "cost_usd": turn["cost_usd"],

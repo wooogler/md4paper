@@ -7,6 +7,10 @@
 `state["current_wd"]`로 폴백하지 않는다(창이 여럿이면 엉뚱한 논문을 읽게 된다). 그러니 app.py는
 `wd_for`로 **폴백 없는** 조회(`state["wd_by_token"].get`)를 넘겨야 한다.
 
+재시작: 등록부는 서버 메모리라 다시 켜면 빈다. 그래도 대화 기록에는 앞 턴에서 받은 token이 남아
+모델이 그것으로 tool을 부르므로(승인까지 받은 쓰기 재개도), 턴을 시작할 때마다 세션의 `papers`
+(token → 작업 폴더)를 `register_token`으로 다시 등록한다. 없어진 폴더는 건너뛴다.
+
 승인: 쓰기 tool을 부른 턴은 `approval_needed`로 끝나고 세션에 대기 호출이 남는다. 창은 같은 턴
 라우트에 `approvals: {call_id: true|false}`를 보내 재개한다(빠진 id는 거절). 대기 중인데 approvals
 없이 새 질문이 오면 대기 호출을 모두 거절로 닫고 그 질문을 잇는다 — 사용자가 카드를 무시하고
@@ -76,6 +80,20 @@ def _detail(s: sessions.Session) -> dict:
     """세션 하나를 창에 그릴 형태로."""
     return {**s.meta(), "paper_tokens": s.paper_tokens, "turns": s.turns,
             "pending": s.pending, "usage": s.usage, "cost_cap": config.resolve_agent_cost_cap()}
+
+
+def _reregister(s: sessions.Session, wd_for: Callable[[str], WorkDir | None],
+                register_token: Callable[[WorkDir], str]) -> None:
+    """세션이 기억하는 논문 중 등록부에 없는 것을 다시 등록한다 (서버 재시작 뒤 대화를 이을 때).
+
+    아직 작업 폴더인지(`structure/sections.yaml`)는 뷰어 라우트(app.review_view)와 같은 판정.
+    """
+    for tok, path in list(s.papers.items()):
+        if wd_for(tok) is not None:
+            continue
+        wd = WorkDir(Path(path))
+        if wd.sections_yaml.exists():
+            register_token(wd)
 
 
 def _sse(ev: dict) -> str:
@@ -153,6 +171,8 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
         s = await asyncio.to_thread(sessions.load, sid)
         if s is None:
             raise HTTPException(status_code=404)
+        # 화면 token 검사보다 먼저 — 재시작 직후 화면의 논문도 이 표로 되살아난다
+        await asyncio.to_thread(_reregister, s, wd_for, register_token)
         body = body or {}
         try:
             ctx = ScreenContext.model_validate(body.get("context") or {})

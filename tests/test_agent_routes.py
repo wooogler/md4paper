@@ -171,6 +171,73 @@ def test_concurrent_turn_on_same_session_is_409(env):
     assert r.status_code == 200 and _sse(r.text)[-1][0] == "done"
 
 
+def _listed_token(msgs: list) -> str:
+    m = re.search(r"token ([0-9a-f]{12}):", "\n".join(tool_returns(msgs)))
+    return m.group(1) if m else "notfound0000"
+
+
+def test_restart_reregisters_tokens_from_session(tmp_path):
+    """서버 재시작(빈 등록부) 뒤에도 앞 턴에서 받은 token으로 승인 재개·읽기가 된다."""
+    from md4paper import notes
+
+    wd = make_wd(tmp_path / "ws")
+    steps = [[("list_papers", {})],
+             lambda msgs: [("write_note", {"name": "메모", "text": "재시작 뒤 글",
+                                           "token": _listed_token(msgs)})],
+             lambda msgs: [("search_paper", {"query": "interviewed",
+                                             "token": _listed_token(msgs)})],
+             "썼어요."]
+
+    def server():  # noqa: ANN202 — 새로 켠 서버: 등록부가 비어 있다
+        reg = Registry()
+        app = FastAPI()
+        routes.register_routes(app, reg.wd_for, reg.register,
+                               build_agent=lambda: make_agent(scripted_model(steps)),
+                               workspace=lambda: tmp_path / "ws")
+        return TestClient(app), reg
+
+    client, _reg = server()
+    sid = client.post("/agent/sessions").json()["id"]
+    r = client.post(f"/agent/sessions/{sid}/turns",
+                    json={"message": "메모 써 줘", "context": {"screen": "home"}})
+    events = _sse(r.text)
+    need = [d for n, d in events if n == "approval_needed"][0]
+    tok = need["calls"][0]["args"]["token"]
+    assert tok != "notfound0000"
+    assert sessions.load(sid).papers == {tok: str(wd.root.resolve())}
+
+    client, reg = server()                                  # 재시작
+    assert reg.by_token == {}
+    r = client.post(f"/agent/sessions/{sid}/turns",
+                    json={"approvals": {need["calls"][0]["id"]: True},
+                          "context": {"screen": "home"}})
+    events = _sse(r.text)
+    results = [d["summary"] for n, d in events if n == "tool_result"]
+    assert len(results) == 2 and not any("알 수 없는" in x for x in results), results
+    assert events[-1][0] == "done" and "썼어요" in events[-1][1]["html"]
+    assert notes.read(wd, "메모") == "재시작 뒤 글\n"
+    assert set(reg.by_token) == {tok}
+
+
+def test_restart_skips_folders_that_are_gone(tmp_path):
+    wd = make_wd(tmp_path)
+    gone = make_wd(tmp_path, "gone")
+    tok = Registry(wd).register(wd)
+    s = sessions.create()
+    sessions.remember_papers(s, {"aaaaaaaaaaaa": gone.root, tok: wd.root})
+    sessions.save(s)
+    shutil.rmtree(gone.root)
+    reg = Registry()
+    app = FastAPI()
+    routes.register_routes(app, reg.wd_for, reg.register, build_agent=_agent)
+    # 화면 token 검사(404)보다 먼저 재등록하므로 재시작 직후의 화면 논문도 통과한다
+    r = TestClient(app).post(f"/agent/sessions/{s.id}/turns",
+                             json={"message": "몇 명?", "context": _ctx(tok)})
+    assert r.status_code == 200 and _sse(r.text)[-1][0] == "done"
+    assert set(reg.by_token) == {tok}
+    assert sessions.load(s.id).papers[tok] == str(wd.root.resolve())
+
+
 def test_models_list_and_switch(env):
     client, _tok = env
     m = client.get("/agent/models").json()

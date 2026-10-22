@@ -71,6 +71,15 @@ class Deps:
     register_token: Callable[[WorkDir], str] = lambda wd: token_of(wd.root)
     note_refs: dict[str, dict] = field(default_factory=dict)   # 메모 태그 → {id,row,token,…}
     workspace: Path | None = None    # list_papers가 훑을 작업 폴더 (None이면 config 기본)
+    # 이번 run에서 새로 등록한 token → 작업 폴더. run이 끝나면 세션 `papers`에 합쳐 저장한다 —
+    # 서버를 다시 켜도 대화 기록 속 token을 routes가 다시 등록할 수 있게.
+    papers: dict[str, Path] = field(default_factory=dict)
+
+    def register(self, wd: WorkDir) -> str:
+        """`register_token`을 부르고 그 token의 경로를 `papers`에 적는다 (tool은 이것을 쓴다)."""
+        tok = self.register_token(wd)
+        self.papers[tok] = Path(wd.root)
+        return tok
 
 
 # --- 공통 ---------------------------------------------------------------
@@ -403,7 +412,7 @@ async def list_papers(ctx: RunContext[Deps], query: str | None = None,
             extra.append("컬렉션: " + ", ".join(names[i] for i in r["projects"]))
         if r.get("has_ko"):
             extra.append("번역 있음")
-        tok = deps.register_token(WorkDir(Path(r["root"])))
+        tok = deps.register(WorkDir(Path(r["root"])))
         if tok == deps.current_token:
             extra.append("← 지금 열린 논문")
         tail = f" · {' · '.join(extra)}" if extra else ""

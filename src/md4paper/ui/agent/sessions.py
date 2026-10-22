@@ -15,6 +15,11 @@ CONFIG_DIR/agent/sessions.json         ← 목록 (id, 제목, 갱신 시각, �
 
 저장은 tmp→replace로 원자적이고 프로세스 안에서는 락을 건다. 여러 창이 같은 세션에 쓰면
 마지막 저장이 이긴다(손상만 막는다). 상한(MAX_TURNS)을 넘으면 오래된 턴을 요약 없이 버린다.
+
+`papers`는 대화에 나온 논문 token → 작업 폴더 절대 경로. 서버의 token 등록부(`wd_by_token`)는
+메모리라 재시작하면 비는데, 대화 기록에는 앞 턴의 token이 그대로 남아 모델이 그것으로 tool을
+부른다. 턴을 시작할 때 routes가 이 표로 등록부를 다시 채운다. (옛 파일은 `paper_tokens`만 있고
+`papers`가 없다 — 빈 표로 읽고, 다음 턴부터 채워진다.)
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from md4paper import config
 
 VERSION = 1
 MAX_TURNS = 200       # 사용자 질문 기준 상한 — 넘으면 앞부분을 잘라낸다 (요약하지 않는다)
+MAX_PAPERS = 500      # papers(token → 경로) 상한 — list_papers가 한 번에 수백 편을 등록할 수 있다
 TITLE_CHARS = 40      # 기본 제목 = 첫 질문 앞 40자
 
 _lock = threading.RLock()
@@ -68,6 +74,8 @@ class Session:
     updated: float = field(default_factory=time.time)
     model: str = ""                                   # "openai:gpt-6-luna" — 마지막 턴의 모델
     paper_tokens: list[str] = field(default_factory=list)   # 다룬 논문들 (마지막 = 최근)
+    # 대화에 나온 token → 작업 폴더 절대 경로 (화면의 논문·list_papers 결과). 재시작 뒤 재등록용.
+    papers: dict[str, str] = field(default_factory=dict)
     conversation: object = field(default_factory=_empty_conversation)  # pydantic_ai.Conversation
     turns: list[dict] = field(default_factory=list)
     usage: dict = field(default_factory=lambda: {"input": 0, "output": 0, "cost_usd": 0.0})
@@ -111,7 +119,7 @@ def _to_dict(s: Session) -> dict:
     conv = json.loads(ConversationTypeAdapter.dump_json(s.conversation))
     return {"version": VERSION, "id": s.id, "title": s.title, "created": s.created,
             "updated": s.updated, "model": s.model, "paper_tokens": s.paper_tokens,
-            "conversation": conv, "turns": s.turns, "usage": s.usage,
+            "papers": s.papers, "conversation": conv, "turns": s.turns, "usage": s.usage,
             "pending_token": s.pending_token}
 
 
@@ -123,12 +131,14 @@ def _from_dict(data: dict) -> Session:
     conv = (ConversationTypeAdapter.validate_json(json.dumps(raw)) if isinstance(raw, dict)
             else _empty_conversation())
     usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+    papers = data.get("papers") if isinstance(data.get("papers"), dict) else {}
     return Session(
         id=str(data["id"]), title=str(data.get("title") or ""),
         created=float(data.get("created") or time.time()),
         updated=float(data.get("updated") or time.time()),
         model=str(data.get("model") or ""),
         paper_tokens=[str(t) for t in (data.get("paper_tokens") or []) if t],
+        papers={str(t): str(p) for t, p in papers.items() if t and p},
         conversation=conv,
         turns=[t for t in (data.get("turns") or []) if isinstance(t, dict)],
         usage={"input": int(usage.get("input") or 0), "output": int(usage.get("output") or 0),
@@ -262,11 +272,28 @@ def delete(sid: str) -> bool:
         return existed
 
 
-def touch_paper(session: Session, token: str | None) -> None:
-    """이 세션이 다룬 논문 목록에 토큰을 맨 뒤(= 최근)로 올린다 (저장은 호출자가)."""
+def touch_paper(session: Session, token: str | None, root: Path | str | None = None) -> None:
+    """이 세션이 다룬 논문 목록에 토큰을 맨 뒤(= 최근)로 올린다 (저장은 호출자가).
+
+    root를 주면 `papers`에도 경로를 적는다 — 재시작 뒤 이 token을 다시 등록할 수 있게.
+    """
     if not token:
         return
     session.paper_tokens = [t for t in session.paper_tokens if t != token] + [token]
+    if root is not None:
+        remember_papers(session, {token: root})
+
+
+def remember_papers(session: Session, papers: dict[str, Path | str]) -> None:
+    """token → 작업 폴더 경로를 `papers`에 합친다. 새로 본 것이 뒤(= 최근)로 가고, 상한을 넘으면
+    오래된 것부터 버린다 (저장은 호출자가)."""
+    for tok, root in papers.items():
+        if not tok or not root:
+            continue
+        session.papers.pop(tok, None)
+        session.papers[tok] = str(Path(root).expanduser().resolve())
+    while len(session.papers) > MAX_PAPERS:
+        session.papers.pop(next(iter(session.papers)))
 
 
 def default_title(text: str) -> str:
