@@ -419,8 +419,10 @@ async def goto_row(ctx: RunContext[Deps], row: int, token: str | None = None) ->
         return got
     tok, wd = got
     n = len((await asyncio.to_thread(retrieval.paper, wd)).chunks)
-    if not 0 <= int(row) < max(n, 1):
-        return f"행 범위 밖입니다 (r0–r{max(n - 1, 0)})."
+    if not n:
+        return "이 논문에서 읽을 수 있는 본문이 없습니다."
+    if not 0 <= int(row) < n:
+        return f"행 범위 밖입니다 (r0–r{n - 1})."
     ctx.deps.ui_actions.put_nowait({"kind": "goto_row", "token": tok, "row": int(row)})
     where = "" if tok == ctx.deps.current_token else " (그 논문을 열고)"
     return f"화면을{where} r{int(row)}로 옮겼습니다."
