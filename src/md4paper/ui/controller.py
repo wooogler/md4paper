@@ -136,8 +136,12 @@ class UIController:
         depth = int(depth_s or 0)
         value = int(level) if str(level).isdigit() else level
         n = 0
+        from md4paper.structure import numbering
+
         for s in self.manifest.sections:
             if self.group_key(s) == (scheme, depth):
+                if isinstance(value, int) and numbering.is_front_matter_label(s.text):
+                    continue  # 'Abstract와 같은 무번호 → 제목 1'에 Keywords·CCS 라벨이 딸려 올라가지 않게
                 s.level = value
                 s.needs_review = False
                 n += 1

@@ -755,3 +755,19 @@ def test_opening_old_manifest_reassembles_front_matter_labels(tmp_path):
     UIController(wd)
     en = wd.en_md.read_text(encoding="utf-8")
     assert "# CCS Concepts" not in en and "*CCS Concepts*\n\n· HCI." in en
+
+
+def test_group_level_does_not_promote_front_matter_labels(tmp_path):
+    """무번호 그룹을 일괄 '제목 1'로 해도 Keywords 라벨은 기울임 문단으로 남는다."""
+    from md4paper.review import manifest as manifest_io
+    from md4paper.structure import build
+
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.ensure()
+    raw = "# A Paper\n\n## Abstract\n\nText.\n\n## Keywords\n\nwriting\n\n# 1 Introduction\n\nBody.\n"
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    manifest_io.save(build.build(raw, wd), wd)
+    c = UIController(wd)
+    c.apply_group_level("unnumbered:1", 2)
+    lv = {s.text: s.level for s in c.manifest.sections}
+    assert lv["Abstract"] == 2 and lv["Keywords"] == "italic"
