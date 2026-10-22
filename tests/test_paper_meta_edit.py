@@ -202,6 +202,37 @@ def test_refetch_overlays_user_values_and_fills_doi(tmp_path, monkeypatch):
     assert bibsource.load(wd) == rec  # 못 찾으면 받아 둔 기록을 지우지 않는다
 
 
+def test_refetch_keeps_old_values_missing_from_new_record(tmp_path, monkeypatch):
+    """다시 받은 기록에 venue·pages가 빠져도 옛 값이 남아 .bib의 booktitle이 사라지지 않는다."""
+    sparse = {"title": RECORD["title"], "authors": [], "year": 2017, "venue": "",
+              "kind": "inproceedings", "doi": "", "retracted": False, "meta_source": "s2"}
+    monkeypatch.setattr(bibsource, "fetch", lambda *a, **k: dict(sparse))
+    wd = _wd(tmp_path, meta=ATTN)
+    bibsource.save(wd, {**RECORD, "retracted": True})
+
+    rec = bibsource.refetch(wd)
+
+    assert rec["venue"] == RECORD["venue"] and rec["pages"] == "5998--6008"
+    assert rec["doi"] == RECORD["doi"]
+    assert rec["authors"] == RECORD["authors"]  # 저자가 비면 옛 저자·표기를 함께 남긴다
+    assert rec["author_latex"] == RECORD["author_latex"]
+    assert rec["retracted"] is False and rec["meta_source"] == "s2"  # 값이 있는 칸은 새 기록이 이긴다
+    _key, entry = bibtex.entry_for(wd)
+    assert "Advances in Neural Information Processing Systems" in entry
+
+
+def test_refetch_new_authors_do_not_borrow_old_author_latex(tmp_path, monkeypatch):
+    monkeypatch.setattr(bibsource, "fetch", lambda *a, **k: {
+        "title": RECORD["title"], "authors": ["Ashish Vaswani", "Noam Shazeer"], "venue": "NeurIPS"})
+    wd = _wd(tmp_path, meta=ATTN)
+    bibsource.save(wd, RECORD)
+
+    rec = bibsource.refetch(wd)
+
+    assert rec["authors"] == ["Ashish Vaswani", "Noam Shazeer"] and "author_latex" not in rec
+    assert rec["venue"] == "NeurIPS" and rec["pages"] == "5998--6008"
+
+
 class _Provider:
     def __init__(self, meta: PaperMeta):
         self.meta = meta
