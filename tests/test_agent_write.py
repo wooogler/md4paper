@@ -348,6 +348,24 @@ def test_remember_appends_dated_line_and_warns_when_long(tmp_path):
     assert sessions.memory_path().read_text(encoding="utf-8").endswith(f"가\n- {today} 넘침\n")
 
 
+def test_memory_text_keeps_recent_tail_at_line_boundary():
+    path = sessions.memory_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"- 2026-10-{i % 28 + 1:02d} 기억 {i:03d} " + "가" * 60 for i in range(80)]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert len(path.read_text(encoding="utf-8")) > 4000
+    text = memory_text()
+    body = text.split("\n", 1)[1]                                 # 머리 줄 다음
+    assert body.startswith("…(앞부분 생략)\n- ")                  # 줄 경계에서 자른다
+    assert "기억 079" in body and "기억 000" not in body           # 최근(끝) 기억이 남는다
+    assert len(body) <= 4000 + len("…(앞부분 생략)\n")
+    kept = body.split("\n")[1:]
+    assert all(ln in lines for ln in kept)                         # 반쪽 줄이 없다
+
+    path.write_text("짧은 기억\n", encoding="utf-8")
+    assert "앞부분 생략" not in memory_text() and memory_text().endswith("짧은 기억")
+
+
 def test_descriptions_and_tools_require_approval(tmp_path):
     assert describe_call("write_note", {"name": "정리", "text": "a\n\nb\nc", "mode": "replace"}) \
         == "'정리' 탭 내용을 새 글(3줄)로 바꿈"

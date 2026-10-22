@@ -100,8 +100,15 @@ SYSTEM = """너는 md4paper의 논문 읽기 도우미다. 사용자는 PDF를 �
 - add_highlight의 quote는 read_rows·search_paper로 읽은 그 행의 글을 그대로 복사한다."""
 
 
+MEMORY_CUT_NOTE = "…(앞부분 생략)"
+
+
 def memory_text() -> str:
-    """장기 메모리(`CONFIG_DIR/agent/memory.md`) — 없으면 빈 문자열, 길면 앞 4000자."""
+    """장기 메모리(`CONFIG_DIR/agent/memory.md`) — 없으면 빈 문자열, 길면 **뒤** 4000자.
+
+    `remember`는 끝에 덧붙이므로 최근 기억이 꼬리에 있다. 자르는 자리는 줄 경계 — 잘린 첫 줄은
+    통째로 버린다(반쪽 문장이 사실처럼 읽히지 않게). 한 줄이 4000자를 넘으면 글자로 자른다.
+    """
     try:
         text = sessions.memory_path().read_text(encoding="utf-8").strip()
     except OSError:
@@ -109,7 +116,12 @@ def memory_text() -> str:
     if not text:
         return ""
     if len(text) > MEMORY_MAX:
-        text = text[:MEMORY_MAX].rstrip() + "\n…(memory.md가 길어 뒷부분 생략)"
+        cut = len(text) - MEMORY_MAX
+        tail = text[cut:]
+        if text[cut - 1] != "\n":              # 줄 한가운데서 잘렸으면 그 줄을 버린다
+            nl = tail.find("\n")
+            tail = tail[nl + 1:] if nl >= 0 else tail
+        text = MEMORY_CUT_NOTE + "\n" + tail.lstrip("\n")
     return "## 사용자에 대해 기억해 둔 것 (memory.md)\n" + text
 
 

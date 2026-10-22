@@ -526,7 +526,7 @@ async def open_paper(ctx: RunContext[Deps], token: str, lang: str | None = None)
 
 NOTE_MAX = 20000       # write_note 한 번에 쓰는 글 상한
 MEMORY_LINE_MAX = 500  # remember 한 줄 상한
-MEMORY_WARN = 4000     # agent.MEMORY_MAX와 같은 값 — 넘으면 뒷부분이 지시문에 안 들어간다
+MEMORY_WARN = 4000     # agent.MEMORY_MAX와 같은 값 — 넘으면 앞부분(오래된 기억)이 지시문에 안 들어간다
 ANCHOR_CTX = 40        # 하이라이트 앵커의 앞뒤 문맥 길이 — 뷰어 JS의 CTX와 같게
 # 뷰어가 셀을 그리는 markdown2 extras (app.py의 `_md = [...]`, ui.markdown(enb, extras=_md))
 VIEW_EXTRAS = "fenced-code-blocks tables latex"
@@ -803,8 +803,8 @@ async def remember(ctx: RunContext[Deps], text: str) -> str:
     size = await asyncio.to_thread(work)
     msg = f"기억해 두었습니다: {line}"
     if size > MEMORY_WARN:
-        msg += (f"\n(memory.md가 {MEMORY_WARN}자를 넘어 뒷부분은 지시문에 들어가지 않습니다 — "
-                "사용자에게 memory.md를 정리하라고 알려 주세요.)")
+        msg += (f"\n(memory.md가 {MEMORY_WARN}자를 넘어 앞부분(오래된 기억)은 지시문에 들어가지 "
+                "않습니다 — 사용자에게 memory.md를 정리하라고 알려 주세요.)")
     return msg
 
 
