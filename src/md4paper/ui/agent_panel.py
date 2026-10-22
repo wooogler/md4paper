@@ -20,11 +20,23 @@
 
 메모 서랍(`#md-anno-panel`)과 같은 자리·같은 시각 언어를 쓰고 둘은 번갈아 열린다. '읽던 자리로'
 알약(칩 점프로 잃은 자리 되돌리기)은 옛 서랍에서 그대로 옮겨 왔다.
+
+- **새 창으로**(머리의 ⧉): 같은 창 UI를 단독 페이지 `/agent?session=…&paper=…`(`standalone_page`)로
+  띄운다. 앱 창 모드면 서버가 형제 웹뷰 프로세스를(`POPOUT_EVENT` → app.py가 넘긴 `popout`),
+  브라우저 모드면 진짜 `<a target="_blank">` 링크가 새 탭을 연다(서버를 왕복한 window.open은 팝업
+  차단에 걸린다). 같은 세션을 두 창이 함께 쓰면 마지막 저장이 이기므로 기본은 **넘겨주기** — 새 창을
+  열면 이 창의 서랍은 닫는다. 단독 창(body.ag-standalone)에는 뷰어가 없어 화면 이동(칩·open_paper·
+  goto_row)은 새 탭(사용자 클릭일 때) 또는 "메인 창에서 열어 주세요" 안내 줄로 대신하고, 턴이 없을 때
+  `SA_POLL_MS`마다 세션을 다시 읽어 다른 창에서 쌓인 턴을 반영한다.
 """
 
 from __future__ import annotations
 
 import json
+import re
+from collections.abc import Callable
+from pathlib import Path
+from urllib.parse import urlencode
 
 PANEL_ID = "md4-agent"           # body 직속 서랍 id — spa.add_body_html이 같은 id를 다시 넣지 않는다
 PANEL_Z = 9000                   # 메모 서랍(#md-anno-panel)과 같은 층 — 둘은 번갈아 열린다
@@ -35,6 +47,14 @@ WATCH_JOB_EVENT = "md4-agent-watch-job"     # JS → 서버: 에이전트가 이
                                             # 뷰어 번역 패널(app.py)이 자기 작업처럼 진행 바를 붙인다
 JOB_POLL_MS = 3000                          # 미완료 작업이 있는 동안 GET …/jobs 간격 (JS의 JOB_POLL_MS)
 ANNO_RELOAD_API = "__mdAnnoReload"          # 뷰어 하이라이트 스크립트(app.py)가 내놓는 다시 칠하기 함수
+
+# '새 창으로' — 단독 페이지 주소·이벤트 (JS의 POPOUT_PATH·emitEvent 이름과 한 짝, 테스트가 대조한다)
+STANDALONE_PATH = "/agent"                  # app.py run()의 @ui.page — 셸(shell)이 아닌 단독 페이지
+POPOUT_EVENT = "md4-agent-popout"           # JS → 서버(앱 창 모드만): 이 세션을 형제 웹뷰 창으로 띄워 달라
+STANDALONE_CLASS = "ag-standalone"          # 단독 페이지 body 클래스 — 서랍을 화면 전체로 편다
+SA_POLL_MS = 10000                          # 단독 창이 턴 없을 때 세션을 다시 읽는 간격 (JS의 SA_POLL_MS)
+WINDOW_TITLE = "md4paper 도우미"
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")   # 쿼리로 받은 세션 id·논문 token — 스크립트에 싣기 전 거른다
 
 # '읽던 자리로' 되돌리기 알약 — 아래 CSS/HTML/JS 문자열과 이 상수가 한 짝이다(테스트가 대조한다).
 JUMP_BACK_ID = "md-jump-back"    # body 직속 오버레이 id — 서랍 밖이라 서랍을 닫아도 남는다
@@ -111,6 +131,22 @@ body.ag-open.ag-narrow .md4-hprev { display: none; }
 .ag-btn:hover { background: #f0efec; }
 .ag-btn:disabled { cursor: default; opacity: .5; }
 .ag-x { font-size: 13px; }
+/* '새 창으로' — 진짜 링크(<a>)다: 브라우저 모드에서는 이 링크가 새 탭을 연다 */
+a.ag-pop { display: inline-flex; align-items: center; text-decoration: none; padding: 3px 4px; }
+a.ag-pop .material-icons { font-size: 15px; }
+
+/* 단독 창(/agent) — 셸의 헤더·본문 없이 서랍만 화면 전체로. 닫기·너비 드래그·새 창 단추와
+   '읽던 자리로' 알약(본문이 없다)은 할 일이 없어 숨긴다. 넓은 창에서는 대화 줄을 가운데 폭으로 모은다. */
+body.ag-standalone { --ag-top: 0px; overflow: hidden; }
+body.ag-standalone #md4-agent { top: 0; left: 0; width: auto; border-left: none; }
+body.ag-standalone .ag-handle, body.ag-standalone .ag-x, body.ag-standalone .ag-pop,
+body.ag-standalone #md-jump-back { display: none !important; }
+body.ag-standalone .ag-list, body.ag-standalone .ag-foot {
+  padding-left: max(11px, calc((100% - 860px) / 2)); padding-right: max(11px, calc((100% - 860px) / 2)); }
+/* 단독 창의 화면 이동 안내 — 뷰어가 없어 칩·이동 요청을 여기서 할 수 없다 */
+.ag-note { font-size: 11.5px; line-height: 1.55; margin: 4px 0 8px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid #e6e4e0; background: #f7f6f3; color: #6b6862; }
+.ag-note a { color: #2383e2; margin-left: 4px; }
 
 /* 세션 목록 — 머리 아래로 펼친다 */
 .ag-menu { position: absolute; left: 8px; right: 8px; top: calc(100% + 2px); z-index: 2;
@@ -307,6 +343,8 @@ a.chat-cite-note:hover { background: #f7cf60; }
   .ag-job { background: #1e2733; border-color: #2f4560; color: #8fbcf0; }
   .ag-job.ok { background: #1f2a20; border-color: #34503a; color: #8fd18f; }
   .ag-job.fail { background: #2e1f1e; border-color: #5a2f2b; color: #f0a39b; }
+  .ag-note { background: #262626; border-color: #3a3a3a; color: #a0a0a0; }
+  .ag-note a { color: #5a96e6; }
   a.chat-cite.ag-far { background: #1f1f1f; color: #5a96e6; border-color: #5a96e6; }
   :root { --mjb-ring: #a9a69f; }
   #md-jump-back { background: #262626; border-color: #3a3a3a; color: #d4d4d4;
@@ -328,6 +366,9 @@ HTML = """
     <select class="ag-model" title="에이전트가 쓸 모델 — 번역 설정과 별개입니다"></select>
     <span class="ag-cost" title="이 세션에서 쓴 비용 (누적)"></span>
     <button type="button" class="ag-btn ag-new" title="새 세션">+ 새 세션</button>
+    <a class="ag-btn ag-pop" href="/agent" target="_blank" rel="noopener"
+      title="새 창으로 열기 — 이 창의 서랍은 닫힙니다"><i class="material-icons"
+      aria-hidden="true">open_in_new</i></a>
     <button type="button" class="ag-btn ag-x" title="닫기 (Esc)">&#10005;</button>
     <div class="ag-menu" role="menu"></div>
   </div>
@@ -369,6 +410,10 @@ JS = r"""
   var newBtn = panel.querySelector('.ag-new');
   var selBar = panel.querySelector('.ag-sel');
   var selT = panel.querySelector('.ag-sel-t');
+  var popBtn = panel.querySelector('.ag-pop');
+  // 단독 창(/agent)이면 서버가 이 스크립트 앞에 {session, paper, title}을 심는다 — 셸에서는 null
+  var SA = window.__md4AgentStandalone || null;
+  var POPOUT_PATH = '/agent', SA_POLL_MS = 10000;
 
   // 브라우저에 두는 것 — 활성 세션·서랍 폭·열림 여부(localStorage), 다른 논문으로 가는 행(sessionStorage)
   var LS_SESSION = 'md4agent.session', LS_W = 'md4agent.w', LS_OPEN = 'md4agent.open';
@@ -378,7 +423,8 @@ JS = r"""
     try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) {}
   }
 
-  var paper = window.__md4AgentTok || null;     // 지금 화면의 논문 토큰 (홈이면 null)
+  // 지금 화면의 논문 토큰 (홈이면 null). 단독 창은 띄운 쪽이 넘겨 준 논문을 끝까지 쓴다
+  var paper = SA ? (SA.paper || null) : (window.__md4AgentTok || null);
   var sid = null, sess = null, sessList = [], turns = [], pending = null;
   var live = null, busy = false, errMsg = null, loaded = false, menuMode = '';
   var toolsByTurn = {};      // 턴 id → 그 답을 만들며 부른 tool 줄 (이 창이 떠 있는 동안만)
@@ -388,6 +434,7 @@ JS = r"""
   var jobTimer = null;       // 미완료 작업 폴링 타이머 — 미완료가 없으면 멈춘다
   var JOB_POLL_MS = 3000;
   var capRetry = null;       // 비용 상한으로 막힌 요청 {body, msg} — '그래도 계속'이 override를 더해 다시 보낸다
+  var notice = null;         // 단독 창의 화면 이동 안내 {url} — 다음 질문을 보내면 걷힌다
   var PH_IDLE = input.placeholder;
   var PH_WAIT = '승인을 기다리는 중 — 그냥 보내면 건너뜁니다';
   var models = [], modelInfo = {ready: true, reason: '', provider: '', model: ''};
@@ -410,6 +457,14 @@ JS = r"""
   // SPA 이동은 서버가 한다(ui.navigate.to) — 셸의 ui.on('md4-agent-nav')가 받는다
   function nav(url){
     if (!url) return;
+    if (SA){
+      // 단독 창에는 뷰어가 없다(그 이벤트를 받을 셸도 없다). 브라우저면 새 탭으로 — 칩 클릭처럼 사용자
+      // 제스처 안에서만 열리고, 답이 흐르다 온 이동(open_paper·goto_row)은 팝업 차단에 걸려 null이다.
+      // 앱 창이면 window.open이 시스템 쪽으로 새지 않게 시도하지 않는다. 못 열면 안내 줄을 남긴다.
+      var w = window.__md4AgentNative ? null : window.open(url, '_blank');
+      if (!w){ notice = {url: url}; render(); }
+      return;
+    }
     if (typeof emitEvent === 'function') emitEvent('md4-agent-nav', {url: url});
     else location.href = url;
   }
@@ -495,6 +550,10 @@ JS = r"""
     return p ? {id: null, name: (p.textContent || '').trim()} : null;
   }
   function ctxNow(){
+    if (SA)       // 단독 창 — 화면(DOM) 맥락이 없다. 넘겨받은 논문만 싣고 제목은 서버가 채운다
+      return {screen: 'window', paper: paper ? {token: paper, title: SA.title || null} : null,
+              lang: null, visible_rows: [], top_row: null, selection: lastSel || selNow(),
+              note_tabs: null, left_panel: null, project: null};
     var review = onReview();
     var rows = review ? visibleRows() : [];
     return {
@@ -977,7 +1036,7 @@ JS = r"""
   function ensureSession(){
     loaded = true;
     return loadList().then(function(ss){
-      var want = sid || lsGet(LS_SESSION), hit = null;
+      var want = sid || (SA && SA.session) || lsGet(LS_SESSION), hit = null;
       for (var i = 0; i < ss.length; i++) if (ss[i].id === want) hit = ss[i];
       hit = hit || ss[0];
       if (hit) return openSession(hit.id).catch(function(){ return newSession(); });
@@ -1278,6 +1337,16 @@ JS = r"""
     box.appendChild(t); box.appendChild(go); box.appendChild(no);
     return box;
   }
+  function noticeNode(){                   // 단독 창 — 화면 이동을 여기서 못 했다
+    var box = document.createElement('div'); box.className = 'ag-note';
+    box.textContent = '이 창에는 논문 화면이 없습니다 — 메인 창에서 열어 주세요.';
+    if (!window.__md4AgentNative && notice.url){     // 브라우저면 진짜 링크 — 누르면 새 탭(차단 없음)
+      var a = document.createElement('a');
+      a.href = notice.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = '새 탭에서 열기';
+      box.appendChild(a);
+    }
+    return box;
+  }
   var liveText = null, liveTools = null;
   function liveNode(){
     var frag = document.createDocumentFragment();
@@ -1318,6 +1387,7 @@ JS = r"""
     costEl.textContent = '$' + c.toFixed(4) + (cap ? ' / $' + cap.toFixed(2) : '');
     costEl.classList.toggle('over', !!cap && c >= cap);
     costEl.title = '이 세션에서 쓴 비용 (누적)' + (cap ? ' / 세션 상한 — 넘으면 다음 질문 전에 묻습니다' : '');
+    if (popBtn) popBtn.setAttribute('href', popHref());   // 가운데 클릭·⌘클릭도 지금 세션으로
   }
   function render(){
     renderHead();
@@ -1333,7 +1403,7 @@ JS = r"""
     if (!turns.length && !live && modelInfo.ready){
       var em = document.createElement('div');
       em.className = 'ag-empty';
-      em.textContent = (paper && onReview()
+      em.textContent = (paper && (onReview() || SA)
         ? '열린 논문과 라이브러리의 다른 논문을 읽고 답합니다.\n'
           + '예: "이 논문의 방법 섹션 핵심은?", "선택한 문장 쉽게 풀어 줘", "3번째 섹션으로 가 줘"'
         : '라이브러리의 논문을 찾아 읽고 답합니다.\n'
@@ -1349,6 +1419,7 @@ JS = r"""
     else { liveText = null; liveTools = null; }
     if (pending) list.appendChild(approvalNode(pending, true));   // 진행 중 말풍선 아래에
     if (capRetry) list.appendChild(capNode());
+    if (notice) list.appendChild(noticeNode());
     if (errMsg){
       var er = document.createElement('div');
       er.className = 'ag-err'; er.textContent = errMsg;
@@ -1405,6 +1476,7 @@ JS = r"""
   // 쓰기 tool이 파일을 고친 뒤 — 지금 화면이 그것을 보여 주고 있으면 다시 그린다.
   // 메모·하이라이트는 지금 뷰어의 논문일 때만(다른 논문이면 열 때 새로 읽으므로 할 일이 없다).
   function refreshView(what, tok){
+    if (SA) return;          // 다시 그릴 화면(홈·뷰어)이 이 창에는 없다 — 메인 창은 열 때 새로 읽는다
     if (what === 'library'){
       // 홈의 목록·컬렉션 칩은 서버가 짓는다 — 본문(sub_pages)만 다시 짓게 한다. 같은 주소로 가는
       // ui.navigate.to는 sub_pages가 '이미 그 화면'으로 보고 다시 짓지 않아 refresh 표시를 붙인다
@@ -1466,7 +1538,7 @@ JS = r"""
       if (approvals) body.approvals = approvals;
       if (q){ input.value = ''; autosize(); lastSel = null; paintSel(); }
     }
-    capRetry = null;
+    capRetry = null; notice = null;
     // 대기 중이던 승인 카드를 잠근다 — 승인/거절을 보냈거나, 그냥 새 질문을 보내 건너뛰었다.
     // 잠긴 카드는 마지막 턴(그 승인을 부른 질문) 뒤에 남는다. 스트림 전에 거절되면 되돌린다.
     var rec = null, key = null, was = pending;
@@ -1561,11 +1633,12 @@ JS = r"""
   function syncBody(){
     var on = panel.classList.contains('open');
     document.body.classList.toggle('ag-open', on);
-    lsSet(LS_OPEN, on ? '1' : null);
+    if (!SA) lsSet(LS_OPEN, on ? '1' : null);   // 단독 창은 늘 열려 있다 — 메인 창의 '열어 둠'을 건드리지 않게
     syncLayout();
   }
   // 서랍 위끝을 헤더 아래에 맞춘다 (메모 서랍이 여는 순간 하는 것과 같은 계산).
   function syncTop(){
+    if (SA){ document.documentElement.style.setProperty('--ag-top', '0px'); return 1; }   // 헤더가 없다
     var h = document.querySelector('.q-header');
     var top = h ? Math.max(0, h.getBoundingClientRect().bottom) : 0;
     document.documentElement.style.setProperty('--ag-top', top + 'px');
@@ -1599,6 +1672,7 @@ JS = r"""
   //   ag-slim(서랍에) — 서랍 자체가 좁아 머리줄을 줄인다
   function syncLayout(){
     var vw = window.innerWidth;
+    if (SA){ panel.classList.toggle('ag-slim', vw < AG_SLIM_BELOW); return; }   // 폭은 CSS가 화면 전체로
     var w = Math.min(vw, agWant, agCap());
     document.documentElement.style.setProperty('--ag-w', w + 'px');
     var on = panel.classList.contains('open'), rest = vw - w;
@@ -1641,10 +1715,12 @@ JS = r"""
     var ap = document.getElementById('md-anno-panel');
     if (ap) ap.classList.remove('open');          // 없을 수도 있다 (홈)
     panel.classList.add('open');
-    if (!loaded){ loadModels(); ensureSession(); } else render();
+    // 다시 열 때는 세션을 새로 읽는다 — 그사이 새 창(단독 창)에서 쌓인 턴이 있을 수 있다
+    if (!loaded){ loadModels(); ensureSession(); }
+    else { render(); if (!busy) refreshSession(); }
     setTimeout(function(){ if (!input.disabled) input.focus(); }, 60);
   }
-  function closePanel(){ panel.classList.remove('open'); closeMenu(); }
+  function closePanel(){ closeMenu(); if (!SA) panel.classList.remove('open'); }
   window.__md4Agent = {
     toggle: function(){ if (panel.classList.contains('open')) closePanel(); else openPanel(); },
     open: openPanel, close: closePanel,
@@ -1674,13 +1750,56 @@ JS = r"""
     // 단 그림 확대·메모 카드·찾기 바·대화상자가 열려 있으면 Esc의 주인은 그쪽이라 비켜선다.
     if (document.querySelector('#md-img-zoom.open, #md-anno-pop.open, #md4-find.on, .q-dialog')) return;
     if (pin){ jbDismiss(); return; }
-    if (panel.classList.contains('open')) panel.classList.remove('open');
+    if (!SA && panel.classList.contains('open')) panel.classList.remove('open');
   });
+  // ---- 새 창으로 (머리의 ⧉) ----
+  // 진짜 링크다: 브라우저 모드면 기본 동작(새 탭)을 그대로 두고 href만 지금 세션으로 맞춘다. 앱 창이면
+  // 서버가 형제 웹뷰 창을 띄운다(app.py가 install에 넘긴 popout). 같은 세션을 두 창이 함께 쓰면 마지막
+  // 저장이 이기므로 넘겨주기가 기본이다 — 이 창의 서랍은 닫는다.
+  function popHref(){
+    var q = [];
+    if (sid) q.push('session=' + encodeURIComponent(sid));
+    if (paper && onReview()) q.push('paper=' + encodeURIComponent(paper));
+    return POPOUT_PATH + (q.length ? '?' + q.join('&') : '');
+  }
+  if (popBtn) popBtn.addEventListener('click', function(ev){
+    popBtn.setAttribute('href', popHref());
+    if (window.__md4AgentNative && typeof emitEvent === 'function'){
+      ev.preventDefault();
+      emitEvent('md4-agent-popout', {session: sid || '', paper: (paper && onReview()) ? paper : ''});
+    }
+    setTimeout(closePanel, 0);               // 링크의 기본 동작(새 탭)이 먼저 돈 뒤에
+  });
+
+  // ---- 단독 창: 다른 창에서 쌓인 턴 반영 ----
+  // 턴이 없을 때만 세션을 다시 읽고, 바뀐 게 있을 때만 다시 그린다(무조건 그리면 읽던 스크롤이 맨 아래로
+  // 튀고 고르던 승인 답이 지워진다).
+  function sessSig(ts, pd, title, js){
+    var last = ts && ts.length ? ts[ts.length - 1].id : '';
+    return [(ts || []).length, last, ((pd && pd.calls) || []).map(function(c){ return c.id; }).join(','),
+            title || '', (js || []).map(function(j){ return j.id + (j.done ? '+' : '-'); }).join(',')].join('|');
+  }
+  function saPoll(){
+    if (!sid || busy || live || document.hidden || menu.classList.contains('open')) return;
+    var at = sid;
+    api('GET', '/agent/sessions/' + encodeURIComponent(at)).then(function(d){
+      if (at !== sid || busy || live) return;
+      if (sessSig(d.turns, d.pending, d.title, d.jobs)
+          === sessSig(turns, pending, sess && sess.title, jobs)) return;
+      setSession(d);
+      loadList().then(renderHead).catch(function(){});
+    }).catch(function(){});
+  }
+
   var wasOpen = lsGet(LS_OPEN) === '1';        // syncBody가 지우기 전에 읽는다
+  if (SA){
+    document.body.classList.add('ag-standalone');
+    setInterval(saPoll, SA_POLL_MS);
+  }
   watchAnno();
   syncBody();
   render();
-  if (wasOpen) openPanel();                    // 다시 켜도 열어 두었던 창은 연 채로
+  if (wasOpen || SA) openPanel();              // 다시 켜도 열어 두었던 창은 연 채로 (단독 창은 늘)
 })();
 """
 
@@ -1716,10 +1835,26 @@ def _nav(url: str, refresh: bool = False) -> None:
         ui.navigate.to(url)
 
 
-def install(state: dict | None = None) -> None:  # noqa: ARG001 — 셸 설치 훅들과 같은 꼴
+def popout_path(session: str = "", paper: str = "") -> str:
+    """단독 창 주소 — JS popHref()와 같은 꼴(`/agent?session=…&paper=…`, 빈 값은 뺀다)."""
+    q = urlencode([(k, v) for k, v in (("session", session), ("paper", paper)) if v])
+    return STANDALONE_PATH + (f"?{q}" if q else "")
+
+
+def _flags_js(native: bool, standalone: dict | None) -> str:
+    """창 스크립트보다 **먼저** 도는 전역 — 앱 창 모드인지, 단독 창이면 무엇을 넘겨받았는지."""
+    sa = json.dumps(standalone, ensure_ascii=False).replace("<", "\\u003c")
+    return (f"<script>window.__md4AgentNative = {'true' if native else 'false'};"
+            f"window.__md4AgentStandalone = {sa};</script>")
+
+
+def install(state: dict | None = None,  # noqa: ARG001 — 셸 설치 훅들과 같은 꼴
+            popout: Callable[[str], object] | None = None) -> None:
     """셸 페이지가 한 번 부른다 — 창 CSS·마크업·스크립트와 화면 이동 이벤트.
 
     셸에 붙으므로 홈 ↔ 뷰어를 오가도(본문만 갈아 끼움) 창은 다시 지어지지 않는다.
+    popout: 앱 창 모드에서만 app.py가 넘긴다 — 단독 창 경로(`popout_path`)를 형제 웹뷰 창으로 띄우는
+    함수(코루틴 가능). 넘기면 '새 창으로'가 링크 대신 `POPOUT_EVENT`로 서버에 부탁한다.
     """
     from nicegui import ui
 
@@ -1727,5 +1862,41 @@ def install(state: dict | None = None) -> None:  # noqa: ARG001 — 셸 설치 �
 
     spa.add_css(CSS)
     spa.add_body_html(HTML)
+    spa.add_body_html(_flags_js(popout is not None, None))
     spa.add_body_html(f"<script>{JS}</script>")
     ui.on(NAV_EVENT, lambda e: _nav((e.args or {}).get("url", ""), bool((e.args or {}).get("refresh"))))
+    if popout is not None:
+        ui.on(POPOUT_EVENT, lambda e: _popout(popout, e.args or {}))
+
+
+def _popout(popout: Callable[[str], object], args: dict):  # noqa: ANN202 — popout의 반환(코루틴)을 그대로
+    """JS가 부탁한 새 창 — 쿼리로 넘길 값은 형식을 걸러서만 싣는다."""
+    sid, tok = (str(args.get(k) or "") for k in ("session", "paper"))
+    return popout(popout_path(sid if _ID_RE.match(sid) else "", tok if _ID_RE.match(tok) else ""))
+
+
+def standalone_page(state: dict, session: str = "", paper: str = "", *, native: bool = False) -> None:
+    """단독 창(`/agent`) — 셸의 헤더·화면 없이 창 UI만 화면 전체로 (app.py의 @ui.page가 부른다).
+
+    paper는 등록부(`state["wd_by_token"]`)에 있을 때만 맥락에 싣는다 — 서버를 다시 켠 뒤 옛 주소로
+    열면 모르는 token이 되어 첫 질문부터 404('알 수 없는 논문 token')가 나기 때문이다.
+    화면 이동 이벤트(NAV)는 등록하지 않는다: 이 창에서 뷰어로 옮겨 가면 창이 사라진다.
+    """
+    from nicegui import ui
+
+    from md4paper.workdir import paper_title
+
+    sid = session if _ID_RE.match(session or "") else ""
+    wd = (state.get("wd_by_token") or {}).get(paper) if paper and _ID_RE.match(paper) else None
+    title = ""
+    if wd is not None:
+        try:
+            title = " ".join(paper_title(Path(wd.root)).split())[:200]
+        except OSError:
+            title = ""
+    ui.page_title(f"{WINDOW_TITLE} — {title}" if title else WINDOW_TITLE)
+    ui.add_css(CSS)
+    ui.add_body_html(HTML)
+    ui.add_body_html(_flags_js(native, {"session": sid, "paper": paper if wd is not None else None,
+                                        "title": title or None}))
+    ui.add_body_html(f"<script>{JS}</script>")

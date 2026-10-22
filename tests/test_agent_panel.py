@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -55,7 +56,7 @@ def test_init_js_sets_global_before_panel_and_escapes():
     assert "window.__md4Agent &&" in js
     assert agent_panel.init_js(None).startswith("window.__md4AgentTok = null;")
     assert "<" not in agent_panel.init_js("</script>")   # </script> 조기 종료 방지
-    assert "var paper = window.__md4AgentTok || null;" in JS
+    assert "var paper = SA ? (SA.paper || null) : (window.__md4AgentTok || null);" in JS
 
 
 def test_nav_event_name_matches_and_is_guarded(monkeypatch):
@@ -482,3 +483,141 @@ def test_money_shows_only_in_head_session_total():
         assert word not in JS
     # 남은 한 곳 — 머리의 세션 누적
     assert JS.count("toFixed(4)") == 1 and "costEl.textContent = '$' + c.toFixed(4)" in JS
+
+
+# --- 새 창으로 (단독 창 /agent) ------------------------------------------------
+
+
+_APP_SRC = (Path(agent_panel.__file__).with_name("app.py")).read_text(encoding="utf-8")
+
+
+def test_standalone_page_is_registered_apart_from_shell():
+    """단독 창은 셸(shell)과 다른 페이지 함수여야 새 문서로 뜬다 — 셸 경로 묶음에 끼면 헤더·화면이 붙는다."""
+    assert agent_panel.STANDALONE_PATH == "/agent"
+    page = _APP_SRC[_APP_SRC.index("@ui.page(agent_panel.STANDALONE_PATH"):]
+    page = page[:page.index("\n\n")]
+    assert "def agent_window(session: str = \"\", paper: str = \"\")" in page
+    assert "agent_panel.standalone_page(state, session, paper, native=desktop.active())" in page
+    shell = _APP_SRC[_APP_SRC.index('@ui.page("/")'):_APP_SRC.index("def shell()")]
+    assert "/agent" not in shell and "STANDALONE_PATH" not in shell
+
+
+def test_popout_event_and_path_match_js_and_app():
+    """JS가 내보내는 이벤트·주소가 install의 ui.on·app.py의 형제 창 경로와 한 이름이다."""
+    assert f"emitEvent('{agent_panel.POPOUT_EVENT}'" in JS
+    assert f"POPOUT_PATH = '{agent_panel.STANDALONE_PATH}'" in JS
+    assert f"SA_POLL_MS = {agent_panel.SA_POLL_MS}" in JS
+    assert f'href="{agent_panel.STANDALONE_PATH}" target="_blank"' in HTML   # 브라우저 모드는 진짜 링크
+    assert "open_in_new" in HTML
+    # popHref()와 같은 꼴
+    assert agent_panel.popout_path("s1a2b3c", "tok9") == "/agent?session=s1a2b3c&paper=tok9"
+    assert agent_panel.popout_path("s1a2b3c") == "/agent?session=s1a2b3c"
+    assert agent_panel.popout_path() == "/agent"
+    ph = _js_block(JS, "function popHref(")
+    assert "'session=' + encodeURIComponent(sid)" in ph and "'paper=' + encodeURIComponent(paper)" in ph
+    # 앱 창 모드 — app.py가 형제 웹뷰를 띄우는 함수를 넘긴다(새 창 단추와 같은 _spawn_path)
+    assert "agent_panel.install(state, popout=" in _APP_SRC and "if desktop.active() else None" in _APP_SRC
+    assert "await _spawn_path(_review_url(root), state, title" in _APP_SRC
+
+
+def test_popout_hands_over_and_closes_this_drawer():
+    """같은 세션을 두 창이 함께 쓰면 마지막 저장이 이긴다 → 새 창을 열면 이 창의 서랍은 닫는다."""
+    i = JS.index("if (popBtn) popBtn.addEventListener('click'")
+    block = JS[i:JS.index("// ---- 단독 창", i)]
+    assert "popBtn.setAttribute('href', popHref());" in block       # 클릭 순간 지금 세션으로
+    assert "ev.preventDefault();" in block and "window.__md4AgentNative" in block   # 앱 창만 서버로
+    assert "setTimeout(closePanel, 0);" in block
+    # 다시 열면 세션을 새로 읽는다 — 단독 창에서 쌓인 턴
+    op = _js_block(JS, "function openPanel(")
+    assert "if (!busy) refreshSession();" in op
+
+
+def test_install_registers_popout_only_in_app_window_mode(monkeypatch):
+    from nicegui import context, ui
+
+    client = _Client(False)
+    events: dict = {}
+    body: list[str] = []
+    monkeypatch.setattr(type(context), "client", property(lambda self: client))
+    monkeypatch.setattr(ui, "add_body_html", body.append)
+    monkeypatch.setattr(ui, "add_head_html", lambda *_: None)
+    monkeypatch.setattr(ui, "on", lambda name, handler: events.setdefault(name, handler))
+
+    agent_panel.install({})
+    assert agent_panel.POPOUT_EVENT not in events
+    assert any("window.__md4AgentNative = false;" in b for b in body)
+
+    paths: list[str] = []
+    events.clear()
+    agent_panel.install({}, popout=paths.append)
+    assert set(events) == {agent_panel.NAV_EVENT, agent_panel.POPOUT_EVENT}
+    assert any("window.__md4AgentNative = true;" in b for b in body)
+
+    class _E:
+        args = {"session": "s0a1b2c3", "paper": "../x"}   # 형식에 안 맞는 값은 싣지 않는다
+    events[agent_panel.POPOUT_EVENT](_E())
+    assert paths == ["/agent?session=s0a1b2c3"]
+
+
+def test_standalone_mode_css_hides_drawer_chrome():
+    """단독 창 — 서랍을 화면 전체로 펴고 닫기·너비 드래그·새 창 단추·'읽던 자리로' 알약은 숨긴다."""
+    assert agent_panel.STANDALONE_CLASS == "ag-standalone"
+    assert "document.body.classList.add('ag-standalone')" in JS
+    r = _rule(CSS, "body.ag-standalone #md4-agent")
+    assert "top: 0" in r and "left: 0" in r and "width: auto" in r
+    hide = CSS.split("body.ag-standalone .ag-handle,", 1)[1].split("}", 1)[0]
+    for sel in (".ag-x", ".ag-pop", "#md-jump-back"):
+        assert f"body.ag-standalone {sel}" in hide
+    assert "display: none !important" in hide
+    assert "--ag-top: 0px" in _rule(CSS, "body.ag-standalone")
+
+
+def test_standalone_js_guards_shared_state_and_navigation():
+    """단독 창이 메인 창의 localStorage(열림)를 건드리지 않고, Esc·✕로 비지 않고, 화면 이동은 안내로."""
+    assert "if (!SA) lsSet(LS_OPEN" in _js_block(JS, "function syncBody(")
+    assert "if (!SA) panel.classList.remove('open')" in JS                     # closePanel
+    assert "if (!SA && panel.classList.contains('open')) panel.classList.remove('open');" in JS  # Esc
+    nv = _js_block(JS, "function nav(")
+    assert nv.index("if (SA){") < nv.index("emitEvent('md4-agent-nav'")
+    assert "notice = {url: url}" in nv
+    assert "메인 창에서 열어 주세요" in _js_block(JS, "function noticeNode(")
+    assert "if (SA) return;" in _js_block(JS, "function refreshView(")
+    ctx = _js_block(JS, "function ctxNow(")
+    assert "screen: 'window'" in ctx
+    assert "(SA && SA.session)" in _js_block(JS, "function ensureSession(")
+
+
+def test_standalone_poll_redraws_only_on_change():
+    poll = JS[JS.index("function saPoll("):JS.index("var wasOpen")]
+    assert "busy || live" in poll and "document.hidden" in poll
+    assert "sessSig(d.turns, d.pending, d.title, d.jobs)" in poll and "setSession(d)" in poll
+    assert "setInterval(saPoll, SA_POLL_MS)" in JS
+
+
+def test_standalone_page_drops_unknown_paper_and_bad_session(monkeypatch, tmp_path):
+    from nicegui import ui
+
+    body: list[str] = []
+    titles: list[str] = []
+    monkeypatch.setattr(ui, "add_body_html", body.append)
+    monkeypatch.setattr(ui, "add_css", lambda *_: None)
+    monkeypatch.setattr(ui, "page_title", titles.append)
+
+    agent_panel.standalone_page({"wd_by_token": {}}, "s0a1b2c3", "nope")
+    flags = next(b for b in body if "__md4AgentStandalone" in b)
+    assert '"session": "s0a1b2c3"' in flags and '"paper": null' in flags
+    assert titles == [agent_panel.WINDOW_TITLE]
+
+    class _WD:
+        root = tmp_path / "paper.md4"
+    (tmp_path / "paper.md4" / "structure").mkdir(parents=True)
+    (tmp_path / "paper.md4" / "structure" / "sections.yaml").write_text("title: A </script> Paper\n")
+    body.clear()
+    titles.clear()
+    agent_panel.standalone_page({"wd_by_token": {"tokA": _WD()}}, "bad id!", "tokA")
+    flags = next(b for b in body if "__md4AgentStandalone" in b)
+    assert '"session": ""' in flags and '"paper": "tokA"' in flags
+    assert "</script> Paper" not in flags                     # 제목이 스크립트를 닫지 못한다
+    assert titles and titles[0].startswith(agent_panel.WINDOW_TITLE + " — A")
+    assert any(b.startswith("<script>") and "__md4AgentInit" in b for b in body)
+    assert body.index(flags) < next(i for i, b in enumerate(body) if "__md4AgentInit" in b)

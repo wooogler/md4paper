@@ -54,7 +54,7 @@ class ProjectRef(_Loose):
 class ScreenContext(_Loose):
     """클라이언트가 보내는 화면 스냅숏 (설계 노트의 JSON 형태)."""
 
-    screen: str | None = None          # "review" | "home"
+    screen: str | None = None          # "review" | "home" | "window"(단독 창)
     paper: PaperRef | None = None
     lang: str | None = None            # "en" | "ko" | "both"
     visible_rows: list[int] = Field(default_factory=list)
@@ -75,7 +75,8 @@ class ScreenContext(_Loose):
         return (self.paper.token or None) if self.paper else None
 
 
-_SCREEN_KO = {"review": "논문 뷰어", "home": "홈(논문 목록)"}
+_SCREEN_KO = {"review": "논문 뷰어", "home": "홈(논문 목록)",
+              "window": "따로 띄운 도우미 창 — 논문 본문·화면 이동은 메인 창에 있다"}
 _LANG_KO = {"en": "원문만", "ko": "번역만", "both": "원문·번역 나란히"}
 _SIDE_KO = {"en": "원문", "ko": "번역"}
 

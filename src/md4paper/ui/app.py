@@ -2367,6 +2367,15 @@ _CHROME_CSS = """
 async def _spawn_window(root: Path, state: dict, title: str) -> None:
     """앱 창 모드에서 이 논문을 형제 앱 창으로 띄운다 (서버는 그대로 하나).
 
+    같은 논문을 두 창에서 고치면 하이라이트·메모는 나중에 저장한 쪽이 앞을 덮으므로 이미 떠 있으면
+    띄우지 않는다.
+    """
+    await _spawn_path(_review_url(root), state, title, dup_note="이 논문은 이미 다른 창에 떠 있습니다.")
+
+
+async def _spawn_path(path: str, state: dict, title: str, *, dup_note: str) -> None:
+    """이 서버의 경로 하나를 형제 앱 창으로 띄운다 — 논문 새 창과 에이전트 '새 창으로'가 함께 쓴다.
+
     프로세스를 띄운 뒤 잠깐 지켜보고 나서 성공을 알린다 — 바로 죽는 경우(그 인터프리터에
     pywebview가 없거나 웹뷰 백엔드가 없는 환경)에 '열었습니다'라고 거짓말하지 않기 위해서다.
     """
@@ -2374,10 +2383,9 @@ async def _spawn_window(root: Path, state: dict, title: str) -> None:
 
     from md4paper.ui import window as extra_window
 
-    url = f"http://127.0.0.1:{state.get('port') or 8080}{_review_url(root)}"
+    url = f"http://127.0.0.1:{state.get('port') or 8080}{path}"
     if extra_window.already_open(url):
-        # 같은 논문을 두 창에서 고치면 하이라이트·메모는 나중에 저장한 쪽이 앞을 덮는다.
-        ui.notify("이 논문은 이미 다른 창에 떠 있습니다.", type="info", timeout=2000)
+        ui.notify(dup_note, type="info", timeout=2000)
         return
     proc = extra_window.open_new(url, title or "md4paper")
     if proc is None:
@@ -5761,10 +5769,19 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         spa.make_header()
         # 에이전트 창 — 셸에 붙어 화면을 갈아 끼워도 대화가 남는다. 하위 화면보다 **먼저** 넣어야
         # 첫 화면(뷰어·홈)이 부르는 setPaper가 이미 떠 있는 창에 닿는다.
-        agent_panel.install(state)
+        # 앱 창 모드면 '새 창으로'가 단독 창(/agent)을 형제 웹뷰로 띄운다(브라우저 모드는 링크가 새 탭).
+        agent_panel.install(state, popout=(lambda path: _spawn_path(
+            path, state, agent_panel.WINDOW_TITLE, dup_note="이 대화는 이미 다른 창에 떠 있습니다."))
+            if desktop.active() else None)
         # w-full: 없으면 sub_pages 상자가 내용 폭으로 줄어(큰 화면에서 1275px) 변환·번역 탭 splitter가 좁아진다
         ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view}).classes("w-full")
         update_banner.install(state)  # 새 버전 알림 — 셸에 붙어 탭을 옮겨도 남는다
+
+    # 에이전트 단독 창 — 셸과 **다른** 페이지 함수라 새 문서로 뜬다(헤더·화면 없이 창 UI만).
+    # 서랍 머리의 '새 창으로'가 연다: ?session=<sid>&paper=<token> (§agent_panel.standalone_page)
+    @ui.page(agent_panel.STANDALONE_PATH, title=agent_panel.WINDOW_TITLE)
+    def agent_window(session: str = "", paper: str = "") -> None:  # 쿼리 파라미터
+        agent_panel.standalone_page(state, session, paper, native=desktop.active())
 
     port = pick_port(port)
     state["port"] = port  # 새 창(형제 웹뷰 프로세스)이 가리킬 주소를 만들 때 쓴다
