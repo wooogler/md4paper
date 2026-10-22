@@ -60,8 +60,10 @@ def _context_tail(text: str, max_chars: int = _TAIL_CHARS) -> str:
     return tail[m.end():] if m else tail
 
 
-def _build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict]:
+def build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict]:
     """en.md를 섹션 단위 유닛으로. 각 유닛: {sids, translatable, source}.
+
+    공개 접합부 — 에이전트의 섹션 재번역(ui/agent/jobtools)이 어느 유닛의 캐시를 지울지 고를 때 쓴다.
 
     섹션별 translate 플래그를 따르고, 참고문헌은 translate_references가 꺼져 있으면 제외.
     작은 번역 섹션은 인접끼리 병합(멤버 sid 보존), 큰 섹션은 문단 경계로 파트 분할(각 파트가 같은 sid).
@@ -130,7 +132,7 @@ def _build_units(wd: WorkDir, manifest: Manifest, lines: list[str]) -> list[dict
     return final
 
 
-build_units = _build_units  # 공개 이름 (재번역 tool 등이 유닛을 같은 규칙으로 나눌 때)
+_build_units = build_units  # 옛 이름 (controller가 쓴다)
 
 
 def run_glossary(wd: WorkDir, provider: Provider, *, regenerate: bool = True) -> int:

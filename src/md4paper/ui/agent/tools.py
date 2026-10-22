@@ -12,6 +12,8 @@
   마커는 이 집합 안의 것만 칩이 된다.
 - 화면을 움직이는 tool(goto_row/open_paper)은 `deps.ui_actions`에 동작을 넣을 뿐이다. SSE 생성기가
   그것을 스트림에 끼워 보내고 브라우저가 실행한다.
+- 비용이 드는 tool(retranslate_sections·run_glossary)은 `jobtools.py`에 있다 — 승인 뒤 서버 수명
+  작업을 띄우고 바로 돌아온다. 에이전트에는 `TOOLS + jobtools.TOOLS`로 함께 건다.
 - 쓰기 tool(write_note·add_highlight·set_project_membership·remember)은 `requires_approval` —
   모델이 부르면 run이 승인 대기로 끝나고, 사용자가 승인한 뒤의 run에서야 실제로 실행된다.
   승인 카드의 한 줄 설명은 `DESCRIBE`(tool 이름 → args로 문장 만들기). 실행한 뒤에는
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import secrets
 import time
 from collections.abc import Callable
@@ -74,6 +77,12 @@ class Deps:
     # 이번 run에서 새로 등록한 token → 작업 폴더. run이 끝나면 세션 `papers`에 합쳐 저장한다 —
     # 서버를 다시 켜도 대화 기록 속 token을 routes가 다시 등록할 수 있게.
     papers: dict[str, Path] = field(default_factory=dict)
+    # 비용 tool(jobtools)이 이번 run에 띄운 백그라운드 작업 기록 — run_turn이 세션 `jobs`에 합친다
+    jobs: list[dict] = field(default_factory=list)
+    # 작업용 LLM 공장 (purpose "translate"|"glossary", WorkDir) → Provider. None이면 앱 설정
+    # (jobtools.default_job_provider). 테스트는 FakeProvider를 돌려주는 함수를 끼운다.
+    build_job_provider: Callable | None = None
+    job_notice: str = ""     # 지시문에 실을 백그라운드 작업 소식 (run_turn이 run 전에 한 번 만든다)
 
     def register(self, wd: WorkDir) -> str:
         """`register_token`을 부르고 그 token의 경로를 `papers`에 적는다 (tool은 이것을 쓴다)."""
@@ -235,9 +244,10 @@ async def read_rows(ctx: RunContext[Deps], start: int, end: int | None = None,
 
 
 async def outline(ctx: RunContext[Deps], token: str | None = None) -> str:
-    """논문의 섹션 목차를 행 번호와 함께 돌려준다 (어느 섹션이 몇 행에서 시작하는지).
+    """논문의 섹션 목차를 행 번호·섹션 id와 함께 돌려준다 (어느 섹션이 몇 행에서 시작하는지).
 
-    특정 섹션을 읽으려면 여기서 행 번호를 보고 read_rows로 읽는다.
+    각 줄은 `- [r12] h_0004 Introduction` 꼴이다. 특정 섹션을 읽으려면 행 번호를 보고 read_rows로
+    읽고, 섹션을 다시 번역할 때(retranslate_sections)는 섹션 id(`h_0004`)를 넘긴다.
 
     Args:
         token: 논문 token. 생략하면 지금 화면의 논문.
@@ -247,12 +257,45 @@ async def outline(ctx: RunContext[Deps], token: str | None = None) -> str:
         return got
     tok, wd = got
     chunks = (await asyncio.to_thread(retrieval.paper, wd)).chunks
+    sids = await asyncio.to_thread(section_ids, wd, chunks)
     lines = [f"{'  ' * (c.head_level - 1)}- [{row_label(tok, c.row, ctx.deps.current_token)}] "
-             f"{c.heading}" for c in chunks if c.head_level]
+             f"{sids[c.row] + ' ' if c.row in sids else ''}{c.heading}"
+             for c in chunks if c.head_level]
     if not lines:
         return "목차(헤더)를 찾지 못했습니다." if chunks else "이 논문에서 읽을 수 있는 본문이 없습니다."
     head = await _paper_line(ctx.deps, tok, wd)
-    return _cap(f"{head}목차 (전체 r0–r{len(chunks) - 1}):\n" + "\n".join(lines))
+    note = " — 각 줄: [행 번호] 섹션 id 제목" if sids else ""
+    return _cap(f"{head}목차 (전체 r0–r{len(chunks) - 1}){note}:\n" + "\n".join(lines))
+
+
+def _norm_head(text: str) -> str:
+    return " ".join((text or "").split()).lower()
+
+
+def section_ids(wd: WorkDir, chunks: list[retrieval.Chunk]) -> dict[int, str]:
+    """outline의 헤더 행 번호 → `out/sections.map.json`의 섹션 id (retranslate_sections가 받는 id).
+
+    둘 다 en.md의 헤더 줄에서 나오므로(코드 펜스 안 # 제외) 개수가 같으면 순서대로 짝짓는다.
+    다르면(재조립 중이거나 손으로 고친 en.md) 제목 글자가 같은 것을 문서 순서로 찾는다.
+    """
+    try:
+        smap = json.loads(wd.sections_map.read_text(encoding="utf-8")).get("sections", [])
+    except (OSError, ValueError):
+        return {}
+    smap = sorted((e for e in smap if e.get("id")), key=lambda e: e.get("out_line", 0))
+    heads = [c for c in chunks if c.head_level]
+    if len(heads) == len(smap):
+        return {c.row: str(e["id"]) for c, e in zip(heads, smap)}
+    out: dict[int, str] = {}
+    j = 0
+    for c in heads:
+        k = j
+        while k < len(smap) and _norm_head(smap[k].get("text", "")) != _norm_head(c.heading):
+            k += 1
+        if k < len(smap):
+            out[c.row] = str(smap[k]["id"])
+            j = k + 1
+    return out
 
 
 # --- 메모·하이라이트 ----------------------------------------------------
@@ -872,13 +915,20 @@ DESCRIBE: dict[str, Callable[[dict], str]] = {
 }
 
 
-def describe_call(name: str, args: dict) -> str:
-    """승인 카드에 보일 사람용 한 줄. 모르는 tool은 이름만."""
-    fn = DESCRIBE.get(name)
-    if fn is None:
-        return f"{name} 실행"
+def describe_call(name: str, args: dict, root: Path | str | None = None) -> str:
+    """승인 카드에 보일 사람용 한 줄. 모르는 tool은 이름만.
+
+    root는 그 호출이 쓸 논문의 작업 폴더(세션 `papers`에서 찾은 것) — 비용 tool은 그 논문을 읽어
+    섹션 제목·모델을 보인다. 없으면 인자만으로 짧게.
+    """
+    from md4paper.ui.agent import jobtools
+
+    a = args if isinstance(args, dict) else {}
     try:
-        return fn(args if isinstance(args, dict) else {})
+        if name in jobtools.DESCRIBE:
+            return jobtools.DESCRIBE[name](a, Path(root) if root else None)
+        fn = DESCRIBE.get(name)
+        return fn(a) if fn is not None else f"{name} 실행"
     except Exception:  # noqa: BLE001 — 깨진 인자여도 카드는 뜬다
         return f"{name} 실행"
 
