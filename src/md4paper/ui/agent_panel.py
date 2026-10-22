@@ -854,14 +854,18 @@ JS = r"""
       byProv[prov].forEach(function(m){
         var o = document.createElement('option');
         o.value = m.provider + '/' + m.model;
-        // 키 없는 제공사는 목록에 남기되 못 고르게 — 왜 안 보이는지 헤매지 않도록
-        o.textContent = m.model + (m.price ? '  ' + m.price : '') + (m.has_key ? '' : '  (키 없음)');
+        // 키 없는 제공사는 목록에 남기되 못 고르게 — 왜 안 보이는지 헤매지 않도록.
+        // 단가는 싣지 않는다 — 돈은 머리의 세션 누적 한 곳에서만 보인다
+        o.textContent = m.model + (m.has_key ? '' : '  (키 없음)');
         o.disabled = !m.has_key;
         if (m.model === cur && m.provider === modelInfo.provider) o.selected = true;
         g.appendChild(o);
       });
       modelSel.appendChild(g);
     });
+  }
+  function modelLabel(){                    // 서버 model_label과 같은 '제공사:모델'
+    return modelInfo.model ? (modelInfo.provider ? modelInfo.provider + ':' : '') + modelInfo.model : '';
   }
   function takeModels(j){
     models = j.models || models;
@@ -920,7 +924,7 @@ JS = r"""
       else if (!live) jobs.forEach(function(x){ if (!x.done) paintJob(x); });  // 진행 숫자만
     }).catch(function(){ if (!jobTimer && at === sid) jobTimer = setTimeout(pollJobs, JOB_POLL_MS * 2); });
   }
-  function money(v){ return '$' + Number(v || 0).toFixed(4); }
+  // 완료 줄에 작업 비용을 붙이지 않는다 — 끝난 작업 비용은 세션 누적(머리)에 더해져 거기서만 보인다
   function jobText(j){
     var what = j.kind === 'glossary' ? '용어집' : '번역';
     if (!j.done){
@@ -929,8 +933,8 @@ JS = r"""
     }
     if (j.status !== 'done') return '❌ ' + what + ' 실패: ' + (j.error || '알 수 없는 오류');
     var r = j.result || {};
-    if (j.kind === 'glossary') return '✅ 용어집 완료: ' + (r.entries || 0) + '개 항목, ' + money(r.cost_usd);
-    return '✅ 번역 완료: ' + (r.sections || 0) + '개 섹션, ' + money(r.cost_usd)
+    if (j.kind === 'glossary') return '✅ 용어집 완료: ' + (r.entries || 0) + '개 항목';
+    return '✅ 번역 완료: ' + (r.sections || 0) + '개 섹션'
       + (r.failed ? ' · ' + r.failed + '개 구간은 영어 유지(구조 검증 실패)' : '');
   }
   function jobNode(j){
@@ -938,7 +942,8 @@ JS = r"""
     d.className = 'ag-job' + (j.done ? (j.status === 'done' ? ' ok' : ' fail') : '');
     d.setAttribute('data-job', j.id);
     d.textContent = jobText(j);
-    d.title = (j.title ? '‘' + j.title + '’ — ' : '') + (j.message || j.label || '')
+    // 작업 message는 쓰지 않는다 — jobtools가 '(≈$…)' 비용을 붙여 둔 뷰어 토스트용 문구다
+    d.title = (j.title ? '‘' + j.title + '’ — ' : '') + (j.label || '')
       + (j.model ? '\n모델 ' + j.model : '');
     return d;
   }
@@ -1162,12 +1167,10 @@ JS = r"""
       e.className = 'ag-err'; e.textContent = t.error;
       wrap.appendChild(e);
     }
-    var bits = [];
-    if (t.model) bits.push(esc(t.model));
-    if (t.cost_usd) bits.push('$' + Number(t.cost_usd).toFixed(4));
-    if (bits.length){
+    // 답 아래에는 모델 이름만, 그것도 지금 고른 모델과 다를 때만 — 턴별 비용은 보이지 않는다
+    if (t.model && t.model !== modelLabel()){
       var meta = document.createElement('div');
-      meta.className = 'ag-meta'; meta.innerHTML = bits.join(' · ');
+      meta.className = 'ag-meta'; meta.textContent = t.model;
       wrap.appendChild(meta);
     }
     apprDone(wrap, t.id);
@@ -1517,9 +1520,7 @@ JS = r"""
           if (L.q) turns.push({id: 'local-' + Date.now(), role: 'user', text: L.q, html: ''});
           toolsByTurn[L.done.turn_id] = L.tools;
           turns.push({id: L.done.turn_id, role: 'assistant', text: L.text, html: L.done.html,
-                      citations: L.done.citations || [], cost_usd: L.done.cost_usd,
-                      model: modelInfo.model                // 서버 model_label과 같은 '제공사:모델'
-                        ? (modelInfo.provider ? modelInfo.provider + ':' : '') + modelInfo.model : ''});
+                      citations: L.done.citations || [], model: modelLabel()});
           if (sess){ sess.usage = sess.usage || {}; sess.usage.cost_usd = L.done.session_cost_usd; }
           if (L.done.jobs) setJobs(L.done.jobs);   // 이 턴이 띄운 작업 — 미완료면 폴링이 시작된다
           live = null;

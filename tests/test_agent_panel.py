@@ -463,3 +463,22 @@ def test_home_refresh_rebuilds_sub_pages_only_when_home_is_shown(monkeypatch):
     agent_panel._nav("/home", refresh=True)
     agent_panel._nav("https://evil.example/", refresh=True)
     assert (home.n, review.n, went) == (1, 0, [])
+
+
+# --- 비용은 머리 한 곳에만 ----------------------------------------------------
+
+
+def test_money_shows_only_in_head_session_total():
+    """쓴 돈은 머리의 세션 누적(상한 있으면 '/ 상한') 한 곳만 — 모델 단가·턴별 비용·작업 비용·토큰은 없다."""
+    assert "m.price" not in JS                         # 드롭다운에 단가를 붙이지 않는다
+    assert "(m.has_key ? '' : '  (키 없음)')" in JS     # 키 없음 표시는 남는다
+    assert "money(" not in JS                          # 작업 완료 줄의 ', $0.0016'
+    turn = _js_block(JS, "function turnNode(")
+    assert "cost_usd" not in turn and "toFixed" not in turn
+    assert "t.model !== modelLabel()" in turn           # 모델 이름은 지금 모델과 다를 때만
+    job = _js_block(JS, "function jobNode(")
+    assert "j.message" not in job and "j.label" in job                      # jobtools 문구엔 '(≈$…)'가 붙어 있다
+    for word in ("usage.input", "usage.output", "tokens"):
+        assert word not in JS
+    # 남은 한 곳 — 머리의 세션 누적
+    assert JS.count("toFixed(4)") == 1 and "costEl.textContent = '$' + c.toFixed(4)" in JS
