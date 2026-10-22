@@ -188,7 +188,7 @@ class WorkDir:
 
     @property
     def chat_json(self) -> Path:
-        """뷰어 챗봇 대화 기록 (읽는 사람의 것이라 파이프라인이 덮어쓰지 않는다)."""
+        """옛 뷰어 챗봇 대화 기록 — 에이전트 창(전역 세션)은 읽지 않지만 사용자의 것이라 지우지 않는다."""
         return self.root / "chat.json"
 
     @property

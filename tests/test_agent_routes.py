@@ -190,3 +190,55 @@ def test_default_factory_reports_missing_key(tmp_path):
     routes.register_routes(app, reg.wd_for, reg.register)
     m = TestClient(app).get("/agent/models").json()
     assert m["ready"] is False and "API 키가 없습니다" in m["reason"]
+
+
+# --- 모델 고르기 (설정 [chat] — 옛 뷰어 챗봇 테스트에서 옮김) ------------------------------
+
+
+@pytest.fixture
+def cfg_snapshot():
+    """설정 파일을 되돌린다 — 키·기본 제공사가 뒤 테스트로 새지 않게."""
+    path = config.CONFIG_PATH
+    before = path.read_bytes() if path.exists() else None
+    yield
+    if before is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_bytes(before)
+
+
+def test_chat_choice_falls_back_to_global_default(cfg_snapshot):
+    """[chat]을 안 정했으면 전역 기본을 그대로 따른다."""
+    config.set_chat_choice(None)
+    config.set_default("default_provider", "openai")
+    assert config.resolve_chat_choice() == ("openai", config.DEFAULT_MODELS["openai"])
+    config.set_default("default_provider", "anthropic")
+    assert config.resolve_chat_choice() == ("anthropic", config.DEFAULT_MODELS["anthropic"])
+
+
+def test_chat_choice_overrides_global_and_clears(cfg_snapshot):
+    """에이전트만 다른 모델로 — 전역 기본(번역 등)은 건드리지 않는다."""
+    config.set_default("default_provider", "openai")
+    config.set_chat_choice("anthropic", "claude-opus-5")
+    assert config.resolve_chat_choice() == ("anthropic", "claude-opus-5")
+    assert config.resolve_provider() == "openai"          # 전역은 그대로
+
+    config.set_chat_choice("gemini")                      # 모델 생략 → 그 제공사 기본
+    assert config.resolve_chat_choice() == ("gemini", config.DEFAULT_MODELS["gemini"])
+
+    config.set_chat_choice(None)                          # 해제 → 다시 전역
+    assert config.resolve_chat_choice() == ("openai", config.DEFAULT_MODELS["openai"])
+
+
+def test_chat_choice_rejects_unknown_provider():
+    with pytest.raises(ValueError):
+        config.set_chat_choice("mistral", "whatever")
+
+
+def test_model_options_marks_providers_without_key(cfg_snapshot):
+    """키 없는 제공사도 목록에는 남긴다 — 왜 못 고르는지 보여주려고."""
+    config.set_key("openai", "sk-test")
+    opts = routes.model_options()
+    assert {o["model"] for o in opts} >= set(config.MODEL_TIERS["anthropic"])
+    by_prov = {o["provider"]: o["has_key"] for o in opts}
+    assert by_prov["openai"] is True and by_prov["anthropic"] is False

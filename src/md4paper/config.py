@@ -347,9 +347,9 @@ def resolve_author_parts() -> list[str]:
 
 
 def resolve_chat_choice() -> tuple[str, str]:
-    """뷰어 챗봇이 쓸 (프로바이더, 모델).
+    """에이전트 창이 쓸 (프로바이더, 모델). 설정 섹션 이름은 옛 뷰어 챗봇 때의 [chat] 그대로다.
 
-    [chat]에 고른 게 있으면 그것, 없으면 전역 기본을 따른다 — 챗봇은 짧은 문답이라
+    [chat]에 고른 게 있으면 그것, 없으면 전역 기본을 따른다 — 에이전트는 대화형 문답이라
     번역과 다른 등급을 고르고 싶을 수 있어서 따로 둔다.
     """
     ch = load_config().get("chat", {}) or {}
@@ -361,7 +361,7 @@ def resolve_chat_choice() -> tuple[str, str]:
 
 
 def set_chat_choice(provider: str | None, model: str | None = None) -> None:
-    """챗봇 모델 고정. provider=None이면 [chat] 설정을 지워 전역 기본을 따른다."""
+    """에이전트 모델 고정. provider=None이면 [chat] 설정을 지워 전역 기본을 따른다."""
     if provider is None:
         set_section_value("chat", "provider", None)
         set_section_value("chat", "model", None)
@@ -370,20 +370,6 @@ def set_chat_choice(provider: str | None, model: str | None = None) -> None:
         raise ValueError(f"알 수 없는 프로바이더: {provider}")
     set_section_value("chat", "provider", provider)
     set_section_value("chat", "model", model or DEFAULT_MODELS.get(provider, ""))
-
-
-def build_chat_provider():  # noqa: ANN201 — Provider (순환 import 피하려 지연 로드)
-    """챗봇 전용 프로바이더 인스턴스. 키 없으면 오류."""
-    from md4paper.llm import get_provider
-
-    provider, model = resolve_chat_choice()
-    key = resolve_key(provider)
-    if not key:
-        raise RuntimeError(
-            f"{provider} API 키가 없습니다. env {ENV_VARS[provider]} 또는 "
-            f"`md4paper keys set {provider}`로 설정하세요."
-        )
-    return get_provider(provider, api_key=key, model=model)
 
 
 def build_provider(cli_provider: str | None = None, cli_model: str | None = None):
