@@ -888,3 +888,8 @@ WRITE_TOOLS = [write_note, add_highlight, set_project_membership, remember]
 TOOLS = [search_paper, read_rows, outline, list_note_tabs, read_notes, read_highlights,
          list_papers, list_projects, get_bibtex, goto_row, open_paper,
          *(Tool(fn, requires_approval=True) for fn in WRITE_TOOLS)]
+
+# 컬렉션 용어집 tool은 따로 모듈에 — 위의 Deps·_find_project·_refresh 등이 정의된 뒤라 순환 import가 풀린다
+from md4paper.ui.agent import glossary_tools  # noqa: E402
+
+TOOLS = [*TOOLS, *glossary_tools.TOOLS]

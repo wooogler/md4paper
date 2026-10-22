@@ -300,7 +300,7 @@ def shared(by_paper: Mapping[Hashable, list[GlossaryEntry]], min_papers: int = 2
     return out
 
 
-def _members(pid: str, workspace: Path) -> list[dict]:
+def members(pid: str, workspace: Path) -> list[dict]:
     """작업 폴더에서 이 컬렉션에 속한 논문 행(recent_workdirs 행; 숨긴 논문은 빼고)."""
     from md4paper import projects
     from md4paper.workdir import recent_workdirs
@@ -317,7 +317,7 @@ def collection_entries_by_paper(pid: str, workspace: Path) -> dict[Path, list[Gl
     소속은 어느 위치든(주 컬렉션이 아니어도) 센다. 숨긴 논문은 목록에서처럼 뺀다.
     """
     out: dict[Path, list[GlossaryEntry]] = {}
-    for row in _members(pid, workspace):
+    for row in members(pid, workspace):
         wd = WorkDir(row["root"])
         if wd.glossary_yaml.exists():
             out[wd.root] = load(wd).entries
@@ -347,7 +347,7 @@ def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | N
     from md4paper.workdir import paper_title
 
     out: list[dict] = []
-    for row in _members(pid, workspace):
+    for row in members(pid, workspace):
         wd = WorkDir(row["root"])
         if not wd.ko_md.exists():
             continue
