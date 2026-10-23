@@ -91,8 +91,8 @@ def test_dialog_entry_points_exist():
 
     assert callable(cgd.open_collection_glossary) and callable(batch_translate_dialog.open_batch_translate)
     src = inspect.getsource(home.build_home)
-    assert 'ui.menu_item("용어집…"' in src and "open_collection_glossary(p)" in src  # 사이드바 ⋯ 메뉴
-    assert "toggle_select_all" in src and 'f"번역 ({n}편)"' in src  # 전체 선택 · 일괄 번역
+    assert 'ui.menu_item(t("용어집…")' in src and "open_collection_glossary(p)" in src  # 사이드바 ⋯ 메뉴
+    assert "toggle_select_all" in src and 't("번역 ({n}편)", n=n)' in src  # 전체 선택 · 일괄 번역
     assert 'j.detail.get("queued")' in src and "translate_job.ahead(j)" in src  # 대기 중 작업 카드
 
 
