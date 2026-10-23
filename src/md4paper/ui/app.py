@@ -215,6 +215,10 @@ sup.md-fn a:hover { text-decoration: underline; }
 .vtoc-item:hover .vtoc-l1 { color: #37352f; }
 .vmain { flex: 1 1 auto; min-width: 0; height: 100%; }
 .vwrap { position: relative; height: 100%; min-width: 0; }        /* 정렬 그리드 + 컬럼 드래그 핸들 */
+/* 원문 | PDF 나란히 — splitter 패널은 flex-column이라 그 안 상자가 내용 폭으로 줄어든다. 그러면 본문이
+   패널 가운데가 아니라 왼쪽에 붙고(폭 핸들의 기준 가운데도 같이 틀어진다), PDF 칸은 쪽 그림 폭이 0으로 잡혀
+   사라지기도 한다 → 패널 폭을 다 채우게. */
+.vmain .q-splitter__panel > .vwrap, .vmain .q-splitter__panel > .vpdf { width: 100%; }
 .vcol-handle { position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: col-resize; z-index: 3; }
 .vcol-handle::after { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 1px; background: #e6e4e0; }
 .vcol-handle:hover::after { background: #2383e2; width: 2px; }
@@ -3620,9 +3624,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         })(%d, '%s');
         """ % (cm_id, pv_sel)
 
-    def _pdf_pane() -> None:
+    def _pdf_pane(own_width: bool = False) -> None:
+        """own_width = 텍스트 옆 PDF — 쪽 폭을 본문 폭(--md4-maxw)과 떼어 둔다. 안 그러면 원문 본문 핸들을
+        좁힐 때 옆 PDF 쪽도 같이 줄어든다. PDF만 볼 때는 같은 핸들로 쪽 폭을 조절하므로 물려받는다."""
         sizes = ctrl.pdf_page_sizes()
-        with ui.element("div").classes("vpdf"):
+        with ui.element("div").classes("vpdf").style("--md4-maxw:900px" if own_width else ""):
             if not sizes:
                 ui.label("원본 PDF를 찾을 수 없습니다.").classes("text-sm text-gray-500")
                 return
@@ -3655,7 +3661,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             show_en = True  # 최소 하나는 보이도록
 
         def text_area(solo: bool = False) -> None:
-            """solo = 텍스트 한 패널만(PDF 옆이 아님) — 그때만 단일 컬럼 본문에 폭 핸들을 둔다."""
+            """solo = 텍스트가 한 컬럼(원문만·번역만)으로 보일 때 — PDF 옆이어도 본문에 폭 핸들을 두고
+            가운데에 묶는다. 원문|번역 두 컬럼이면 컬럼 사이 핸들(.vcol-handle)이 대신한다."""
             two = show_en and show_ko and aligned
             # 한 언어만 볼 때 반대쪽을 숨은 셀로 같이 그린다 — 문장에 올리면 그 짝을 툴팁으로(JS)
             ghost = aligned and show_en != show_ko and viewer_state["stip"]
@@ -3711,9 +3718,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 with ui.splitter(value=viewer_state["split"]).classes("w-full").style("height:100%") as sp:
                     sp.on_value_change(lambda e: viewer_state.update(split=e.value))
                     with sp.before:
-                        text_area()
+                        text_area(solo=True)
                     with sp.after:
-                        _pdf_pane()
+                        _pdf_pane(own_width=True)
                 if row_page0 and viewer_state["sync"]:  # 텍스트 스크롤 → PDF 페이지 따라오기 (토글)
                     ui.run_javascript(_PDF_SYNC_JS)
             elif show_pdf:
