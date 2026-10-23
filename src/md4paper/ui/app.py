@@ -18,7 +18,7 @@ from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
     agent_panel, annotations, desktop, figrefs, figure_crop, figure_ko, find_bar, formula_pop, jobs,
-    live_preview, mdrender, reanchor,
+    live_preview, mdrender, pdf_zoom, reanchor,
     scroll_memory, sentpair, spa, tabstore, term_examples, translate_job, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
@@ -236,7 +236,7 @@ sup.md-fn a:hover { text-decoration: underline; }
    각 컬럼이 이미 좁으므로 그대로. 폭은 본문 좌우 가장자리 핸들(.vbody-handle)을 끌어 조절·기억한다. */
 .sbs-grid:not(.sbs-two) > .sbs-cell { width: 100%; max-width: var(--md4-maxw, 820px); justify-self: center; }
 .vpane-in { max-width: var(--md4-maxw, 820px); margin: 0 auto; }
-.vpdf img { max-width: var(--md4-maxw, 900px) !important; }
+.vpdf img { max-width: calc(var(--md4-maxw, 900px) * var(--pdf-zoom, 1)) !important; }  /* --pdf-zoom: §ui/pdf_zoom */
 /* 캔버스 편집 모드의 프리뷰 스크롤 패널 (프리뷰↔PDF 싱크 컨테이너).
    width:100%가 필요하다 — splitter 패널이 flex-column이라 이 상자가 내용의 max-content(844px)로
    잡혀 611px 칸을 넘고 오른쪽이 잘렸다('마크다운 + PDF'에서도 매 줄 끝이 잘리던 기존 버그). */
@@ -2719,6 +2719,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     spa.add_css(_CHROME_CSS)
     find_bar.install()  # Cmd/Ctrl+F 페이지 찾기 — 앱 창에는 브라우저 찾기 바가 없다
+    pdf_zoom.install()  # PDF 칸 핀치·Ctrl+휠 확대 — 작은 글씨·그림 속 숫자 보기
     scroll_memory.install(tok)  # 읽던 자리(단계별 스크롤) 기억 — 탭으로 오가도 그 자리로
 
     async def open_pdf_app() -> None:
@@ -6133,11 +6134,12 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         return FileResponse(png)
 
     @fastapi_app.get("/pdfpage/{token}/{idx:int}")
-    def _serve_pdf_page(token: str, idx: int):  # noqa: ANN202 — 해당 논문 PDF의 idx(0-based) 페이지 PNG
+    def _serve_pdf_page(token: str, idx: int, s: float = 2.0):  # noqa: ANN202 — 해당 논문 PDF의 idx(0-based) 페이지 PNG
+        # s = 렌더 배율(72dpi 기준). 기본 2배, PDF 칸을 확대하면 4배로 다시 받는다(§ui/pdf_zoom)
         cur = _wd_for(token)
         if cur is None:
             raise HTTPException(status_code=404)
-        png = UIController(cur).pdf_page_png(idx, zoom=2.0)
+        png = UIController(cur).pdf_page_png(idx, zoom=min(4.0, max(1.0, s)))
         if png is None:
             raise HTTPException(status_code=404)
         return Response(content=png, media_type="image/png",
