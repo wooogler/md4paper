@@ -389,6 +389,18 @@ def _convert_panel(ui, save_global, export_target):  # noqa: ANN001, ANN202 — 
         save_global("translate", "target_lang", e.value, f"번역 언어 · {langs.get(e.value).native}")
         style_select.refresh()
 
+    from md4paper import i18n
+
+    def pick_ui_lang(e) -> None:  # noqa: ANN001
+        if e.value == i18n.ui_lang():
+            return
+        save_global("ui", "language", e.value, i18n.t("화면 언어 — 창을 새로 열면 바뀝니다"))
+
+    _ui = i18n.ui_lang()
+    ui.select({c: langs.get(c).native if c != "en" else "English" for c in i18n.available()}, value=_ui,
+              label=i18n.t("화면 언어"), on_change=pick_ui_lang).props("dense outlined").classes("w-full")
+    ui.label(i18n.t("메뉴·단추의 언어입니다. 아직 일부 화면만 옮겨져 있어 나머지는 한국어로 보입니다.")) \
+        .classes("text-xs text-gray-400")
     _lang = config.resolve_target_lang()
     ui.select(langs.language_options(_lang), value=_lang, label="번역 언어 (모국어)", on_change=pick_lang) \
         .props("dense outlined").classes("w-full")

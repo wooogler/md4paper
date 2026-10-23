@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 
-from md4paper import config, formula_fix, langs, library, projects
+from md4paper import config, formula_fix, i18n, langs, library, projects
 from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
@@ -6224,7 +6224,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     @ui.page("/home")
     @ui.page("/review")
     def shell() -> None:
-        ui.add_head_html(spa.HEAD_HTML + _PREPAINT_HTML)
+        ui.add_head_html(spa.HEAD_HTML + _PREPAINT_HTML + i18n.head_html())  # 화면 언어 카탈로그(md4T)
         spa.make_header()
         # 에이전트 창 — 셸에 붙어 화면을 갈아 끼워도 대화가 남는다. 하위 화면보다 **먼저** 넣어야
         # 첫 화면(뷰어·홈)이 부르는 setPaper가 이미 떠 있는 창에 닿는다.
@@ -6261,5 +6261,6 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     else:
         print(f"md4paper UI: http://127.0.0.1:{port}  (Ctrl+C로 종료)")
     ui.run(host="127.0.0.1", port=port, show=show and not native, reload=False, title="md4paper",
+           language=i18n.quasar_language(),  # Quasar 내장 문구(표·날짜 선택기)도 화면 언어로
            favicon=str(desktop.ICON) if desktop.ICON.is_file() else None,
            native=native, window_size=(1440, 900) if native else None)
