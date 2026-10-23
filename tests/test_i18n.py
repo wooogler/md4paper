@@ -105,3 +105,10 @@ def test_html_marks_are_translated_escaped_and_collected(tmp_path):
     pkg.mkdir()
     (pkg / "a.py").write_text('X = """<b>⦃굵게⦄</b>"""\n', encoding="utf-8")
     assert i18n.collect(pkg) == {"굵게": ["md4paper/a.py:1"]}
+
+
+def test_collect_joins_implicitly_concatenated_literals(tmp_path):
+    pkg = tmp_path / "md4paper"
+    pkg.mkdir()
+    (pkg / "a.py").write_text('x = t("첫 줄 "\n      "둘째 줄", n=1)\ny = N_("상수")\n', encoding="utf-8")
+    assert set(i18n.collect(pkg)) == {"첫 줄 둘째 줄", "상수"}

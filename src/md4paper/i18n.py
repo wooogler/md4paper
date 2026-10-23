@@ -178,12 +178,36 @@ def collect(root: Path | None = None) -> dict[str, list[str]]:
         for m in _HTML_MARK.finditer(text):
             line = text.count("\n", 0, m.start()) + 1
             found.setdefault(m.group(1), []).append(f"{path.relative_to(root.parent)}:{line}")
-        for rx in (_PY_CALL, _JS_CALL):
-            for m in rx.finditer(text):
-                s = m.group("s") if rx is _JS_CALL else _unescape(m.group("s"))
-                line = text.count("\n", 0, m.start()) + 1
-                found.setdefault(s, []).append(f"{path.relative_to(root.parent)}:{line}")
+        for m in _JS_CALL.finditer(text):
+            line = text.count("\n", 0, m.start()) + 1
+            found.setdefault(m.group("s"), []).append(f"{path.relative_to(root.parent)}:{line}")
+        for s, line in _py_calls(text):
+            found.setdefault(s, []).append(f"{path.relative_to(root.parent)}:{line}")
     return found
+
+
+def _py_calls(text: str) -> list[tuple[str, int]]:
+    """`t("…")`·`i18n.t("…")`·`N_("…")`의 첫 인자 문자열 — AST로 읽어 여러 줄로 이어 쓴 리터럴도 한 문구로."""
+    import ast
+    import warnings
+
+    try:
+        with warnings.catch_warnings():  # 파일 속 JS 정규식의 '\\s' 같은 이스케이프 경고는 수집과 상관없다
+            warnings.simplefilter("ignore", SyntaxWarning)
+            tree = ast.parse(text)
+    except SyntaxError:
+        return [(_unescape(m.group("s")), text.count("\n", 0, m.start()) + 1) for m in _PY_CALL.finditer(text)]
+    out = []
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and n.args):
+            continue
+        f = n.func
+        name = f.id if isinstance(f, ast.Name) else (
+            f.attr if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "i18n" else "")
+        a = n.args[0]
+        if name in ("t", "N_") and isinstance(a, ast.Constant) and isinstance(a.value, str):
+            out.append((a.value, a.lineno))
+    return sorted(out, key=lambda x: x[1])
 
 
 def problems(lang: str) -> list[str]:
