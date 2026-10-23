@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from md4paper.i18n import N_
+
 DEFAULT = "ko"
 # 파일 이름에 들어가므로 좁게 받는다: 주 언어 2~3자 + 하위 태그(문자·숫자 2~8자)
 _CODE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$")
@@ -139,17 +141,19 @@ def fit_style(code: str, style: str, default: str | None = None) -> str:
 
 # 문체 선택 칸의 설명 — 한국어는 예전 화면 그대로, 다른 언어는 이름 옆에 짧은 풀이
 _STYLE_HINT = {
-    "해라체": "~한다 · 논문 표준", "합니다체": "~합니다 · 경어", "해요체": "~해요 · 부드럽게",
-    "である調": "～である · 논문 표준", "です・ます調": "～です · 경어",
-    "书面语": "학술 문어체 · 논문 표준", "通俗": "쉬운 문장",
-    "académico": "학술 문어체 · 논문 표준", "divulgativo": "쉬운 문장",
-    _ACADEMIC: "학술 문어체",
+    "해라체": N_("~한다 · 논문 표준"), "합니다체": N_("~합니다 · 경어"), "해요체": N_("~해요 · 부드럽게"),
+    "である調": N_("～である · 논문 표준"), "です・ます調": N_("～です · 경어"),
+    "书面语": N_("학술 문어체 · 논문 표준"), "通俗": N_("쉬운 문장"),
+    "académico": N_("학술 문어체 · 논문 표준"), "divulgativo": N_("쉬운 문장"),
+    _ACADEMIC: N_("학술 문어체"),
 }
 
 
 def style_options(code: str) -> dict[str, str]:
-    """문체 선택 칸 {값: 표시} — 그 언어의 프리셋들."""
-    return {s: f"{s} ({_STYLE_HINT[s]})" if s in _STYLE_HINT else s for s in style_names(code)}
+    """문체 선택 칸 {값: 표시} — 그 언어의 프리셋들 (풀이는 화면 언어로)."""
+    from md4paper.i18n import t
+
+    return {s: f"{s} ({t(_STYLE_HINT[s])})" if s in _STYLE_HINT else s for s in style_names(code)}
 
 
 def language_options(current: str | None = None) -> dict[str, str]:
