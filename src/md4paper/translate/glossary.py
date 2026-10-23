@@ -400,7 +400,9 @@ def _member_rows(pid: str, workspace: Path) -> tuple[list[dict], list[dict]]:
 
 def secondary_note(n: int) -> str:
     """충돌 머리 꼬리 — 비주 소속이 있으면 " (비주 소속 N편 제외)", 없으면 빈 문자열."""
-    return f" (비주 소속 {n}편 제외)" if n else ""
+    from md4paper.i18n import t
+
+    return t(" (비주 소속 {n}편 제외)", n=n) if n else ""
 
 
 def collection_entries_by_paper(pid: str, workspace: Path,
