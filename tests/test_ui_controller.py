@@ -369,12 +369,80 @@ def test_manual_edit_saves_and_flags(ctrl):
     assert "수동으로 덧붙인 문장" in ctrl.wd.en_md.read_text(encoding="utf-8")
 
 
-def test_reassemble_clears_manual_edit_flag(ctrl):
+def test_reassemble_keeps_manual_edit_through_level_change(ctrl):
+    """레벨만 바꿨는데 직접 고친 내용이 사라지던 것 — 재조립이 편집을 새 구조에 합친다."""
+    en = ctrl.en_markdown()
+    assert "# 2 Background" in en
+    ctrl.save_en_markdown(en.replace("# 1 Introduction", "# 1 Introduction\n\n직접 덧붙인 문단.", 1))
+    sid = next(s.id for s in ctrl.manifest.sections if s.text == "2 Background")
+    ctrl.set_level(sid, 3)
+    r = ctrl.save_and_reassemble()
+    out = ctrl.en_markdown()
+    assert "직접 덧붙인 문단." in out and "### 2 Background" in out
+    assert r["kept"] and r["conflicts"] == 0 and r["backup"] is None
+    assert ctrl.has_manual_edit()  # 편집이 남았으니 표시도 남는다
+    # 섹션 맵 줄 번호가 합친 문서를 따라간다 (덧붙인 두 줄만큼 밀림)
+    lines = out.splitlines()
+    for e in ctrl.section_map():
+        assert lines[e["out_line"]].lstrip("#").strip().endswith(e["text"].split()[-1]), e
+
+
+def test_reassemble_without_keep_edits_discards(ctrl):
+    """'되돌리기(원본 다시 렌더)'는 예전처럼 원문에서 새로 만든다."""
     ctrl.save_en_markdown(ctrl.en_markdown() + "\n임시 편집\n")
-    assert ctrl.has_manual_edit()
-    ctrl.save_and_reassemble()  # 섹션 트리에서 다시 생성 → 편집 사라짐
-    assert not ctrl.has_manual_edit()
+    r = ctrl.save_and_reassemble(keep_edits=False)
+    assert not r["kept"] and not ctrl.has_manual_edit()
     assert "임시 편집" not in ctrl.en_markdown()
+
+
+def test_reassemble_drops_edits_inside_dropped_section_with_backup(ctrl):
+    en = ctrl.en_markdown()
+    sec = next(s for s in ctrl.manifest.sections if s.text == "2 Background")
+    body = en.split("# 2 Background", 1)[1].split("\n# ", 1)[0]
+    line = next(x for x in body.splitlines() if x.strip())
+    ctrl.save_en_markdown(en.replace(line, line + " (사용자 편집)", 1))
+    ctrl.set_level(sec.id, "drop")
+    r = ctrl.save_and_reassemble()
+    assert "사용자 편집" not in ctrl.en_markdown() and r["dropped"] == 1
+    assert r["backup"] is not None and "사용자 편집" in r["backup"].read_text(encoding="utf-8")
+
+
+def test_assembled_markdown_matches_run_assemble(ctrl):
+    """편집을 합칠 때의 공통 조상(base)은 run_assemble이 실제로 쓰는 en.md와 같아야 한다 — 인용 링크까지."""
+    import json
+
+    from md4paper.ir import RefEntry
+    from md4paper.review import manifest as manifest_io
+
+    ctrl.wd.cite.mkdir(parents=True, exist_ok=True)
+    refs = [RefEntry(label="1", authors=["A B"], year=2017, title="T", venue="V")]
+    ctrl.wd.references_json.write_text(
+        json.dumps({"accepted": [r.model_dump() for r in refs]}), encoding="utf-8")
+    ctrl.save_and_reassemble()
+    assert pipeline.assembled_markdown(ctrl.wd, manifest_io.load(ctrl.wd)) == ctrl.en_markdown()
+
+
+def test_author_parts_change_keeps_edit_and_applies(tmp_path):
+    """raw.md를 먼저 바꾸는 변경(저자 표기)도 편집을 살리고 새 표기를 반영한다 — base를 바꾸기 전에 떠 둔다."""
+    import json
+
+    from md4paper.extract.front_matter import _render_authors_detail
+    from md4paper.ir import AuthorEntry
+
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.extract.mkdir(parents=True)
+    authors = [AuthorEntry(name="A One", emails=["a@x.edu"], affiliations=["X Lab"])]
+    block = _render_authors_detail(authors, ["email", "affiliation"])
+    wd.raw_md.write_text(f"## Paper Title\n\n{block}\n\n## 1 Introduction\n\nIntro body.\n", encoding="utf-8")
+    wd.authors_json.write_text(json.dumps([a.model_dump() for a in authors]), encoding="utf-8")
+    pipeline.run_structure(wd)
+    pipeline.run_assemble(wd, force=True)
+    c = UIController(wd)
+    c.save_en_markdown(c.en_markdown().replace("Intro body.", "Intro body, edited."))
+    assert c.set_author_parts(["affiliation"]) is True
+    c.save_and_reassemble()
+    en = c.en_markdown()
+    assert "a@x.edu" not in en and "Intro body, edited." in en
 
 
 def test_rerender_reflects_level_without_yaml_save(ctrl):
