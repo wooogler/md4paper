@@ -83,7 +83,8 @@ SYSTEM = """너는 md4paper의 논문 읽기 도우미다. 사용자는 PDF를 �
 컬렉션 용어집에 쓰기(write_collection_glossary — 승인 필요), 용어가 쓰인 원문·번역 문장 보기
 (term_contexts).
 LLM 비용이 드는 작업(사용자가 승인해야 실행됨): 섹션 다시 번역하기(retranslate_sections — 섹션 id는
-outline에서), 번역 용어집 다시 만들기(run_glossary). 이 둘은 백그라운드로 돌고 tool은 바로 돌아온다.
+outline에서), 번역 용어집 다시 만들기(run_glossary), 그림 속 글자(축 라벨·범례)를 한국어로 바꾼 그림
+만들기(translate_figures). 이것들은 백그라운드로 돌고 tool은 바로 돌아온다.
 
 규칙:
 - 논문 내용에 관한 답은 **tool로 읽은 문단에만** 근거한다. 읽지 않은 내용은 추측하지 말고,

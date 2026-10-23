@@ -197,7 +197,18 @@ def replace(wd: WorkDir, name: str, page: int, rect) -> dict:  # noqa: ANN001
                                               round(max(left, right), 1), round(max(top, bottom), 1)],
                   "manual": True, **({"auto": auto} if auto else {})}
     _save(wd, data)
+    _unlink_translation(wd)
     return {"name": name, "copies": copies}
+
+
+def _unlink_translation(wd: WorkDir) -> None:
+    """그림이 바뀌었으니 옛 그림으로 만든 번역 그림은 ko.md에서 뺀다 (기록은 남아 '원본이 바뀜'으로 보인다)."""
+    from md4paper import figure_translate
+
+    try:
+        figure_translate.link_ko(wd)
+    except Exception:  # noqa: BLE001 — 그림 교체 자체는 끝났다
+        pass
 
 
 def has_backup(wd: WorkDir, name: str) -> bool:
@@ -218,4 +229,5 @@ def restore(wd: WorkDir, name: str) -> dict:
     else:
         data.pop(name, None)
     _save(wd, data)
+    _unlink_translation(wd)
     return {"name": name, "copies": copies}
