@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from md4paper.i18n import N_, t
 from md4paper.workdir import WorkDir
 
 CLIP = 260            # 문장이 이보다 길면 용어 주변만 보인다
@@ -52,15 +53,15 @@ class Example:
 
 def plain(md: str) -> str:
     """마크다운 셀 → 평문 (이미지·링크 주소·HTML·강조 기호·헤더 표식·표 구분선을 걷는다)."""
-    t = _IMG_RE.sub("", md or "")
-    t = _LINK_RE.sub(r"\1", t)
-    t = _TAG_RE.sub("", t)
-    t = _TABLE_RE.sub("", t)
-    t = _HEAD_RE.sub("", t)
-    t = _LIST_RE.sub("", t)
-    t = _MARK_RE.sub("", t)
-    t = t.replace("|", " ")
-    return re.sub(r"[ \t]+", " ", t)
+    tv = _IMG_RE.sub("", md or "")
+    tv = _LINK_RE.sub(r"\1", tv)
+    tv = _TAG_RE.sub("", tv)
+    tv = _TABLE_RE.sub("", tv)
+    tv = _HEAD_RE.sub("", tv)
+    tv = _LIST_RE.sub("", tv)
+    tv = _MARK_RE.sub("", tv)
+    tv = tv.replace("|", " ")
+    return re.sub(r"[ \t]+", " ", tv)
 
 
 def sentences(text: str) -> list[str]:
@@ -222,14 +223,14 @@ CSS = """
 
 def text_lines(ex: Example) -> str:
     """에이전트·CLI용 평문 두 줄 — 용어·번역어를 «»로 감싼다."""
-    def mark(t: str, spans: list[tuple[int, int]]) -> str:
+    def mark(tv: str, spans: list[tuple[int, int]]) -> str:
         out, at = [], 0
         for a, b in sorted(spans):
             if a < at:
                 continue
-            out += [t[at:a], "«", t[a:b], "»"]
+            out += [tv[at:a], "«", tv[a:b], "»"]
             at = b
-        return "".join(out + [t[at:]])
+        return "".join(out + [tv[at:]])
 
     line = f"EN: {mark(ex.en, ex.en_spans)}"
     if ex.ko:
@@ -251,8 +252,8 @@ def unaligned(wd: WorkDir) -> bool:
     return not any(c.ko for c in retrieval.paper(wd).chunks)
 
 
-UNALIGNED_NOTE = ("번역과 원문의 섹션 수가 맞지 않아(재변환·제목 수준 변경 뒤) 번역 문장을 짝짓지 못했습니다 — "
-                  "다시 번역하면 맞춰집니다.")
+UNALIGNED_NOTE = N_("번역과 원문의 섹션 수가 맞지 않아(재변환·제목 수준 변경 뒤) 번역 문장을 짝짓지 못했습니다 — "
+                  "다시 번역하면 맞춰집니다.")  # 화면엔 t(), 에이전트(LLM)엔 그대로
 
 
 def render(examples: list[Example], rows: int, *, goto=None, max_note: bool = True,  # noqa: ANN001
@@ -261,9 +262,9 @@ def render(examples: list[Example], rows: int, *, goto=None, max_note: bool = Tr
     from nicegui import ui
 
     if examples and unaligned_note:
-        ui.label(UNALIGNED_NOTE).classes("md4-tex-meta")
+        ui.label(t(UNALIGNED_NOTE)).classes("md4-tex-meta")
     if not examples:
-        ui.label("본문에서 이 용어를 찾지 못했습니다 (복수형·하이픈 표기 차이일 수 있습니다).") \
+        ui.label(t("본문에서 이 용어를 찾지 못했습니다 (복수형·하이픈 표기 차이일 수 있습니다).")) \
             .classes("md4-tex-meta")
         return
     for e in examples:
@@ -274,13 +275,13 @@ def render(examples: list[Example], rows: int, *, goto=None, max_note: bool = Tr
                 if goto is not None:
                     ui.button(where, on_click=lambda _, r=e.row: goto(r)) \
                         .props("flat dense no-caps size=xs color=grey-7").classes("md4-tex-meta") \
-                        .tooltip("본문의 이 자리로 이동")
+                        .tooltip(t("본문의 이 자리로 이동"))
                 else:
                     ui.label(where).classes("md4-tex-meta")
                 if e.ko and not e.ko_exact:
-                    ui.label("· 번역어가 안 보임 — 다른 말로 옮긴 문장").classes("md4-tex-meta")
+                    ui.label(t("· 번역어가 안 보임 — 다른 말로 옮긴 문장")).classes("md4-tex-meta")
     if max_note and rows > len(examples):
-        ui.label(f"이 논문에서 {rows}곳에 나옵니다 (여기엔 {len(examples)}곳).").classes("md4-tex-meta")
+        ui.label(t("이 논문에서 {rows}곳에 나옵니다 (여기엔 {n}곳).", rows=rows, n=len(examples))).classes("md4-tex-meta")
 
 
 def render_across(groups: list[dict]) -> None:
@@ -288,9 +289,9 @@ def render_across(groups: list[dict]) -> None:
     from nicegui import ui
 
     if not groups:
-        ui.label("이 논문들의 본문에서 이 용어를 찾지 못했습니다.").classes("md4-tex-meta")
+        ui.label(t("이 논문들의 본문에서 이 용어를 찾지 못했습니다.")).classes("md4-tex-meta")
         return
     for g in groups:
-        tail = f" · {g['rows']}곳" if g.get("rows") else ""
+        tail = t(" · {n}곳", n=g["rows"]) if g.get("rows") else ""
         ui.label(f"{g['title'][:70]}{tail}").classes("md4-tex-meta q-mt-xs").tooltip(g["title"])
         render(g["examples"], g["rows"], max_note=False, unaligned_note=bool(g.get("unaligned")))
