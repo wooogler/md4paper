@@ -133,3 +133,33 @@ def fit_style(code: str, style: str, default: str | None = None) -> str:
         ok = default and (default in lang.styles or default.startswith("custom:"))
         return default if ok else lang.default_style
     return style
+
+
+# --- 화면 표시 ------------------------------------------------------------------
+
+# 문체 선택 칸의 설명 — 한국어는 예전 화면 그대로, 다른 언어는 이름 옆에 짧은 풀이
+_STYLE_HINT = {
+    "해라체": "~한다 · 논문 표준", "합니다체": "~합니다 · 경어", "해요체": "~해요 · 부드럽게",
+    "である調": "～である · 논문 표준", "です・ます調": "～です · 경어",
+    "书面语": "학술 문어체 · 논문 표준", "通俗": "쉬운 문장",
+    "académico": "학술 문어체 · 논문 표준", "divulgativo": "쉬운 문장",
+    _ACADEMIC: "학술 문어체",
+}
+
+
+def style_options(code: str) -> dict[str, str]:
+    """문체 선택 칸 {값: 표시} — 그 언어의 프리셋들."""
+    return {s: f"{s} ({_STYLE_HINT[s]})" if s in _STYLE_HINT else s for s in style_names(code)}
+
+
+def language_options(current: str | None = None) -> dict[str, str]:
+    """번역 언어 선택 칸 {코드: '日本語 · ja'} — 프리셋 언어, 이름만 아는 언어, 그리고 지금 값(목록 밖이어도)."""
+    codes = [*_PRESETS, *_NAMES]
+    if current and current not in codes:
+        codes.append(current)
+    return {c: f"{get(c).native} · {c}" for c in codes}
+
+
+def short(code: str) -> str:
+    """단추에 쓰는 짧은 이름 — `KO`·`JA`·`ZH`·`ES` (주 언어 대문자)."""
+    return normalize(code).split("-")[0].upper()

@@ -686,6 +686,7 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
             "year": year,
             "venue": venue,
             "has_ko": WorkDir(md4).ko_md.exists(),  # 번역(이 논문의 언어)이 있는지
+            "lang": WorkDir(md4).lang,  # 번역 언어 (단추 이름 KO·JA …)
             "opened": opened,  # 리뷰 화면을 한 번이라도 연 적 있는지 (미열람 표시용)
             "hidden": hidden,  # 사용자가 목록에서 감춘 논문 (파일은 그대로)
             "pinned": bool(pinned_at),  # 사용자가 위에 고정한 논문

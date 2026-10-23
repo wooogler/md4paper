@@ -251,3 +251,48 @@ def test_status_lang_survives_reconvert_stage_reset(paper):
     paper.mark_done("cite", "x")
     assert paper.lang == "es"
     assert json.loads(paper.status_json.read_text(encoding="utf-8"))["lang"] == "es"
+
+
+# --- 화면 (2단계) ---------------------------------------------------------------
+
+def test_style_and_language_options_for_screens():
+    assert langs.style_options("ko") == {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)",
+                                         "해요체": "해요체 (~해요 · 부드럽게)"}
+    assert list(langs.style_options("ja")) == ["である調", "です・ます調"]
+    opts = langs.language_options()
+    assert opts["ja"] == "日本語 · ja" and opts["zh-Hans"] == "简体中文 · zh-Hans" and "es" in opts
+    assert "sw" in langs.language_options("sw")  # 목록 밖의 지금 값도 고를 수 있게
+    assert (langs.short("ko"), langs.short("zh-Hans"), langs.short("es")) == ("KO", "ZH", "ES")
+
+
+def test_export_layout_puts_translations_in_language_folder(tmp_path):
+    from md4paper import projects
+
+    assert projects.layout(tmp_path)["ko"] == tmp_path / "ko"
+    config.set_section_value("translate", "target_lang", "ja")
+    assert projects.layout(tmp_path) == {"en": tmp_path, "ko": tmp_path / "ja", "pdf": tmp_path / "pdf"}
+
+
+def test_home_rows_carry_paper_language(paper):
+    from md4paper.workdir import recent_workdirs
+
+    paper.set_lang("es")
+    row = next(r for r in recent_workdirs(paper.root.parent, limit=10) if r["root"] == paper.root)
+    assert row["lang"] == "es" and row["has_ko"] is False
+
+
+def test_toc_toggle_names_the_translation_language():
+    from md4paper.ui.app import _toc_lang_options
+
+    assert _toc_lang_options("ko") == {"en": "영어", "ko": "한국어", "both": "병기"}
+    assert _toc_lang_options("ja")["ko"] == "日本語"
+
+
+def test_batch_plan_skips_figures_for_other_languages(paper, monkeypatch):
+    from md4paper import figure_translate
+    from md4paper.ui import translate_job
+
+    monkeypatch.setattr(figure_translate, "todo", lambda wd: ["figure-1.png"])
+    assert translate_job.plan([paper.root], model_for=lambda wd: "openai/gpt-6-luna")["figures"] == 1
+    paper.set_lang("ja")
+    assert translate_job.plan([paper.root], model_for=lambda wd: "openai/gpt-6-luna")["figures"] == 0
