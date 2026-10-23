@@ -162,7 +162,9 @@ def version_label() -> str:
                                  capture_output=True, text=True, check=False, timeout=5).stdout.strip()
         except (OSError, subprocess.TimeoutExpired):
             sha = ""
-        return f"{label} · 개발본 {sha}".rstrip()
+        from md4paper.i18n import t
+
+        return t("{label} · 개발본 {sha}", label=label, sha=sha).rstrip()
     return label
 
 

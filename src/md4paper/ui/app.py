@@ -11,8 +11,10 @@ import functools
 import json
 import re
 import time
+from html import escape
 from pathlib import Path
 
+from md4paper.i18n import N_, t
 from md4paper import config, formula_fix, i18n, langs, library, projects
 from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
@@ -26,22 +28,27 @@ from md4paper.workdir import WorkDir, left_panel, paper_title, set_left_panel, s
 
 # 설명이 붙은 옵션 (값 → 사람이 이해하기 쉬운 라벨)
 # 마크다운 내보내기 형식 — 다운로드 zip에 적용 (설명 없이 이름만)
-_EXPORT_TARGET = {"universal": "범용", "notion": "Notion", "obsidian": "Obsidian"}
+_EXPORT_TARGET = {"universal": N_("범용"), "notion": "Notion", "obsidian": "Obsidian"}
 # 목차 제목 언어 — 영어만 / 번역만 / 둘 다(두 줄). "ko"의 표시는 논문 번역 언어 이름으로 바꿔 쓴다(_toc_lang_options)
-_TOC_LANG = {"en": "영어", "ko": "한국어", "both": "병기"}
+_TOC_LANG = {"en": N_("영어"), "ko": N_("한국어"), "both": N_("병기")}
 
 
 def _toc_lang_options(lang: str) -> dict[str, str]:
     """목차 언어 토글 — 번역 쪽 이름은 논문 번역 언어로 (한국어는 예전 그대로)."""
-    return {**_TOC_LANG, "ko": langs.get(lang).native}
+    return {**_tr(_TOC_LANG), "ko": langs.get(lang).native if lang != "ko" else t(_TOC_LANG["ko"])}
+
+
+def _tr(d: dict) -> dict:
+    """N_()로 표시한 라벨 사전 → 화면 언어로 (값만)."""
+    return {k: t(v) for k, v in d.items()}
 # AI 서비스 — 비전문가용 이름 + 키 형식 힌트
 _PROVIDER_NAME = {
-    "openai": "OpenAI (ChatGPT 계열)",
-    "anthropic": "Anthropic (Claude 계열)",
-    "gemini": "Google (Gemini 계열)",
+    "openai": N_("OpenAI (ChatGPT 계열)"),
+    "anthropic": N_("Anthropic (Claude 계열)"),
+    "gemini": N_("Google (Gemini 계열)"),
 }
-_KEY_HINT = {"openai": "sk-proj-... 또는 sk-...", "anthropic": "sk-ant-...", "gemini": "AIza..."}
-_TIER_LABEL = ("저렴 · 빠름", "중간", "비쌈 · 고성능")
+_KEY_HINT = {"openai": N_("sk-proj-... 또는 sk-..."), "anthropic": "sk-ant-...", "gemini": "AIza..."}
+_TIER_LABEL = (N_("저렴 · 빠름"), N_("중간"), N_("비쌈 · 고성능"))
 
 
 def _short_provider(p: str) -> str:
@@ -55,46 +62,46 @@ def _model_options(provider: str) -> dict:
     opts: dict[str, str] = {}
     for i, mid in enumerate(config.MODEL_TIERS.get(provider, ())):
         pr = PRICING.get(mid)
-        price = f" · ${pr[0]:g}/${pr[1]:g} (100만 토큰)" if pr else ""
-        opts[mid] = f"{_TIER_LABEL[i]} — {mid}{price}"
+        price = t(" · ${inp:g}/${out:g} (100만 토큰)", inp=pr[0], out=pr[1]) if pr else ""
+        opts[mid] = f"{t(_TIER_LABEL[i])} — {mid}{price}"
     return opts
 
 
-_CAPSTYLE_NAME = {"bold-italic": "굵은 라벨 + 이탤릭", "blockquote": "인용구", "italic": "이탤릭만"}
+_CAPSTYLE_NAME = {"bold-italic": N_("굵은 라벨 + 이탤릭"), "blockquote": N_("인용구"), "italic": N_("이탤릭만")}
 # 마크다운 문법 대신 '렌더 결과'를 그대로 보여주는 미리보기 (직관적 선택)
 _CAPSTYLE_EX = {
-    "bold-italic": "<b>Figure 1:</b> <i>예시 캡션</i>",
+    "bold-italic": "<b>Figure 1:</b> <i>⦃예시 캡션⦄</i>",
     "blockquote": '<span style="border-left:3px solid currentColor;padding-left:8px;opacity:.9">'
-                  "<b>Figure 1:</b> 예시 캡션</span>",
-    "italic": "<i>Figure 1: 예시 캡션</i>",
+                  "<b>Figure 1:</b> ⦃예시 캡션⦄</span>",
+    "italic": "<i>Figure 1: ⦃예시 캡션⦄</i>",
 }
 _RUNIN = {
-    "off": "끄기 — 본문 그대로",
-    "header": "헤더로 승격 — ### 4.1.3 제목",
-    "italic": "이탤릭 표기 — *4.1.3 제목.*",
+    "off": N_("끄기 — 본문 그대로"),
+    "header": N_("헤더로 승격 — ### 4.1.3 제목"),
+    "italic": N_("이탤릭 표기 — *4.1.3 제목.*"),
 }
 _POLICY = {
-    "translate": "번역 (의미로)",
-    "transliterate": "음역 (소리로)",
-    "keep": "원어 유지",
-    "병기-first-use": "첫 등장 시 원어 병기",
+    "translate": N_("번역 (의미로)"),
+    "transliterate": N_("음역 (소리로)"),
+    "keep": N_("원어 유지"),
+    "병기-first-use": N_("첫 등장 시 원어 병기"),
 }
 
 # 헤더 레벨 드롭다운 — 내부 값(int/문자)은 그대로 두고 표시만 결과 중심의 한국어로.
 # (기존엔 skip/merge-up/drop 같은 영어 내부값이 그대로 노출돼 뜻이 안 와닿았다.)
 _LEVEL_LABEL = {
-    1: "제목 1", 2: "제목 2", 3: "제목 3", 4: "제목 4", 5: "제목 5", 6: "제목 6",
-    "italic": "기울임",       # run-in 소제목을 기울임 문단으로
-    "skip": "본문으로",       # 헤더 해제 — 제목 텍스트는 일반 문단으로 남김
-    "merge-up": "위에 합침",  # 제목 줄을 없애고 그 내용을 위 섹션에 합침
-    "drop": "통째 삭제",      # 제목 + 본문을 통째로 제거
+    1: N_("제목 1"), 2: N_("제목 2"), 3: N_("제목 3"), 4: N_("제목 4"), 5: N_("제목 5"), 6: N_("제목 6"),
+    "italic": N_("기울임"),       # run-in 소제목을 기울임 문단으로
+    "skip": N_("본문으로"),       # 헤더 해제 — 제목 텍스트는 일반 문단으로 남김
+    "merge-up": N_("위에 합침"),  # 제목 줄을 없애고 그 내용을 위 섹션에 합침
+    "drop": N_("통째 삭제"),      # 제목 + 본문을 통째로 제거
 }
 
 
 def _level_opts(runin: bool) -> dict:
     """레벨 선택 옵션 {값: 한국어 라벨}. 값은 controller의 정본 목록을 그대로 쓴다."""
     src = RUNIN_LEVEL_OPTIONS if runin else LEVEL_OPTIONS
-    return {v: _LEVEL_LABEL.get(v, str(v)) for v in src}
+    return {v: t(_LEVEL_LABEL[v]) if v in _LEVEL_LABEL else str(v) for v in src}
 
 # Notion 느낌의 프리뷰 스타일
 _PREVIEW_CSS = """
@@ -154,7 +161,7 @@ _PREVIEW_CSS = """
   padding: 2px; border: none; background: none; color: inherit; cursor: pointer; opacity: .55; }
 #md-cite-tip .md-cite-copy:hover { opacity: 1; }
 #md-cite-tip .md-cite-copy.copied { opacity: 1; color: #34c759; }
-#md-cite-tip .md-cite-copy.copied::after { content: '제목 복사됨'; position: absolute; right: 100%;
+#md-cite-tip .md-cite-copy.copied::after { content: '⦃제목 복사됨⦄'; position: absolute; right: 100%;
   margin-right: 6px; top: 50%; transform: translateY(-50%); font-size: 10.5px; line-height: 1.4;
   background: rgba(0,0,0,.72); color: #fff; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
 @media (prefers-color-scheme: dark) { #md-cite-tip a.md-cite-doi { color: #2c62b8; } }
@@ -470,11 +477,11 @@ _ANNO_HTML = """
 <div id="md-anno-bar"></div>
 <div id="md-anno-pop"></div>
 <div id="md-anno-panel">
-  <div class="ap-head"><b>하이라이트 · 메모</b><span class="ap-count">0</span>
-    <span class="apop-sp"></span><button class="ap-x" title="닫기 (Esc)">&#10005;</button></div>
+  <div class="ap-head"><b>⦃하이라이트 · 메모⦄</b><span class="ap-count">0</span>
+    <span class="apop-sp"></span><button class="ap-x" title="⦃닫기 (Esc)⦄">&#10005;</button></div>
   <div class="ap-tools" style="display:none"></div>
   <div class="ap-list"></div>
-  <div class="ap-foot">드래그 = 끌어 둔 그 자리에 · 더블클릭 = 그 <b>문장</b> 통째로 (원문·번역 함께)</div>
+  <div class="ap-foot">⦃드래그 = 끌어 둔 그 자리에 · 더블클릭 = 그 문장 통째로 (원문·번역 함께)⦄</div>
 </div>
 <script>
 (function(){
@@ -737,7 +744,7 @@ _ANNO_HTML = """
     if (e <= s){ clearSel(); return; }
     pending = {scope: sc, start: s, end: e};
     bar.innerHTML = dots(null) + '<span class="ab-sep"></span>'
-      + '<button class="ab-btn" data-act="note">메모 달기</button>';
+      + '<button class="ab-btn" data-act="note">' + md4T('메모 달기') + '</button>';
     bar.classList.add('open');
     place(bar, r.getBoundingClientRect());
   }
@@ -844,10 +851,10 @@ _ANNO_HTML = """
     editing = id;
     var en = quoteOf(a, 'en'), ko = quoteOf(a, 'ko');
     pop.innerHTML = '<div class="apop-row">' + dots(a.color)
-      + '<span class="apop-sp"></span><button class="apop-del">삭제</button></div>'
+      + '<span class="apop-sp"></span><button class="apop-del">' + md4T('삭제') + '</button></div>'
       + (en ? '<div class="apop-quote">' + esc(cut(en, 130)) + '</div>' : '')
       + (ko ? '<div class="apop-quote apop-ko">' + esc(cut(ko, 130)) + '</div>' : '')
-      + '<textarea placeholder="메모 (자동 저장)"></textarea>';
+      + '<textarea placeholder="' + md4T('메모 (자동 저장)') + '"></textarea>';
     var ta = pop.querySelector('textarea'); ta.value = a.note || '';
     pop.classList.add('open');
     var ms = marksFor(id);
@@ -886,7 +893,7 @@ _ANNO_HTML = """
   function origText(a){   // 추정 배지 툴팁 — 고치기 전 원래 문장
     var out = '';
     for (var i = 0; i < a.anchors.length; i++) if (a.anchors[i].guess && a.anchors[i].orig)
-      out += '\\n\\n원래 ' + (a.anchors[i].side === 'ko' ? '번역' : '원문') + ': ' + cut(a.anchors[i].orig.quote, 200);
+      out += '\\n\\n' + (a.anchors[i].side === 'ko' ? md4T('원래 번역') : md4T('원래 원문')) + ': ' + cut(a.anchors[i].orig.quote, 200);
     return out;
   }
   function renderPanel(){
@@ -904,24 +911,24 @@ _ANNO_HTML = """
       return kx[0] - ky[0] || kx[1] - ky[1] || kx[2] - ky[2];
     });
     var mc = missCount(), tools = panel.querySelector('.ap-tools');
-    tools.innerHTML = (mc ? '<button class="ap-refind">다시 찾기</button>'
-      + '<span class="ap-tnote">위치를 못 찾은 곳 ' + mc + '군데</span>' : '')
+    tools.innerHTML = (mc ? '<button class="ap-refind">' + md4T('다시 찾기') + '</button>'
+      + '<span class="ap-tnote">' + md4T('위치를 못 찾은 곳 {n}군데', {n: mc}) + '</span>' : '')
       + (refindMsg ? '<span class="ap-tmsg">' + esc(refindMsg) + '</span>' : '');
     tools.style.display = tools.innerHTML ? '' : 'none';
     if (!sorted.length){
-      list.innerHTML = '<div class="ap-empty">아직 표시한 곳이 없습니다.<br>본문을 드래그해 색을 고르면 여기에 쌓입니다.</div>';
+      list.innerHTML = '<div class="ap-empty">' + md4T('아직 표시한 곳이 없습니다.') + '<br>' + md4T('본문을 드래그해 색을 고르면 여기에 쌓입니다.') + '</div>';
       return;
     }
     list.innerHTML = sorted.map(function(a){
       var en = quoteOf(a, 'en'), ko = quoteOf(a, 'ko');
       return '<div class="ap-item' + (lost[a.id] ? ' ap-lost' : '') + '" data-id="' + esc(a.id) + '">'
         + '<div class="ap-top"><span class="ap-dot" style="background:' + (SWATCH[a.color] || SWATCH.yellow) + '"></span>'
-        + '<span class="ap-side">' + (en && ko ? '원문 · 번역' : (ko ? '번역' : '원문')) + '</span>'
-        + (lost[a.id] ? '<span class="ap-lostb">위치 못 찾음</span>'
-           : (miss[a.id] ? '<span class="ap-lostb">' + (miss[a.id][0] === 'ko' ? '번역' : '원문') + ' 쪽 못 찾음</span>' : ''))
-        + (isGuess(a) ? '<button class="ap-guessb" title="문구가 바뀌어 가장 비슷한 문장에 붙였습니다. 눌러서 맞다고 확인'
-           + esc(origText(a)).replace(/"/g, '&quot;') + '">추정 · 확인</button>' : '')
-        + '<span class="apop-sp"></span><button class="ap-del" title="삭제">&#10005;</button></div>'
+        + '<span class="ap-side">' + (en && ko ? md4T('원문 · 번역') : (ko ? md4T('번역') : md4T('원문'))) + '</span>'
+        + (lost[a.id] ? '<span class="ap-lostb">' + md4T('위치 못 찾음') + '</span>'
+           : (miss[a.id] ? '<span class="ap-lostb">' + (miss[a.id][0] === 'ko' ? md4T('번역 쪽 못 찾음') : md4T('원문 쪽 못 찾음')) + '</span>' : ''))
+        + (isGuess(a) ? '<button class="ap-guessb" title="' + md4T('문구가 바뀌어 가장 비슷한 문장에 붙였습니다. 눌러서 맞다고 확인') + ''
+           + esc(origText(a)).replace(/"/g, '&quot;') + '">' + md4T('추정 · 확인') + '</button>' : '')
+        + '<span class="apop-sp"></span><button class="ap-del" title="' + md4T('삭제') + '">&#10005;</button></div>'
         + (en ? '<div class="ap-q">' + esc(cut(en, 170)) + '</div>' : '')
         + (ko ? '<div class="ap-q ap-ko">' + esc(cut(ko, 170)) + '</div>' : '')
         + ((a.note || '').trim() ? '<div class="ap-n">' + esc(a.note) + '</div>' : '')
@@ -934,7 +941,7 @@ _ANNO_HTML = """
       var before = missCount();
       wideNext = true; applyAll();
       var after = missCount();
-      refindMsg = (before - after) + '군데 다시 붙임 · ' + after + '군데 못 찾음';
+      refindMsg = md4T('{a}군데 다시 붙임 · {b}군데 못 찾음', {a: before - after, b: after});
       renderPanel();
       setTimeout(function(){ refindMsg = ''; renderPanel(); }, 6000);
       return;
@@ -1038,7 +1045,7 @@ _ANNO_HTML = """
     for (i = 0; i < parts.length; i++) txt += parts[i].textContent;
     txt = txt.replace(/\s+/g, ' ').trim();
     if (!txt) return false;
-    stip.innerHTML = '<span class="st-side">' + (ghost.getAttribute('data-side') === 'ko' ? '번역' : '원문') + '</span>';
+    stip.innerHTML = '<span class="st-side">' + (ghost.getAttribute('data-side') === 'ko' ? md4T('번역') : md4T('원문')) + '</span>';
     stip.appendChild(document.createTextNode(txt));
     // 문장 첫 줄 아래(자리가 없으면 위)에 — 문장이 여러 줄이면 클릭한 줄 기준
     var rs = el.getClientRects(), r = rs[0] || el.getBoundingClientRect();
@@ -1178,7 +1185,7 @@ _CITE_TIP_HTML = """
   var tip = document.getElementById('md-cite-tip');
   if (!tip) return;
   var pinned = null;
-  var PIN = '<span class="md-cite-pin" title="고정됨 — 바깥을 클릭하면 닫힘">'
+  var PIN = '<span class="md-cite-pin" title="' + md4T('고정됨 — 바깥을 클릭하면 닫힘') + '">'
     + '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">'
     + '<path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>'
     + '</svg></span>';
@@ -1228,7 +1235,7 @@ _CITE_TIP_HTML = """
       // 고정 시: 우상단 압정 + 그 아래 제목 복사 아이콘(DOI 안 될 때 구글 스콜라 검색용)
       var t = e.title || e.text || '';
       html += PIN;
-      html += '<button class="md-cite-copy" title="제목 복사" data-title="' + escAttr(t) + '">' + COPY_SVG + '</button>';
+      html += '<button class="md-cite-copy" title="' + md4T('제목 복사') + '" data-title="' + escAttr(t) + '">' + COPY_SVG + '</button>';
     }
     tip.innerHTML = html;
   }
@@ -1410,34 +1417,34 @@ _IMG_ZOOM_HTML = """
 <div id="md-img-zoom">
   <img alt="">
   <div class="mdz-bar">
-    <button data-act="out" title="축소 (-)">&#8722;</button>
+    <button data-act="out" title="⦃축소 (-)⦄">&#8722;</button>
     <span class="mdz-pct">100%</span>
-    <button data-act="in" title="확대 (+)">&#43;</button>
-    <button data-act="fit" title="화면에 맞추기 (0)">
+    <button data-act="in" title="⦃확대 (+)⦄">&#43;</button>
+    <button data-act="fit" title="⦃화면에 맞추기 (0)⦄">
       <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
         <path d="M4 9V4h5v2H6v3H4zm11-5h5v5h-2V6h-3V4zM4 15h2v3h3v2H4v-5zm14 3v-3h2v5h-5v-2h3z"/>
       </svg></button>
     <span class="mdz-sep"></span>
-    <button data-act="copy" title="그림 복사 (⌘/Ctrl+C)">
+    <button data-act="copy" title="⦃그림 복사 (⌘/Ctrl+C)⦄">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
         <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
       </svg></button>
-    <button data-act="save" title="그림 저장 (⌘/Ctrl+S)">
+    <button data-act="save" title="⦃그림 저장 (⌘/Ctrl+S)⦄">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
         <path d="M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z"/>
       </svg></button>
-    <button data-act="recrop" title="그림 영역 다시 지정 — PDF에서 다시 자르기">
+    <button data-act="recrop" title="⦃그림 영역 다시 지정 — PDF에서 다시 자르기⦄">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
         <path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/>
       </svg></button>
-    <button data-act="figko" title="그림 속 글자 번역 — 번역 그림 보기·만들기·고치기">가</button>
+    <button data-act="figko" title="⦃그림 속 글자 번역 — 번역 그림 보기·만들기·고치기⦄">⦃가⦄</button>
     <span class="mdz-sep"></span>
-    <button data-act="close" title="닫기 (Esc)">&#10005;</button>
+    <button data-act="close" title="⦃닫기 (Esc)⦄">&#10005;</button>
   </div>
   <div class="mdz-foot"><div class="mdz-cap"></div>
-    <details class="mdz-alt"><summary>그림 설명 <span>· 저자가 PDF에 단 대체 텍스트</span></summary>
+    <details class="mdz-alt"><summary>⦃그림 설명⦄ <span>⦃· 저자가 PDF에 단 대체 텍스트⦄</span></summary>
       <div class="mdz-alt-text"></div></details>
-    <div class="mdz-hint">휠·더블클릭으로 확대 · 드래그로 이동 · ⌘/Ctrl+C 복사 · Esc로 닫기</div></div>
+    <div class="mdz-hint">⦃휠·더블클릭으로 확대 · 드래그로 이동 · ⌘/Ctrl+C 복사 · Esc로 닫기⦄</div></div>
 </div>
 <script>
 (function(){
@@ -1466,7 +1473,7 @@ _IMG_ZOOM_HTML = """
     for (var i = 0; i < imgs.length; i++){
       var has = !!altOf(imgs[i].getAttribute('src'));
       imgs[i].classList.toggle('md-has-alt', has);
-      if (has && !imgs[i].title) imgs[i].title = '그림 설명 있음 — 클릭해서 확대';
+      if (has && !imgs[i].title) imgs[i].title = md4T('그림 설명 있음 — 클릭해서 확대');
     }
   }
   hidpi(document); markAlts(document);
@@ -1834,7 +1841,7 @@ def notes_editor_js(el_id: str, md: str) -> str:
         "Object.keys(all).forEach(function(k){if(!document.getElementById(k)){"
         "try{all[k].destroy();}catch(e){}delete all[k];}});"
         "var crepe=new W.MilkdownCrepe({root:el, defaultValue:md,"
-        "featureConfigs:{placeholder:{text:'메모를 입력하세요 — / 를 누르면 표·체크박스·코드 등을 넣을 수 있습니다',"
+        "featureConfigs:{placeholder:{text:md4T('메모를 입력하세요 — / 를 누르면 표·체크박스·코드 등을 넣을 수 있습니다'),"
         "mode:'doc'}}});"
         "el.__md4crepe=crepe;all[id]=crepe;"
         # 표가 든 문서는 만들자마자 표 정리 트랜잭션이 돌아 내용이 같은 채로 한 번 불린다 → 같으면 건너뜀
@@ -1844,7 +1851,7 @@ def notes_editor_js(el_id: str, md: str) -> str:
         "if(typeof emitEvent==='function')emitEvent('md4-notes',{id:id, md:m});});});"
         "crepe.create().then(function(){el.__md4base=crepe.getMarkdown();el.__md4ready=true;});}"
         "W.__md4CrepeLoad.then(mount, function(){var el=document.getElementById(id);"
-        "if(el)el.textContent='메모 편집기를 불러오지 못했습니다.';});"
+        "if(el)el.textContent=md4T('메모 편집기를 불러오지 못했습니다.');});"
         f"}})({json.dumps(el_id)}, {json.dumps(md, ensure_ascii=False)});"
     )
 
@@ -1927,7 +1934,7 @@ def anchored_markdown(md: str, section_map: list[dict], page_by_id: dict | None 
             if jump:  # 헤더 텍스트 끝에 점프 버튼(섹션 트리 해당 항목으로 이동+하이라이트)
                 line += (
                     f' <a class="md-sec-jump" href="#sectree-{sid}" data-sec="{sid}" '
-                    'title="섹션 트리에서 이 섹션의 구조를 편집">✎ 섹션 구조</a>')
+                    f'title="{escape(t("섹션 트리에서 이 섹션의 구조를 편집"))}">✎ {escape(t("섹션 구조"))}</a>')
             j += 1
         out.append(line)
     # 끝의 개행을 살린다 — splitlines/join 왕복은 문서 끝 빈 줄을 하나 삼킨다.
@@ -2430,7 +2437,7 @@ async def _spawn_window(root: Path, state: dict, title: str) -> None:
     같은 논문을 두 창에서 고치면 하이라이트·메모는 나중에 저장한 쪽이 앞을 덮으므로 이미 떠 있으면
     띄우지 않는다.
     """
-    await _spawn_path(_review_url(root), state, title, dup_note="이 논문은 이미 다른 창에 떠 있습니다.")
+    await _spawn_path(_review_url(root), state, title, dup_note=t("이 논문은 이미 다른 창에 떠 있습니다."))
 
 
 async def _spawn_path(path: str, state: dict, title: str, *, dup_note: str) -> None:
@@ -2449,14 +2456,14 @@ async def _spawn_path(path: str, state: dict, title: str, *, dup_note: str) -> N
         return
     proc = extra_window.open_new(url, title or "md4paper")
     if proc is None:
-        ui.notify("새 창을 띄우지 못했습니다 — 앱 창 의존성(pywebview)을 확인하세요.", type="negative")
+        ui.notify(t("새 창을 띄우지 못했습니다 — 앱 창 의존성(pywebview)을 확인하세요."), type="negative")
         return
     await asyncio.sleep(1.2)
     code = extra_window.died(proc)
     if code is None:
-        ui.notify("새 창에서 열었습니다.", type="positive", timeout=1400)
+        ui.notify(t("새 창에서 열었습니다."), type="positive", timeout=1400)
     else:
-        ui.notify(f"새 창이 바로 닫혔습니다 (종료 코드 {code}) — 앱 창 의존성(pywebview)을 확인하세요.",
+        ui.notify(t("새 창이 바로 닫혔습니다 (종료 코드 {code}) — 앱 창 의존성(pywebview)을 확인하세요.", code=code),
                   type="negative", timeout=6000)
 
 
@@ -2480,19 +2487,19 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
             tabs.append(here_key)
         with ui.row().classes("items-end gap-0 no-wrap md4-tabstrip"):
             _home_chip(active=here_key is None)
-            for t in tabs:
-                _chip(here_title if t == here_key else paper_title(Path(t)), Path(t),
-                      active=t == here_key, busy=t in busy)
+            for tv in tabs:
+                _chip(here_title if tv == here_key else paper_title(Path(tv)), Path(tv),
+                      active=tv == here_key, busy=tv in busy)
         ui.button(icon="add", color=None, on_click=open_picker) \
             .props("flat dense round size=sm text-color=white").classes("md4-tabadd") \
-            .tooltip("논문 열기 — 변환된 논문을 골라 새 탭으로")
+            .tooltip(t("논문 열기 — 변환된 논문을 골라 새 탭으로"))
         with ui.row().classes("items-center gap-0 no-wrap md4-tabtools"):
             jobs_menu()
             if here_key is None:  # 홈 — 에이전트 창 여는 단추 (뷰어는 캔버스 툴바의 forum 단추가 맡는다)
                 ui.button(icon="forum", color=None, on_click=lambda: ui.run_javascript(
                     "window.__md4Agent && window.__md4Agent.toggle()")) \
                     .props("flat dense round size=sm text-color=white").classes("md4-agentbtn") \
-                    .tooltip("에이전트 — 라이브러리의 논문을 찾아 읽고 답합니다")
+                    .tooltip(t("에이전트 — 라이브러리의 논문을 찾아 읽고 답합니다"))
             if tools is not None:
                 tools()
 
@@ -2500,8 +2507,8 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
         tab = ui.element("div").classes("md4-tab md4-tab-home" + (" on" if active else ""))
         with tab:
             ui.icon("home", size="16px").classes("md4-tab-ico")
-            ui.label("홈").classes("md4-tab-t")
-        tab.tooltip("홈 — 업로드 · 논문 목록")
+            ui.label(t("홈")).classes("md4-tab-t")
+        tab.tooltip(t("홈 — 업로드 · 논문 목록"))
         if not active:
             tab.on("click", lambda: ui.navigate.to("/home"))
 
@@ -2522,10 +2529,10 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
             with x:
                 ui.html("&#10005;")
             x.on("click.stop", lambda _, r=root, a=active: close_tab(r, a))
-            x.tooltip("탭 닫기" + (" — 도는 작업은 계속됩니다" if busy else ""))
-        tip = title if active else f"{title}\n클릭하면 이 논문으로 이동"
+            x.tooltip(t("탭 닫기") + (t(" — 도는 작업은 계속됩니다") if busy else ""))
+        tip = title if active else title + "\n" + t("클릭하면 이 논문으로 이동")
         if busy:
-            tip += "\n백그라운드 작업 진행 중"
+            tip += "\n" + t("백그라운드 작업 진행 중")
         tab.tooltip(tip)
         if not active:
             tab.on("click", lambda _, r=root: ui.navigate.to(_review_url(r)))
@@ -2563,21 +2570,21 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
 
         with ui.dialog() as dlg, ui.card().classes("gap-2 q-pa-md").style("width:620px;max-width:94vw"):
             with ui.row().classes("items-center w-full no-wrap"):
-                ui.label("논문 열기").classes("text-base font-bold")
+                ui.label(t("논문 열기")).classes("text-base font-bold")
                 ui.space()
-                ui.button("새 PDF 올리기", icon="upload_file", on_click=lambda: ui.navigate.to("/home")) \
-                    .props("flat dense no-caps size=sm color=primary").tooltip("홈에서 PDF를 올려 변환합니다")
-            search = ui.input(placeholder="제목 · 저자 · 연도로 찾기 (Enter = 첫 번째 열기)") \
+                ui.button(t("새 PDF 올리기"), icon="upload_file", on_click=lambda: ui.navigate.to("/home")) \
+                    .props("flat dense no-caps size=sm color=primary").tooltip(t("홈에서 PDF를 올려 변환합니다"))
+            search = ui.input(placeholder=t("제목 · 저자 · 연도로 찾기 (Enter = 첫 번째 열기)")) \
                 .props("dense outlined autofocus clearable").classes("w-full")
 
             @ui.refreshable
             def listing() -> None:
                 found = matches()
                 if not rows:
-                    ui.label("아직 변환된 논문이 없습니다 — 홈에서 PDF를 올리세요.").classes("text-sm text-gray-500")
+                    ui.label(t("아직 변환된 논문이 없습니다 — 홈에서 PDF를 올리세요.")).classes("text-sm text-gray-500")
                     return
                 if not found:
-                    ui.label("찾는 논문이 없습니다.").classes("text-sm text-gray-500")
+                    ui.label(t("찾는 논문이 없습니다.")).classes("text-sm text-gray-500")
                     return
                 for r in found:
                     key = str(Path(r["root"]).resolve())
@@ -2592,11 +2599,11 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
                             if sub:
                                 ui.label(sub).classes("text-xs text-gray-500 truncate w-full")
                         if is_here:
-                            ui.badge("보는 중", color="grey").props("outline")
+                            ui.badge(t("보는 중"), color="grey").props("outline")
                         elif key in open_keys:
-                            ui.badge("열린 탭", color="primary").props("outline")
+                            ui.badge(t("열린 탭"), color="primary").props("outline")
                         if r.get("has_ko"):
-                            ui.badge("번역", color="green").props("outline")
+                            ui.badge(t("번역"), color="green").props("outline")
                     if is_here:
                         item.on("click", dlg.close)
                     else:
@@ -2625,7 +2632,7 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
         if not active and not conv:
             return
         btn = ui.button(color=None).props("flat dense no-caps text-color=white size=sm") \
-            .classes("md4-jobsbtn").tooltip("백그라운드 작업 진행 중 — 눌러서 보기")
+            .classes("md4-jobsbtn").tooltip(t("백그라운드 작업 진행 중 — 눌러서 보기"))
         with btn:
             ui.icon("autorenew", size="16px").classes("md4-spin")
             ui.label(f"{len(active) + len(conv)}").classes("q-ml-xs")
@@ -2635,7 +2642,7 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
                     ui.menu_item(f"{j.label}{pct} · {j.title or Path(j.root).stem}",
                                  on_click=lambda _, r=j.root: ui.navigate.to(_review_url(Path(r))))
                 for q in conv:
-                    ui.menu_item(f"변환 · {q['name']}", on_click=lambda: ui.navigate.to("/home"))
+                    ui.menu_item(t("변환 · {name}", name=q['name']), on_click=lambda: ui.navigate.to("/home"))
 
     # 탭 아이콘·작업 목록은 다른 논문의 작업 상태도 비추므로, 무엇이 도는지 바뀔 때만 다시 그린다
     sig_state: dict = {"v": None, "watch": []}
@@ -2647,9 +2654,9 @@ def tab_bar(state: dict, here: Path | None, here_title: str = "", tools=None):  
                 j.seen = True
                 name = j.title or Path(j.root).stem
                 if j.status == "done":
-                    ui.notify(f"‘{name}’ — {j.message or j.label + ' 완료'}", type="positive")
+                    ui.notify(f"‘{name}’ — {j.message or t('{label} 완료', label=j.label)}", type="positive")
                 else:
-                    ui.notify(f"‘{name}’ {j.label} 실패: {j.error}", type="negative")
+                    ui.notify(t("‘{name}’ {label} 실패: {error}", name=name, label=j.label, error=j.error), type="negative")
         sig_state["watch"] = jobs.running()
         sig = (tuple(sorted((j.root, j.kind) for j in sig_state["watch"])),
                sum(1 for q in state.get("queue", []) if q.get("status") in _QUEUE_ACTIVE))
@@ -2674,7 +2681,7 @@ def new_window_button(root: Path, state: dict, title: str = "", *,
     """
     from nicegui import ui
 
-    tip = "새 창으로 열기 — 두 논문을 나란히 볼 때"
+    tip = t("새 창으로 열기 — 두 논문을 나란히 볼 때")
     if desktop.active():
         ui.button(icon="open_in_new", color=None,
                   on_click=lambda: _spawn_window(root, state, title)) \
@@ -2692,12 +2699,12 @@ def _relative_time(ts: float) -> str:
     """수정 시각 → '방금 전 / N분 전 / N시간 전 / N일 전'."""
     diff = max(0, int(time.time() - ts))
     if diff < 60:
-        return "방금 전"
+        return t("방금 전")
     if diff < 3600:
-        return f"{diff // 60}분 전"
+        return t("{n}분 전", n=diff // 60)
     if diff < 86400:
-        return f"{diff // 3600}시간 전"
-    return f"{diff // 86400}일 전"
+        return t("{n}시간 전", n=diff // 3600)
+    return t("{n}일 전", n=diff // 86400)
 
 
 async def open_source_pdf(ctrl: UIController) -> None:
@@ -2706,10 +2713,10 @@ async def open_source_pdf(ctrl: UIController) -> None:
 
     pdf = ctrl.source_pdf()
     if not pdf or not Path(pdf).is_file():
-        ui.notify("원본 PDF를 찾지 못했습니다 (마크다운에서 변환한 논문일 수 있어요).", type="warning")
+        ui.notify(t("원본 PDF를 찾지 못했습니다 (마크다운에서 변환한 논문일 수 있어요)."), type="warning")
         return
     if not await run.io_bound(desktop.open_file, Path(pdf)):
-        ui.notify("PDF 뷰어를 열지 못했습니다.", type="negative")
+        ui.notify(t("PDF 뷰어를 열지 못했습니다."), type="negative")
 
 
 def build(ctrl: UIController, state: dict | None = None) -> None:
@@ -2822,8 +2829,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         ui.badge("run-in", color="blue-4").props("outline")
                     if sec.auto_level is not None and sec.level != sec.auto_level:
                         ui.badge("기억됨", color="green").props("outline").tooltip(
-                            f"자동값 {_LEVEL_LABEL.get(sec.auto_level, sec.auto_level)} → "
-                            f"사용자 선택 {_LEVEL_LABEL.get(sec.level, sec.level)} (이름으로 기억)")
+                            t("자동값 {auto} → 사용자 선택 {level} (이름으로 기억)",
+                              auto=t(_LEVEL_LABEL.get(sec.auto_level, str(sec.auto_level))),
+                              level=t(_LEVEL_LABEL.get(sec.level, str(sec.level)))))
                     if sec.needs_review:
                         ui.badge("확인", color="orange").props("outline")
                     # 섹션 라벨을 클릭하면 마크다운 그 위치로 이동(나란히 보기면 PDF도 따라옴).
@@ -2858,7 +2866,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 batch_level_panel.refresh()
                 _refresh_translate_tree()
                 refresh_canvas()
-                ui.notify(f"{name} {n}개 → {_LEVEL_LABEL.get(value, value)}", type="positive")
+                ui.notify(t("{name} {n}개 → {level}", name=name, n=n, level=t(_LEVEL_LABEL.get(value, str(value)))), type="positive")
 
             apply()
 
@@ -2895,7 +2903,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                 lbl.classes("cursor-pointer").on("click", lambda _, sid=s.id: goto_md(sid)) \
                                     .tooltip("클릭하면 마크다운의 이 섹션으로 이동")
 
-    spa.add_css(_PREVIEW_CSS)
+    spa.add_css(i18n.html(_PREVIEW_CSS))
     spa.add_css(live_preview.CSS)  # 편집기 라이브 프리뷰(기호 숨기기·헤더·그림·표·수식)
     # 인용·각주 호버 툴팁: 맵 주입 → 툴팁 요소/스크립트 (같은 툴팁 UI를 #ref-·#fn- 둘 다 씀)
     spa.add_body_html(f"<script>{cite_tips_js(ctrl.citation_tooltips())}</script>")
@@ -2903,7 +2911,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_body_html(f"<script>{fig_alts_js(ctrl.figure_alts())}</script>")  # 확대 뷰어의 그림 설명
     spa.add_body_html(_CITE_TIP_HTML)
     spa.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
-    spa.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어
+    spa.add_body_html(i18n.html(_IMG_ZOOM_HTML))  # 본문 그림 클릭 → 확대 뷰어
     spa.add_body_html(_EXTLINK_HTML)  # 바깥 링크는 새 창(앱 창이면 시스템 브라우저)으로
     spa.add_body_html(_ARROW_HTML)  # -> → · <- ← · <-> ↔ · => ⇒ (메모·하이라이트 메모·마크다운 편집기)
     # 본문 그림·표 참조 호버 → 썸네일, 클릭 → 확대 (그림은 위 확대 뷰어, 마크다운 표는 표 오버레이)
@@ -2948,7 +2956,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_css(_ANNO_CSS)
     spa.add_css(term_examples.CSS)  # 용어집 시트의 '이 용어가 쓰인 문장'
     spa.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
-    spa.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
+    spa.add_body_html(i18n.html(_ANNO_HTML))  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
     spa.add_css(formula_pop.CSS)  # 수식 클릭 → 원본 크롭 대조 · 다시 생성
     spa.add_body_html(f"<script>{formula_pop.init_js(tok)}</script>")
     spa.add_body_html(formula_pop.HTML)
@@ -3130,9 +3138,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     def edit_flush() -> None:
         """기다리던 마크다운 편집을 바로 파일에 — 타자가 멈췄을 때, 편집을 끄거나 대상을 바꾸거나 떠날 때."""
-        t = edit_state.get("timer")
-        if t is not None:
-            t.cancel()
+        tv = edit_state.get("timer")
+        if tv is not None:
+            tv.cancel()
             edit_state["timer"] = None
         pending = edit_state.get("pending")
         if pending is None:
@@ -3297,9 +3305,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         잘리고 높이가 돌아와도 되돌아오지 않는다. 블록만 바꾸면 노드가 살아 있어 브라우저의
         스크롤 앵커링이 위치를 알아서 잡아 준다.
         """
-        t = edit_state.pop("timer", None)
-        if t is not None:
-            t.cancel()
+        tv = edit_state.pop("timer", None)
+        if tv is not None:
+            tv.cancel()
         edit_state["timer"] = ui.timer(0.12, lambda: _live_patch(text), once=True)
 
     def _live_patch(text: str) -> None:
@@ -3342,9 +3350,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             # 자동 저장 — 타자가 0.8초 멈추면 파일에 (메모 패널과 같은 모아 쓰기)
             edit_state["pending"] = (edit_state["lang"], e.value)
             _edit_status("저장 중…")
-            t = edit_state.get("timer")
-            if t is not None:
-                t.cancel()
+            tv = edit_state.get("timer")
+            if tv is not None:
+                tv.cancel()
             edit_state["timer"] = ui.timer(0.8, edit_flush, once=True)
 
         editor = ui.codemirror(
@@ -4224,7 +4232,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         from md4paper.translate.glossary import term_key
 
         on = bool(term.strip()) and term_key(term) in ex_open
-        ui.button(icon="format_quote", on_click=lambda _, t=term: example_toggle(t, refresh)) \
+        ui.button(icon="format_quote", on_click=lambda _, tv=term: example_toggle(tv, refresh)) \
             .props(f"flat dense round size=sm color={'primary' if on else 'grey-6'}") \
             .tooltip("이 용어가 쓰인 문장 (원문·번역) — 어떻게 옮기는 게 자연스러운지 문맥으로 보기")
 
@@ -4265,7 +4273,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.icon("arrow_forward").classes("text-gray-400")
                 ui.input(placeholder="번역어", value=d["korean"]).bind_value(d, "korean") \
                     .on("blur", lambda: gloss_autosave()).props("dense outlined" + strike).classes("w-40")
-                ui.select(_POLICY, value=d["policy"]).bind_value(d, "policy") \
+                ui.select(_tr(_POLICY), value=d["policy"]).bind_value(d, "policy") \
                     .on("update:model-value", lambda: gloss_autosave()).props("dense outlined").classes("w-44")
                 example_button(d["term"], gloss_rows)
                 ui.button(icon="delete", on_click=lambda _, idx=i: (
@@ -4425,12 +4433,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             status_chip.refresh()  # 헤더 칩 → '번역 중…'
 
             def tick() -> None:
-                t = job.total
-                translate_state.update(done=job.done, total=t, status=job.detail.get("status") or {})
+                tv = job.total
+                translate_state.update(done=job.done, total=tv, status=job.detail.get("status") or {})
                 if job.running:
                     bar.value = job.fraction
-                    prog_lbl.text = (f"번역 중… {job.done}/{t} 섹션 ({int(job.fraction * 100)}%) · 병렬 처리 "
-                                     "· 다른 탭으로 옮겨도 계속됩니다" if t else
+                    prog_lbl.text = (f"번역 중… {job.done}/{tv} 섹션 ({int(job.fraction * 100)}%) · 병렬 처리 "
+                                     "· 다른 탭으로 옮겨도 계속됩니다" if tv else
                                      f"대기 중 — 다른 번역이 끝나면 시작합니다 (동시에 {translate_job.gate().limit}편까지)"
                                      if job.detail.get("queued") else "번역 준비 중…")
                     update_tree_status()  # 섹션 트리 아이템에 진행중/완료 아이콘 반영
@@ -4560,7 +4568,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         with ui.row().classes("items-center gap-2 w-full no-wrap"):
                             ui.label(e.term).classes("text-sm w-40 shrink-0 truncate").tooltip(e.term)
                             ui.icon("arrow_forward", size="14px").classes("text-gray-400")
-                            ui.label(f"{e.korean or '(빈 칸)'} · {_POLICY.get(e.policy, e.policy)}") \
+                            ui.label(f"{e.korean or '(빈 칸)'} · {t(_POLICY.get(e.policy, e.policy))}") \
                                 .classes("text-sm text-gray-700 truncate min-w-0")
                             ui.space()
                             example_button(e.term, coll_rows)
@@ -4741,9 +4749,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def remember_width(mode: str, value: float) -> None:
         """드래그 중엔 값이 쏟아지므로 모아 두었다가 잠잠해지면 한 번만 파일에 쓴다."""
         _width_save["pending"][mode] = int(round(value))
-        t = _width_save["timer"]
-        if t is not None:
-            t.cancel()
+        tv = _width_save["timer"]
+        if tv is not None:
+            tv.cancel()
 
         def flush() -> None:
             _width_save["timer"] = None
@@ -4788,9 +4796,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         return True
 
     def notes_flush() -> None:
-        t = notes_state["timer"]
-        if t is not None:
-            t.cancel()
+        tv = notes_state["timer"]
+        if tv is not None:
+            tv.cancel()
             notes_state["timer"] = None
         pending, notes_state["pending"] = notes_state["pending"], {}
         if not pending:
@@ -4809,9 +4817,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def notes_typed(tab: str, text: str, el_id: str | None = None) -> None:
         notes_state["pending"][tab] = (text, el_id, None)  # 친 칸의 탭에 — 칸·탭을 바꿔도 섞이지 않게
         notes_set_status("저장 중…")
-        t = notes_state["timer"]
-        if t is not None:
-            t.cancel()
+        tv = notes_state["timer"]
+        if tv is not None:
+            tv.cancel()
         notes_state["timer"] = ui.timer(0.8, notes_flush, once=True)
 
     def set_panel(mode: str | None, toggle: bool = True) -> None:
@@ -5001,7 +5009,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         @ui.refreshable
         def capstyle_picker() -> None:
             # 마크다운 문법이 아니라 렌더된 모습을 보여주고 클릭해 선택
-            for key, example in _CAPSTYLE_EX.items():
+            for key, example in ((k, i18n.html(v)) for k, v in _CAPSTYLE_EX.items()):
                 sel = ctrl.manifest.caption_style == key
                 row = ui.row().classes(
                     "items-center gap-2 w-full no-wrap q-px-sm q-py-xs rounded-borders cursor-pointer"
@@ -5009,7 +5017,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 with row:
                     ui.icon("radio_button_checked" if sel else "radio_button_unchecked", size="18px") \
                         .classes("text-primary" if sel else "text-grey-5")
-                    ui.html(example).classes("text-sm").tooltip(_CAPSTYLE_NAME[key])
+                    ui.html(example).classes("text-sm").tooltip(t(_CAPSTYLE_NAME[key]))
                 row.on("click", lambda e, k=key: set_capstyle(k))
 
         capstyle_picker()
@@ -5181,8 +5189,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def _pick(e) -> None:  # noqa: ANN001
             config.set_section_value("output", "export_target", e.value)
             export_fmt_review.refresh()
-            ui.notify(f"내보내기 형식 · {_EXPORT_TARGET[e.value]}", type="positive", timeout=1200)
-        ui.select(_EXPORT_TARGET, value=config.resolve_export_target(), on_change=_pick) \
+            ui.notify(t("내보내기 형식 · {v}", v=t(_EXPORT_TARGET[e.value])), type="positive", timeout=1200)
+        ui.select(_tr(_EXPORT_TARGET), value=config.resolve_export_target(), on_change=_pick) \
             .props("dense outlined").classes("w-28").tooltip("다운로드 zip에 적용하는 형식 (전역 설정)")
 
     # --- 레이아웃 자동 수정 (구조 패널) — 깨진 헤더·수식·문단을 처음부터 끝까지 훑어 AI로 고친다 ---
@@ -5259,10 +5267,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
             def tick() -> None:  # 워커 스레드가 job을 갱신 → 타이머가 폴링 (NiceGUI 스레드 안전)
                 if job.running:
-                    t = job.total
+                    tv = job.total
                     fix_bar.value = job.fraction
-                    fix_status.text = (f"수정 중… {job.done}/{t} 구간 ({int(job.fraction * 100)}%)"
-                                       if t else "구간을 나누는 중…")
+                    fix_status.text = (f"수정 중… {job.done}/{tv} 구간 ({int(job.fraction * 100)}%)"
+                                       if tv else "구간을 나누는 중…")
                     fix_banner.text = f"레이아웃 자동 수정 중… {fix_status.text.removeprefix('수정 중… ')}"
                     fix_banner.set_visibility(True)
                     return
@@ -5760,8 +5768,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 if got is not None and got[0] != kept:
                     notes_io.keep(ctrl.wd, tab, got[0])
                 ui.notify("이 창에서 쓴 내용은 논문 폴더의 notes/.trash/에 남겼습니다.", type="info")
-                for el_id, t in notes_state["ids"].items():
-                    if t == tab and el_id in notes_state["mem"]:
+                for el_id, tv in notes_state["ids"].items():
+                    if tv == tab and el_id in notes_state["mem"]:
                         notes_state["mem"][el_id]["dead"] = True
                 remount(None)
                 notes_set_status("저장됨")
@@ -6188,7 +6196,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     from md4paper.ui.agent import routes as agent_routes
 
     agent_routes.register_routes(
-        fastapi_app, wd_for=lambda t: state["wd_by_token"].get(t),
+        fastapi_app, wd_for=lambda tv: state["wd_by_token"].get(tv),
         register_token=lambda w: (_register_wd(w), wd_token(w.root))[1],
         workspace=lambda: state["upload_dir"])
     formula_pop.register_routes(fastapi_app, _wd_for)

@@ -1054,7 +1054,7 @@ def build_home(state: dict) -> None:
     def set_export_target(value: str) -> None:
         config.set_section_value("output", "export_target", value)
         more_menu.refresh()
-        ui.notify(t("내보내기 형식 · {v}", v=_EXPORT_TARGET[value]), type="positive", timeout=1200)
+        ui.notify(t("내보내기 형식 · {v}", v=t(_EXPORT_TARGET[value])), type="positive", timeout=1200)
 
     # ===== 업로드 → 큐 =====
     async def handle(e) -> None:  # noqa: ANN001 — NiceGUI upload 이벤트 (파일마다 발화)
@@ -1249,7 +1249,7 @@ def build_home(state: dict) -> None:
             ui.separator()
             ui.label(t("내보내기 형식 (EN·KO zip·폴더 저장)")).classes("md4-menucap")
             for key, label in _EXPORT_TARGET.items():
-                ui.menu_item(("✓ " if key == cur_target else "    ") + label,
+                ui.menu_item(("✓ " if key == cur_target else "    ") + t(label),
                              on_click=lambda _, k=key: set_export_target(k)).props("dense")
             ui.separator()
             ui.menu_item(t("이 목록의 논문을 폴더로 저장"),

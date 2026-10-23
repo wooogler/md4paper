@@ -88,3 +88,20 @@ def test_quasar_language_follows_screen_language():
     assert i18n.quasar_language() == "ko-KR"
     config.set_section_value("ui", "language", "en")
     assert i18n.quasar_language() == "en-US"
+
+
+def test_html_marks_are_translated_escaped_and_collected(tmp_path):
+    code = '<button title="⦃닫기 (Esc)⦄">⦃닫기⦄</button>'
+    assert i18n.html(code) == '<button title="닫기 (Esc)">닫기</button>'
+    config.set_section_value("ui", "language", "en")
+    import md4paper.i18n as m
+    orig = m.catalog
+    m.catalog = lambda lang=None: {"닫기 (Esc)": 'Close "Esc"', "닫기": "Close"}
+    try:
+        assert i18n.html(code) == '<button title="Close &quot;Esc&quot;">Close</button>'
+    finally:
+        m.catalog = orig
+    pkg = tmp_path / "md4paper"
+    pkg.mkdir()
+    (pkg / "a.py").write_text('X = """<b>⦃굵게⦄</b>"""\n', encoding="utf-8")
+    assert i18n.collect(pkg) == {"굵게": ["md4paper/a.py:1"]}
