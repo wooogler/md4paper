@@ -974,5 +974,7 @@
  " · {n}개 섹션은 아래 표시(구조 검증 실패)": " · {n} sections marked below (structure check failed)",
  " · 체크 해제 {n}개 구간은 지난 번역 유지": " · {n} unchecked chunks kept their previous translation",
  "영어 원문 없음": "No English source",
- "구조(sections.yaml)를 읽지 못함": "Couldn't read the structure (sections.yaml)"
+ "구조(sections.yaml)를 읽지 못함": "Couldn't read the structure (sections.yaml)",
+ "저장을 취소했습니다.": "Save cancelled.",
+ "저장됨: {target}": "Saved: {target}"
 }

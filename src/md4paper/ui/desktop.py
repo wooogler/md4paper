@@ -18,6 +18,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from md4paper.i18n import t
+
 # webview.FileDialog.SAVE. pywebview는 선택 의존성이라 import 없이 값만 가져다 쓴다
 # (브라우저 모드에서 이 모듈을 import하는 것만으로 pywebview를 요구하면 안 된다).
 SAVE_DIALOG = 30
@@ -136,7 +138,7 @@ async def deliver(name: str, data: bytes, media_type: str = "application/zip") -
     else:
         chosen = _first_path(picked)
         if chosen is None:  # 사용자가 취소 — 아무 일도 일어나지 않았다는 걸 알려 준다
-            ui.notify("저장을 취소했습니다.", type="info")
+            ui.notify(t("저장을 취소했습니다."), type="info")
             return
         target = Path(chosen)
 
@@ -144,11 +146,11 @@ async def deliver(name: str, data: bytes, media_type: str = "application/zip") -
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
     except OSError as e:
-        ui.notify(f"저장 실패: {e}", type="negative")
+        ui.notify(t("저장 실패: {e}", e=e), type="negative")
         return
     if fallback:  # 사용자가 위치를 고르지 않았으니 어디에 놓였는지 보여 준다
         reveal(target)
-    ui.notify(f"저장됨: {target}", type="positive")
+    ui.notify(t("저장됨: {target}", target=target), type="positive")
 
 
 def copy_image(path: Path) -> bool:

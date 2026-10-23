@@ -236,8 +236,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if clean and not re.search(r"^from md4paper\.i18n import .*\bt\b", out, flags=re.M):
             m = re.search(r"^from md4paper(\.\S+)? import .*$", out, flags=re.M)
-            at = m.start() if m else 0
-            out = out[:at] + "from md4paper.i18n import t\n" + out[at:]
+            if m:
+                out = out[:m.start()] + "from md4paper.i18n import t\n" + out[m.start():]
+            else:  # md4paper import가 없으면 맨 위 import 묶음 뒤에 (from __future__보다 앞이면 안 된다)
+                body = ast.parse(out).body
+                last = max((n.end_lineno for n in body if isinstance(n, (ast.Import, ast.ImportFrom))), default=0)
+                lines_out = out.splitlines(keepends=True)
+                out = "".join(lines_out[:last]) + "\nfrom md4paper.i18n import t\n" + "".join(lines_out[last:])
         compile(out, str(a.file), "exec")
         a.file.write_text(out, encoding="utf-8")
     print(f"감쌈 {len(clean)}개" + (f" · 사람이 볼 f-string {len(skipped)}개" if skipped else ""))
