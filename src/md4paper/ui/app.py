@@ -2704,10 +2704,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         await open_source_pdf(ctrl)
 
     def review_tools() -> None:
-        if ctrl.source_pdf():
-            ui.button(icon="picture_as_pdf", color=None, on_click=open_pdf_app) \
-                .props("flat dense round size=sm text-color=white") \
-                .tooltip("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서")
+        # 원본 PDF 열기는 툴바 '내보내기' 옆에 있다 — 탭 줄 끝에 두면 탭 수에 따라 자리가 옮겨 다니고,
+        # 툴바의 'PDF'(앱 안 PDF 칸) 토글과 같은 이름의 단추가 둘이 되어 헷갈렸다.
         new_window_button(ctrl.wd.root, state, _title, dark=True, small=True)
 
     # 헤더는 한 줄이다 — 논문 탭은 아래 끝에 물려(활성 탭이 본문 흰 바닥과 맞닿아 '탭'으로 읽힌다),
@@ -3817,6 +3815,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 "flat dense round color=grey-7").tooltip("에이전트 — 이 논문·라이브러리에 묻고, 근거 문단으로 이동")
             ui.space()
             library_button()
+            if ctrl.source_pdf():  # 내보내기와 같은 '이 논문 파일을 바깥으로' 묶음 — 앱 안 PDF 칸은 왼쪽 토글
+                ui.button("원본 PDF", icon="picture_as_pdf", on_click=open_pdf_app) \
+                    .props("flat dense no-caps color=primary") \
+                    .tooltip("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서")
             # 내보내기는 메뉴 하나로 — 세 단추가 툴바 폭을 먹던 것을 접는다. 형식 선택도 같은 메뉴 안에.
             with ui.button("내보내기", icon="download").props("flat dense no-caps color=primary"):
                 with ui.menu().props("anchor='bottom right' self='top right'").classes("md4-exportmenu"):
