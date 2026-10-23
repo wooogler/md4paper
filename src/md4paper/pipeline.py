@@ -165,6 +165,14 @@ def run_assemble(wd: WorkDir, force: bool = False) -> None:
     if refs:
         apply_links(wd, refs, manifest.citation_parts, manifest.reference_links)
 
+    # 그림 설명(태그 PDF의 대체 텍스트) — 조립이 그림 이름을 정하므로 그 뒤에 짝짓는다. 입력이 같으면 건너뛴다
+    from md4paper import figure_alt
+
+    try:
+        figure_alt.ensure(wd)
+    except Exception:  # noqa: BLE001 — 설명은 덤이다; 못 읽어도 조립은 끝난다
+        pass
+
     wd.mark_done("assemble", h)
 
 

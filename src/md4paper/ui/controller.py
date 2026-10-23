@@ -7,6 +7,7 @@ CLI와 같은 아티팩트를 읽고 쓴다(별도 데이터 모델 없음).
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from md4paper import notes as notes_io
@@ -60,6 +61,43 @@ def footnote_tooltips(wd: WorkDir) -> dict[str, str]:
     except (OSError, ValueError):
         return {}
     return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+_LOCATING: set[str] = set()
+_LOCATING_LOCK = threading.Lock()
+
+
+def figure_alts(wd: WorkDir, background: bool = True) -> dict[str, str]:
+    """그림 파일명 → 설명(태그 PDF의 대체 텍스트). 설명이 없는 논문이면 빈 dict.
+
+    처음 여는 옛 논문이면 여기서 짝짓는다(캡션 번호·기록된 그림 자리만 — 태그 PDF도 1초 안쪽).
+    그래도 못 짝지은 설명이 남으면 그림 자리를 PDF에서 찾아(그림당 ~1초) 다시 짝짓는 일을 뒤에서
+    돌린다 — 결과는 다음에 열 때 보인다. 한 논문에 한 번만(기록에 '찾아봄'이 남는다).
+    """
+    from md4paper import figure_alt
+
+    try:
+        data = figure_alt.ensure(wd)
+    except Exception:  # noqa: BLE001 — 설명은 덤이다
+        return {}
+    if background and figure_alt.needs_locate(data):
+        key = str(Path(wd.root).resolve())
+        with _LOCATING_LOCK:
+            if key in _LOCATING:
+                return figure_alt.alts(wd)
+            _LOCATING.add(key)
+
+        def work() -> None:
+            try:
+                figure_alt.build(wd, locate=True)
+            except Exception:  # noqa: BLE001
+                pass
+            finally:
+                with _LOCATING_LOCK:
+                    _LOCATING.discard(key)
+
+        threading.Thread(target=work, name="figure-alt-locate", daemon=True).start()
+    return figure_alt.alts(wd)
 
 
 def demote_ko_headings(ko: str, en_before: str, dropped: list[str]) -> str | None:
@@ -589,6 +627,9 @@ class UIController:
 
     def footnote_tooltips(self) -> dict[str, str]:
         return footnote_tooltips(self.wd)
+
+    def figure_alts(self) -> dict[str, str]:
+        return figure_alts(self.wd)
 
     # --- 수동 편집 (번역 전 손보기) ---
     def save_en_markdown(self, text: str) -> None:
