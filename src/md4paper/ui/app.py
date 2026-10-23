@@ -5213,18 +5213,18 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         push_cite_tips()  # 재조립하며 인용 링크가 다시 붙었다 → 호버 툴팁 맵 갱신
 
     with ui.dialog() as fix_dialog, ui.card().classes("gap-3").style("width:560px;max-width:92vw"):
-        ui.label("레이아웃 자동 수정").classes("text-lg font-bold")
+        ui.label(t("레이아웃 자동 수정")).classes("text-lg font-bold")
         ui.markdown(
-            "PDF에서 뽑은 마크다운을 **처음부터 끝까지 나눠 훑으며** AI가 레이아웃만 고칩니다 — "
+            t("PDF에서 뽑은 마크다운을 **처음부터 끝까지 나눠 훑으며** AI가 레이아웃만 고칩니다 — "
             "쪼개진 헤더(`## 2` + `## Background` → `## 2 Background`), 깨진 수식(`x t` → `$x_t$`), "
             "끊긴 문단·목록·표 같은 것들. **글의 내용(단어)은 바꾸지 않습니다.**\n\n"
             "고친 문서로 **섹션 트리와 일괄 레벨 조정도 다시 만들어집니다** "
-            "(지금 정해 둔 레벨·번역 여부·변환 설정은 그대로 이어받습니다)."
+            "(지금 정해 둔 레벨·번역 여부·변환 설정은 그대로 이어받습니다).")
         ).classes("text-sm")
         fix_info = ui.label("").classes("text-xs text-gray-500")
         fix_prompt = ui.textarea(
-            label="추가 지시 (선택)",
-            placeholder="예) 페이지마다 반복되는 학회명 머리글 줄을 지워줘 / 의사코드 블록은 코드 펜스로 묶어줘",
+            label=t("추가 지시 (선택)"),
+            placeholder=t("예) 페이지마다 반복되는 학회명 머리글 줄을 지워줘 / 의사코드 블록은 코드 펜스로 묶어줘"),
         ).props('outlined autogrow input-style="min-height:66px"').classes("w-full")
         fix_warn = ui.label("").classes("text-xs text-orange-8")
         fix_bar = ui.linear_progress(value=0, show_value=False) \
@@ -5244,19 +5244,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             def work(job: jobs.Job) -> dict:
                 summary = ctrl.fix_layout(prov, instructions, job.progress)
                 if not summary.get("changed"):
-                    job.message = "고칠 레이아웃을 찾지 못했습니다 — 문서는 그대로입니다."
+                    job.message = t("고칠 레이아웃을 찾지 못했습니다 — 문서는 그대로입니다.")
                     return summary
                 library.auto_export(ctrl.wd)
-                msg = (f"레이아웃 수정 완료 · {summary['chunks']}구간 중 {summary['fixed']}개 수정 "
-                       f"(≈${summary['cost_usd']:.4f})")
+                msg = t("레이아웃 수정 완료 · {chunks}구간 중 {fixed}개 수정 (≈${cost:.4f})",
+                        chunks=summary["chunks"], fixed=summary["fixed"], cost=summary["cost_usd"])
                 if summary["kept"]:
-                    msg += f" · {summary['kept']}개 구간은 내용 보존 검증에 걸려 원문 유지"
+                    msg += t(" · {n}개 구간은 내용 보존 검증에 걸려 원문 유지", n=summary["kept"])
                 job.message = msg
                 return summary
 
-            job = jobs.start(ctrl.wd.root, "layout", "레이아웃 수정", work, title=_title)
+            job = jobs.start(ctrl.wd.root, "layout", t("레이아웃 수정"), work, title=_title)
             if job is None:
-                ui.notify("이미 레이아웃을 수정하는 중입니다.", type="info")
+                ui.notify(t("이미 레이아웃을 수정하는 중입니다."), type="info")
                 return
             attach_layout_fix(job, own=True)
             paper_tabs.refresh()
@@ -5277,9 +5277,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 if job.running:
                     tv = job.total
                     fix_bar.value = job.fraction
-                    fix_status.text = (f"수정 중… {job.done}/{tv} 구간 ({int(job.fraction * 100)}%)"
-                                       if tv else "구간을 나누는 중…")
-                    fix_banner.text = f"레이아웃 자동 수정 중… {fix_status.text.removeprefix('수정 중… ')}"
+                    prog = (t("{done}/{total} 구간 ({pct}%)", done=job.done, total=tv, pct=int(job.fraction * 100))
+                            if tv else "")
+                    fix_status.text = t("수정 중… {prog}", prog=prog) if tv else t("구간을 나누는 중…")
+                    fix_banner.text = t("레이아웃 자동 수정 중… {prog}", prog=prog if tv else t("구간을 나누는 중…"))
                     fix_banner.set_visibility(True)
                     return
                 timer.deactivate()
@@ -5305,7 +5306,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 else:
                     if fresh:
                         ui.notify(job.error, type="negative")
-                    fix_status.text = f"실패: {job.error}"
+                    fix_status.text = t("실패: {error}", error=job.error)
                 fix_undo.set_visibility(ctrl.can_undo_layout_fix())
 
             timer = ui.timer(0.3, tick)
@@ -5315,34 +5316,35 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             from nicegui import run
 
             if not await run.io_bound(ctrl.undo_layout_fix):
-                ui.notify("되돌릴 이전 상태가 없습니다.", type="warning")
+                ui.notify(t("되돌릴 이전 상태가 없습니다."), type="warning")
                 return
             _after_relayout()
             await run.io_bound(library.auto_export, ctrl.wd)  # 저장 위치의 사본도 되돌린 문서로
-            ui.notify("레이아웃 수정 전으로 되돌렸습니다.", type="positive")
+            ui.notify(t("레이아웃 수정 전으로 되돌렸습니다."), type="positive")
             fix_dialog.close()
 
         with ui.row().classes("items-center w-full gap-2"):
-            fix_undo = ui.button("직전 상태로 되돌리기", icon="undo", on_click=undo_layout_fix) \
-                .props("flat dense no-caps color=grey-8").tooltip("마지막 수정 직전의 마크다운·구조로 복구")
+            fix_undo = ui.button(t("직전 상태로 되돌리기"), icon="undo", on_click=undo_layout_fix) \
+                .props("flat dense no-caps color=grey-8").tooltip(t("마지막 수정 직전의 마크다운·구조로 복구"))
             ui.space()
-            fix_cancel = ui.button("취소", on_click=fix_dialog.close).props("flat no-caps")
+            fix_cancel = ui.button(t("취소"), on_click=fix_dialog.close).props("flat no-caps")
             # 도는 동안엔 대화상자를 닫을 수 없다(persistent) → 숨기기만 — 작업은 서버에서 계속된다
-            fix_hide = ui.button("숨기기", on_click=fix_dialog.close).props("flat no-caps") \
-                .tooltip("작업은 계속됩니다 — 다른 탭으로 옮겨도 됩니다")
+            fix_hide = ui.button(t("숨기기"), on_click=fix_dialog.close).props("flat no-caps") \
+                .tooltip(t("작업은 계속됩니다 — 다른 탭으로 옮겨도 됩니다"))
             fix_hide.set_visibility(False)
-            fix_apply = ui.button("적용", icon="auto_fix_high", on_click=run_layout_fix) \
+            fix_apply = ui.button(t("적용"), icon="auto_fix_high", on_click=run_layout_fix) \
                 .props("color=primary no-caps")
 
     def open_fix_dialog() -> None:
         if jobs.is_running(ctrl.wd.root, "reconvert"):
-            ui.notify("다시 변환하는 중에는 레이아웃을 수정할 수 없습니다.", type="info")
+            ui.notify(t("다시 변환하는 중에는 레이아웃을 수정할 수 없습니다."), type="info")
             return
         plan = ctrl.layout_fix_plan()
         prov = config.resolve_provider()
-        fix_info.text = (f"본문 {plan['chars']:,}자를 {plan['chunks']}개 구간으로 나눠 "
-                         f"{_short_provider(prov)} {config.resolve_model(prov)}에 보냅니다.")
-        fix_warn.text = ("직접 편집한 마크다운이 있습니다 — 문서를 다시 만들면서 그 편집은 사라집니다."
+        fix_info.text = t("본문 {chars:,}자를 {chunks}개 구간으로 나눠 {provider} {model}에 보냅니다.",
+                          chars=plan["chars"], chunks=plan["chunks"], provider=_short_provider(prov),
+                          model=config.resolve_model(prov))
+        fix_warn.text = (t("직접 편집한 마크다운이 있습니다 — 문서를 다시 만들면서 그 편집은 사라집니다.")
                          if ctrl.has_manual_edit() else "")
         fix_status.text = ""
         fix_undo.set_visibility(ctrl.can_undo_layout_fix())
@@ -5350,37 +5352,37 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     # --- 재변환 (구조 패널) — 원본 PDF에서 추출부터 다시. 추출기 개선을 이미 변환한 논문에 반영한다 ---
     # 원문이 통째로 바뀌므로 번역·레이아웃 수정과 겹쳐 돌면 서로의 결과를 덮는다 → 하나라도 돌면 막는다.
-    _REWRITES = (("translate", "번역"), ("layout", "레이아웃 수정"), ("reconvert", "다시 변환"))
+    _REWRITES = (("translate", N_("번역")), ("layout", N_("레이아웃 수정")), ("reconvert", N_("다시 변환")))
 
     with ui.dialog() as rc_dialog, ui.card().classes("gap-3").style("width:520px;max-width:92vw"):
-        ui.label("PDF에서 다시 변환").classes("text-lg font-bold")
+        ui.label(t("PDF에서 다시 변환")).classes("text-lg font-bold")
         ui.markdown(
-            "원본 PDF에서 **추출부터 다시** 해서 영어 마크다운을 새로 만듭니다. 추출기가 나아진 점"
+            t("원본 PDF에서 **추출부터 다시** 해서 영어 마크다운을 새로 만듭니다. 추출기가 나아진 점"
             "(굵게·기울임, 띄어쓰기, 수식 등)이 이 논문에 반영됩니다.\n\n"
             "정해 둔 **헤더 레벨·번역할 섹션·변환 설정은 그대로 이어받고**, 메모는 바뀐 문장에서 다시 찾습니다. "
-            "마음에 들지 않으면 '레이아웃 자동 수정' 창의 **직전 상태로 되돌리기**로 돌아갈 수 있습니다."
+            "마음에 들지 않으면 '레이아웃 자동 수정' 창의 **직전 상태로 되돌리기**로 돌아갈 수 있습니다.")
         ).classes("text-sm")
         rc_warn = ui.column().classes("gap-1")
         with ui.row().classes("justify-end w-full gap-2"):
-            ui.button("취소", on_click=rc_dialog.close).props("flat no-caps")
-            ui.button("다시 변환", icon="refresh", on_click=lambda: (rc_dialog.close(), run_reconvert())) \
+            ui.button(t("취소"), on_click=rc_dialog.close).props("flat no-caps")
+            ui.button(t("다시 변환"), icon="refresh", on_click=lambda: (rc_dialog.close(), run_reconvert())) \
                 .props("color=primary no-caps")
 
     def open_reconvert_dialog() -> None:
-        busy = [label for kind, label in _REWRITES if jobs.is_running(ctrl.wd.root, kind)]
+        busy = [t(label) for kind, label in _REWRITES if jobs.is_running(ctrl.wd.root, kind)]
         if busy:
-            ui.notify(f"{busy[0]} 중에는 다시 변환할 수 없습니다 — 끝난 뒤 다시 눌러 주세요.", type="info")
+            ui.notify(t("{v} 중에는 다시 변환할 수 없습니다 — 끝난 뒤 다시 눌러 주세요.", v=busy[0]), type="info")
             return
         rc_warn.clear()
         with rc_warn:
             if ctrl.has_manual_edit():
-                ui.label("직접 편집한 마크다운이 있습니다 — 다시 변환하면 그 편집은 사라집니다.") \
+                ui.label(t("직접 편집한 마크다운이 있습니다 — 다시 변환하면 그 편집은 사라집니다.")) \
                     .classes("text-xs text-orange-8")
             if ctrl.ko_markdown():
-                ui.label("번역은 그대로 둡니다. 새 원문을 번역에 반영하려면 변환 뒤 번역을 다시 실행하세요.") \
+                ui.label(t("번역은 그대로 둡니다. 새 원문을 번역에 반영하려면 변환 뒤 번역을 다시 실행하세요.")) \
                     .classes("text-xs text-gray-600")
             if not _has_llm_key():
-                ui.label("API 키가 없어 저자·수식 정리는 규칙으로만 합니다.").classes("text-xs text-gray-600")
+                ui.label(t("API 키가 없어 저자·수식 정리는 규칙으로만 합니다.")).classes("text-xs text-gray-600")
         rc_dialog.open()
 
     def run_reconvert() -> None:
@@ -5395,22 +5397,23 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def work(job: jobs.Job) -> dict:
             summary = ctrl.reconvert(prov, job.progress)
             library.auto_export(ctrl.wd)
-            msg = f"다시 변환했습니다 · 섹션 {summary['sections']}개 · 굵게·기울임 {summary['emphasis']}곳"
+            msg = t("다시 변환했습니다 · 섹션 {sections}개 · 굵게·기울임 {emphasis}곳",
+                    sections=summary["sections"], emphasis=summary["emphasis"])
             if summary["has_translation"]:
-                msg += " · 번역은 다시 실행해야 반영됩니다"
+                msg += t(" · 번역은 다시 실행해야 반영됩니다")
             job.message = msg
             return summary
 
-        job = jobs.start(ctrl.wd.root, "reconvert", "다시 변환", work, title=_title)
+        job = jobs.start(ctrl.wd.root, "reconvert", t("다시 변환"), work, title=_title)
         if job is None:
-            ui.notify("이미 다시 변환하는 중입니다.", type="info")
+            ui.notify(t("이미 다시 변환하는 중입니다."), type="info")
             return
-        ui.notify("PDF에서 다시 변환하는 중… — 다른 탭으로 옮겨도 계속됩니다")
+        ui.notify(t("PDF에서 다시 변환하는 중… — 다른 탭으로 옮겨도 계속됩니다"))
         attach_reconvert(job)
         paper_tabs.refresh()
 
-    _RC_STEPS = ("PDF에서 추출 중…", "수식 정리 중…", "저자·서지 정리 중…", "섹션 구조를 다시 잡는 중…",
-                 "인용 링크 다는 중…", "마무리 중…")
+    _RC_STEPS = (N_("PDF에서 추출 중…"), N_("수식 정리 중…"), N_("저자·서지 정리 중…"), N_("섹션 구조를 다시 잡는 중…"),
+                 N_("인용 링크 다는 중…"), N_("마무리 중…"))
 
     def attach_reconvert(job: jobs.Job) -> None:
         """진행을 버튼 아래 줄에 보여 주고, 끝나면 페이지를 새로 읽는다 — 원문·그림·구조가 통째로 바뀌었다."""
@@ -5419,7 +5422,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         def tick() -> None:
             if job.running:
-                rc_banner.text = f"다시 변환 중 · {_RC_STEPS[min(job.done, len(_RC_STEPS) - 1)]}"
+                rc_banner.text = t("다시 변환 중 · {step}", step=t(_RC_STEPS[min(job.done, len(_RC_STEPS) - 1)]))
                 return
             timer.deactivate()
             rc_banner.set_visibility(False)
@@ -5428,7 +5431,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.navigate.reload()  # 완료 알림은 새로 읽은 페이지가 '못 본 작업'으로 띄운다
             elif not job.seen:
                 job.seen = True
-                ui.notify(f"다시 변환 실패: {job.error}", type="negative")
+                ui.notify(t("다시 변환 실패: {error}", error=job.error), type="negative")
 
         timer = ui.timer(0.5, tick)
         tick()
@@ -5529,7 +5532,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 if panes[0]["tab"] == name:   # 보던 탭을 아래로 → 위 칸에는 다른 탭을
                     others = [n for n in names if n != name]
                     if not others:
-                        ui.notify("탭이 하나뿐이라 나눌 수 없습니다 — + 로 탭을 하나 더 만드세요.", type="info")
+                        ui.notify(t("탭이 하나뿐이라 나눌 수 없습니다 — + 로 탭을 하나 더 만드세요."), type="info")
                         return
                     await capture()
                     panes[0]["tab"] = others[0]
@@ -5623,12 +5626,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 do()
                 return
             with dlg_host, ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:360px"):
-                ui.label(f"‘{name}’ 메모를 지울까요?").classes("text-base font-medium")
-                ui.label("이 탭의 내용이 함께 지워집니다 — 지운 내용은 논문 폴더의 notes/.trash/에 한 벌 남습니다.") \
+                ui.label(t("‘{name}’ 메모를 지울까요?", name=name)).classes("text-base font-medium")
+                ui.label(t("이 탭의 내용이 함께 지워집니다 — 지운 내용은 논문 폴더의 notes/.trash/에 한 벌 남습니다.")) \
                     .classes("text-sm text-gray-600")
                 with ui.row().classes("justify-end gap-2 w-full"):
-                    ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
-                    ui.button("지우기", on_click=lambda: (dlg.close(), do())) \
+                    ui.button(t("취소"), on_click=dlg.close).props("flat dense no-caps")
+                    ui.button(t("지우기"), on_click=lambda: (dlg.close(), do())) \
                         .props("unelevated dense no-caps color=negative")
             dlg.open()
 
@@ -5669,9 +5672,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     tab.on("click", lambda e, n=name: on_tab_click(e, n), ["detail"])
                     tab.on("dragstart", js_handler=_drag_start)
                     tab.on("dragend", js_handler=_drag_end)
-                    tab.tooltip("더블클릭하면 이름 바꾸기 · 메모 칸 아래쪽으로 끌어 놓으면 위아래로 나눠 보기")
+                    tab.tooltip(t("더블클릭하면 이름 바꾸기 · 메모 칸 아래쪽으로 끌어 놓으면 위아래로 나눠 보기"))
                 ui.button(icon="add", on_click=add_tab).props("flat dense round size=xs color=grey-7") \
-                    .classes("md4-notetab-add").tooltip("메모 탭 추가")
+                    .classes("md4-notetab-add").tooltip(t("메모 탭 추가"))
 
         @ui.refreshable
         def note_heads() -> None:
@@ -5729,8 +5732,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         with sp.after:
                             pane_box(1, True)
                     note_heads()
-                drop_zone("top", "위 칸에 열기")
-                drop_zone("bottom", "아래 칸에 열기" if len(panes) > 1 else "아래로 나눠 열기")
+                drop_zone("top", t("위 칸에 열기"))
+                drop_zone("bottom", t("아래 칸에 열기") if len(panes) > 1 else t("아래로 나눠 열기"))
 
         def on_notes(e) -> None:  # noqa: ANN001 — GenericEventArguments
             # 편집기는 바뀐 내용을 0.2초 모아 보내므로, 치자마자 탭을 바꾸면 옛 편집기의 마지막 글자가
@@ -5775,12 +5778,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 got = latest()
                 if got is not None and got[0] != kept:
                     notes_io.keep(ctrl.wd, tab, got[0])
-                ui.notify("이 창에서 쓴 내용은 논문 폴더의 notes/.trash/에 남겼습니다.", type="info")
+                ui.notify(t("이 창에서 쓴 내용은 논문 폴더의 notes/.trash/에 남겼습니다."), type="info")
                 for el_id, tv in notes_state["ids"].items():
                     if tv == tab and el_id in notes_state["mem"]:
                         notes_state["mem"][el_id]["dead"] = True
                 remount(None)
-                notes_set_status("저장됨")
+                notes_set_status(t("저장됨"))
 
             def overwrite() -> None:
                 dlg.close()
@@ -5792,23 +5795,23 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 try:
                     st = ctrl.save_notes(text, tab, keep_old=True)
                 except OSError as e:
-                    notes_set_status(f"저장 실패: {e}")
+                    notes_set_status(t("저장 실패: {e}", e=e))
                     return
                 mem = notes_state["mem"].get(el_id)
                 if mem is not None:
                     mem["saved"], mem["stamp"] = text, st
                 remount(el_id)  # 다른 편집기에 옛 내용이 떠 있으면 새로
-                notes_set_status("저장됨")
+                notes_set_status(t("저장됨"))
 
             with dlg_host, ui.dialog().props("persistent") as dlg, \
                     ui.card().classes("gap-2").style("max-width:400px"):
-                ui.label(f"‘{tab}’ 메모가 다른 곳에서 바뀌었습니다").classes("text-base font-medium")
-                ui.label("이 편집기를 연 뒤 다른 창이나 프로그램이 이 메모 파일을 고쳤습니다. 이 창에서 쓴 "
+                ui.label(t("‘{tab}’ 메모가 다른 곳에서 바뀌었습니다", tab=tab)).classes("text-base font-medium")
+                ui.label(t("이 편집기를 연 뒤 다른 창이나 프로그램이 이 메모 파일을 고쳤습니다. 이 창에서 쓴 "
                          "내용은 아직 저장하지 않았습니다. 어느 쪽을 골라도 버려지는 쪽은 notes/.trash/에 "
-                         "한 벌 남습니다.").classes("text-sm text-gray-600")
+                         "한 벌 남습니다.")).classes("text-sm text-gray-600")
                 with ui.row().classes("justify-end gap-2 w-full"):
-                    ui.button("새로 불러오기", on_click=reload).props("flat dense no-caps")
-                    ui.button("내 내용으로 덮기", on_click=overwrite).props("unelevated dense no-caps color=primary")
+                    ui.button(t("새로 불러오기"), on_click=reload).props("flat dense no-caps")
+                    ui.button(t("내 내용으로 덮기"), on_click=overwrite).props("unelevated dense no-caps color=primary")
             dlg.open()
 
         notes_state["on_conflict"] = on_conflict
@@ -5836,8 +5839,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         ui.on(agent_panel.NOTES_REFRESH_EVENT, on_agent_refresh)
 
         with ui.row().classes("w-full items-center no-wrap gap-2 shrink-0"):
-            ui.label("메모").classes("md4-panel-title")
-            notes_state["status"] = ui.label("저장됨").classes("md4-notes-status")
+            ui.label(t("메모")).classes("md4-panel-title")
+            notes_state["status"] = ui.label(t("저장됨")).classes("md4-notes-status")
             dlg_host = ui.element("div").style("display:none")  # 탭 이름 바꾸기·지우기 대화상자 자리
         note_tabs()
         note_layout()
@@ -5888,11 +5891,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
                     # ---------- 구조 (옛 변환 탭 왼쪽 열) ----------
                     with ui.column().classes("w-full gap-3") as box:
-                        ui.label("구조").classes("md4-panel-title")
-                        ui.button("레이아웃 자동 수정", icon="auto_fix_high", on_click=open_fix_dialog) \
+                        ui.label(t("구조")).classes("md4-panel-title")
+                        ui.button(t("레이아웃 자동 수정"), icon="auto_fix_high", on_click=open_fix_dialog) \
                             .props("outline no-caps color=primary").classes("w-full").tooltip(
-                                "쪼개진 헤더·깨진 수식·끊긴 문단을 AI가 문서 전체에서 찾아 고칩니다")
-                        cap("PDF 추출이 어그러뜨린 부분을 AI가 훑어 고치고, 섹션 트리를 다시 만듭니다.")
+                                t("쪼개진 헤더·깨진 수식·끊긴 문단을 AI가 문서 전체에서 찾아 고칩니다"))
+                        cap(t("PDF 추출이 어그러뜨린 부분을 AI가 훑어 고치고, 섹션 트리를 다시 만듭니다."))
                         # 수정이 도는 동안 대화상자를 숨겼거나 다른 탭에서 돌아왔을 때 진행을 보여 준다
                         fix_banner = ui.label("").classes("text-xs text-primary cursor-pointer")
                         fix_banner.on("click", open_fix_dialog)
@@ -5901,36 +5904,36 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                             attach_layout_fix(jobs.get(ctrl.wd.root, "layout"), own=False)
 
                         has_src = bool(ctrl.source_pdf())
-                        rc_button = ui.button("PDF에서 다시 변환", icon="refresh", on_click=open_reconvert_dialog) \
+                        rc_button = ui.button(t("PDF에서 다시 변환"), icon="refresh", on_click=open_reconvert_dialog) \
                             .props("outline no-caps color=primary").classes("w-full").tooltip(
-                                "원본 PDF에서 추출부터 다시 — 추출기 개선(굵게·기울임, 띄어쓰기 등)을 반영합니다"
-                                if has_src else "원본 PDF가 없는 논문(마크다운으로 올림)은 다시 변환할 수 없습니다")
+                                t("원본 PDF에서 추출부터 다시 — 추출기 개선(굵게·기울임, 띄어쓰기 등)을 반영합니다")
+                                if has_src else t("원본 PDF가 없는 논문(마크다운으로 올림)은 다시 변환할 수 없습니다"))
                         if not has_src:
                             rc_button.disable()
                         elif ctrl.extract_outdated():
-                            cap("이전 버전 추출기로 변환된 논문입니다 — 다시 변환하면 개선 사항이 반영됩니다.")
+                            cap(t("이전 버전 추출기로 변환된 논문입니다 — 다시 변환하면 개선 사항이 반영됩니다."))
                         rc_banner = ui.label("").classes("text-xs text-primary")
                         rc_banner.set_visibility(False)
                         if jobs.is_running(ctrl.wd.root, "reconvert"):
                             attach_reconvert(jobs.get(ctrl.wd.root, "reconvert"))
 
-                        with ui.expansion("일괄 레벨 조정", icon="format_list_numbered").classes("w-full"):
+                        with ui.expansion(t("일괄 레벨 조정"), icon="format_list_numbered").classes("w-full"):
                             batch_level_panel()
 
-                        ui.label("섹션 트리").classes("font-semibold text-sm text-primary")
-                        ui.label("제목 1~6: 헤더 단계 · 본문으로: 헤더를 풀어 제목 텍스트를 일반 문단으로 남김") \
+                        ui.label(t("섹션 트리")).classes("font-semibold text-sm text-primary")
+                        ui.label(t("제목 1~6: 헤더 단계 · 본문으로: 헤더를 풀어 제목 텍스트를 일반 문단으로 남김")) \
                             .classes("text-xs text-gray-500")
-                        ui.label("위에 합침: 제목 줄을 없애고 그 내용을 위 섹션에 합침 · 통째 삭제: 제목·본문 모두 제거") \
+                        ui.label(t("위에 합침: 제목 줄을 없애고 그 내용을 위 섹션에 합침 · 통째 삭제: 제목·본문 모두 제거")) \
                             .classes("text-xs text-gray-500")
-                        ui.label("기울임: run-in 소제목을 기울임 문단으로 표기").classes("text-xs text-gray-500")
-                        ui.label("제목을 클릭하면 캔버스의 해당 위치로 이동합니다 (PDF가 켜져 있으면 그 쪽으로도).") \
+                        ui.label(t("기울임: run-in 소제목을 기울임 문단으로 표기")).classes("text-xs text-gray-500")
+                        ui.label(t("제목을 클릭하면 캔버스의 해당 위치로 이동합니다 (PDF가 켜져 있으면 그 쪽으로도).")) \
                             .classes("text-xs text-gray-500")
                         section_list()
                     panel_state["boxes"]["structure"] = box
 
                     # ---------- 번역 (옛 번역 탭 왼쪽 열 + 용어집 머리) ----------
                     with ui.column().classes("w-full gap-3") as box:
-                        ui.label("번역").classes("md4-panel-title")
+                        ui.label(t("번역")).classes("md4-panel-title")
                         translate_run_panel()
                         ui.separator()
                         translate_settings()
@@ -5938,7 +5941,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
                     # ---------- 설정 (옛 변환 설정) ----------
                     with ui.column().classes("w-full gap-3") as box:
-                        ui.label("설정").classes("md4-panel-title")
+                        ui.label(t("설정")).classes("md4-panel-title")
                         convert_settings()
                     panel_state["boxes"]["settings"] = box
 
@@ -5958,9 +5961,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     for job in jobs.unseen_finished(ctrl.wd.root):
         job.seen = True
         if job.status == "done":
-            ui.notify(job.message or f"{job.label} 완료", type="positive")
+            ui.notify(job.message or t("{label} 완료", label=job.label), type="positive")
         else:
-            ui.notify(f"{job.label} 실패: {job.error}", type="negative")
+            ui.notify(t("{label} 실패: {error}", label=job.label, error=job.error), type="negative")
 
 
 def _mark_opened(wd: WorkDir) -> None:
@@ -6246,7 +6249,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         # 첫 화면(뷰어·홈)이 부르는 setPaper가 이미 떠 있는 창에 닿는다.
         # 앱 창 모드면 '새 창으로'가 단독 창(/agent)을 형제 웹뷰로 띄운다(브라우저 모드는 링크가 새 탭).
         agent_panel.install(state, popout=(lambda path: _spawn_path(
-            path, state, agent_panel.WINDOW_TITLE, dup_note="이 대화는 이미 다른 창에 떠 있습니다."))
+            path, state, agent_panel.WINDOW_TITLE, dup_note=t("이 대화는 이미 다른 창에 떠 있습니다.")))
             if desktop.active() else None)
         # w-full: 없으면 sub_pages 상자가 내용 폭으로 줄어(큰 화면에서 1275px) 변환·번역 탭 splitter가 좁아진다
         ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view}).classes("w-full")
