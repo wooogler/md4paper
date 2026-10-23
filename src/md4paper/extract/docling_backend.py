@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 
 from md4paper.extract import formulas as formula_regions
-from md4paper.extract import ref_tables, spacing, tables
+from md4paper.extract import ref_tables, ruled_tables, spacing, tables
 from md4paper.extract.reading_order import _top_left, export_geometry, repair_reading_order
 from md4paper.extract.text_clean import ExtractError, rewrite_image_refs
 from md4paper.workdir import WorkDir
@@ -199,7 +199,10 @@ _FIG_TITLE_MAX_CHARS = 60  # 그림 제목·축 이름은 대개 짧다 (본문 
 
 def _is_fig_element(line: str) -> bool:
     s = line.strip()
-    return bool(_IMG_LINE_RE.match(s) or _FIG_CAP_RE.match(re.sub(r"<[^>]+>", "", s)) or _SUBFIG_RE.match(s))
+    # 'Table N' 캡션은 뺀다 — 표는 래스터가 아니라 바로 옆 짧은 헤더가 표의 열 머리('Baseline')일 수 있다
+    cap = _FIG_CAP_RE.match(re.sub(r"<[^>]+>", "", s))
+    return bool(_IMG_LINE_RE.match(s) or (cap and not cap.group(0).lstrip().lower().startswith("tab"))
+                or _SUBFIG_RE.match(s))
 
 
 def _drop_figure_text(md: str) -> str:
@@ -1330,6 +1333,10 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
     _save_heading_pages(result.document, wd)  # 줄 번호를 뗀 뒤에 — "53 1 Introduction" 방지
     run_heads = _drop_running_heads(result.document)  # 쪽마다 되풀이되는 러닝 헤더/푸터
     footnotes, boilerplate, author_notes = _relocate_footer_blocks(result.document)
+    try:  # 캡션만 있고 표로 잡히지 않은 괘선 표를 PDF 격자로 — 읽기 순서 복원 전에(열을 다단으로 오인하지 않게)
+        ruled = ruled_tables.rebuild(result.document, source)
+    except Exception:  # noqa: BLE001 — 표 보정 실패가 추출 전체를 막지 않게
+        ruled = 0
     # 다단 조판에서 뒤집힌 단·열 우선 저자 그리드를 되돌린다 (prov bbox가 살아 있는 마지막 지점)
     order_meta = repair_reading_order(result.document)
     try:  # 표로 잡힌 참고문헌 목록([n] 열 + 내어쓴 본문 열)을 PDF 기준선으로 항목마다 되살린다
@@ -1439,6 +1446,7 @@ def extract_to(source: Path, wd: WorkDir, ocr: bool = False) -> dict:
         "running_heads_dropped": run_heads,
         "formulas": n_formulas,
         "table_rows_split": table_rows,
+        "ruled_tables_rebuilt": ruled,
         "reference_tables_unwrapped": refs_unwrapped,
         **order_meta,
         **join_stats,

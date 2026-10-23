@@ -32,7 +32,8 @@ from md4paper.workdir import WorkDir
 # 7: 표 셀·목록 항목으로 들어간 러닝 푸터 제거 (같은 문구 + 다른 쪽 푸터와 같은 높이)
 # 8: 표로 잡힌 참고문헌 목록([n] 열 + 내어쓴 본문)을 PDF 기준선으로 항목마다 되살림
 # 9: 셀 상자가 다른 행의 줄을 덮어 엉킨 표 행 구간을 PDF 줄 기준선으로 다시 지음
-EXTRACT_VERSION = 9
+# 10: 캡션만 있고 표로 잡히지 않은 괘선 표를 PDF 격자로 다시 지음 · 표 캡션 옆 열 머리 헤더를 지우지 않음
+EXTRACT_VERSION = 10
 
 BACKENDS = ("docling",)
 DEFAULT_BACKEND = "docling"

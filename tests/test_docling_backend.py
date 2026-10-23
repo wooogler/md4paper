@@ -477,6 +477,14 @@ def test_drop_figure_text_keeps_numbered_and_body_headers():
     assert _drop_figure_text(md2) == md2
 
 
+def test_drop_figure_text_keeps_column_header_next_to_table_caption():
+    from md4paper.extract.docling_backend import _drop_figure_text
+
+    # 표로 잡히지 못한 표의 열 머리가 헤더로 나온 것 — 표는 래스터가 아니라 이 글자가 유일한 사본이다
+    md = "Table 1: Side-by-side comparison.\n\n## Baseline\n\nInitial Idea 1: Current RAG QA systems.\n"
+    assert _drop_figure_text(md) == md
+
+
 # --- 각주: 본문 마커를 위첨자 링크로, 내용은 목록 + 툴팁 맵 ---
 def test_apply_footnotes_links_markers_and_collects():
     from md4paper.extract.docling_backend import _apply_footnotes
