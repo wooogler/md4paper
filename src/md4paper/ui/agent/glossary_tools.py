@@ -385,7 +385,89 @@ def _describe_write_glossary(args: dict) -> str:
     return out + (f" — 예: {ex}{more}" if ex else "")
 
 
+# --- 용어 예문 ---------------------------------------------------------
+
+
+async def term_contexts(ctx: RunContext[Deps], term: str, korean: str = "", collection: str | None = None,
+                        token: str | None = None, limit: int = 3) -> str:
+    """용어가 논문 본문에서 쓰인 문장(원문 EN)과 그 번역 문장(KO)을 짝지어 돌려준다 — 문맥으로 번역어를 고를 때.
+
+    용어는 «»로, 번역 문장에서 찾은 번역어도 «»로 표시한다. 번역어가 안 보이면 그 문장에서는 다른 말로
+    옮긴 것이다. collection을 주면 그 컬렉션 논문들(논문마다 그 논문 용어집의 번역어로 표시, 최대 4편),
+    아니면 token의 논문(생략하면 지금 화면의 논문). 한 논문을 볼 때 예문 앞 `[rN]`은 인용 번호다.
+
+    Args:
+        term: 영어 용어.
+        korean: 번역 문장에서 찾을 번역어(선택). 한 논문을 볼 때만 쓰고, 컬렉션이면 논문마다 자기 번역어로 찾는다.
+        collection: 컬렉션 id 또는 이름(선택).
+        token: 논문 token(선택). collection과 함께 주면 collection이 우선.
+        limit: 논문 하나에서 보일 예문 수 (1~6, 기본 3).
+    """
+    from md4paper import config
+    from md4paper.translate import glossary
+    from md4paper.ui import term_examples as te
+    from md4paper.ui.agent.cites import row_label
+
+    if not (term or "").strip():
+        return "용어(term)가 비어 있습니다."
+    limit = max(1, min(int(limit or 3), 6))
+    deps = ctx.deps
+    if collection:
+        proj = await asyncio.to_thread(_find_project, collection)
+        if proj is None:
+            return f"'{collection}' 컬렉션이 없습니다. list_projects로 id를 확인하세요."
+        ws = deps.workspace or config.resolve_workspace()
+
+        def work() -> list[dict]:
+            by_paper = glossary.collection_entries_by_paper(proj["id"], Path(ws))
+            key = glossary.term_key(term)
+            papers = []
+            for r in glossary.members(proj["id"], Path(ws)):
+                own = next((e for e in by_paper.get(Path(r["root"]), []) if glossary.term_key(e.term) == key), None)
+                papers.append((Path(r["root"]), own.korean if own else "", own.policy if own else "translate"))
+            return te.across(papers, term, per_paper=limit, max_papers=4)
+
+        groups = await asyncio.to_thread(work)
+        if not groups:
+            return f"컬렉션 '{proj['name']}' 논문들의 본문에서 '{term}'을 찾지 못했습니다."
+        parts = [f"컬렉션 '{proj['name']}'에서 '{term}'이 쓰인 문장 (논문마다 그 논문 용어집의 번역어로 표시):"]
+        for g in groups:
+            tok = deps.register(WorkDir(Path(g["root"])))
+            parts.append(f"\n- token {tok}: {g['title'][:80]} — {g['rows']}곳, 이 논문 번역어: {g['korean'] or '(용어집에 없음)'}")
+            for e in g["examples"]:
+                deps.cited_rows.add((tok, e.row))
+                parts.append(f"  [{row_label(tok, e.row, deps.current_token)}] " + te.text_lines(e).replace("\n", "\n    "))
+        return tools._cap("\n".join(parts), LIST_MAX)
+
+    got = tools._resolve(deps, token)
+    if isinstance(got, str):
+        return got
+    tok, wd = got
+
+    def one() -> tuple[list, int, str, str]:
+        kor, pol = korean, "translate"
+        if not kor and wd.glossary_yaml.exists():
+            key = glossary.term_key(term)
+            own = next((e for e in glossary.effective(wd)[0].entries if glossary.term_key(e.term) == key), None)
+            if own:
+                kor, pol = own.korean, own.policy
+        ex, rows = te.find(wd, term, kor, pol, limit=limit)
+        return ex, rows, kor, pol
+
+    ex, rows, kor, _pol = await asyncio.to_thread(one)
+    head = await tools._paper_line(deps, tok, wd)
+    if ex and await asyncio.to_thread(te.unaligned, wd):
+        head += te.UNALIGNED_NOTE + "\n"
+    if not ex:
+        return head + f"본문에서 '{term}'을 찾지 못했습니다 (복수형·하이픈 표기 차이일 수 있음)."
+    lines = [head + f"'{term}'이 {rows}곳에 나옵니다. 예문 {len(ex)}개 (번역어 표시: {kor or '없음'}):"]
+    for e in ex:
+        deps.cited_rows.add((tok, e.row))
+        lines.append(f"[{row_label(tok, e.row, deps.current_token)}] " + te.text_lines(e).replace("\n", "\n  "))
+    return tools._cap("\n".join(lines))
+
+
 tools.DESCRIBE.update({"write_collection_glossary": _describe_write_glossary})
 
-TOOLS = [glossary_conflicts, read_collection_glossary, translation_impact,
+TOOLS = [glossary_conflicts, read_collection_glossary, translation_impact, term_contexts,
          Tool(write_collection_glossary, requires_approval=True)]

@@ -18,7 +18,7 @@ from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
     agent_panel, annotations, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, mdrender, reanchor,
-    scroll_memory, sentpair, spa, tabstore, translate_job, update_banner,
+    scroll_memory, sentpair, spa, tabstore, term_examples, translate_job, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
 from md4paper.workdir import WorkDir, left_panel, paper_title, set_left_panel, set_project
@@ -2889,6 +2889,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     ui.on("md4-img-save", save_zoomed)
     ui.on("md4-img-copy", copy_zoomed)
     spa.add_css(_ANNO_CSS)
+    spa.add_css(term_examples.CSS)  # 용어집 시트의 '이 용어가 쓰인 문장'
     spa.add_body_html(f"<script>{anno_items_js(annotations.load(ctrl.wd), tok)}</script>")
     spa.add_body_html(_ANNO_HTML)  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
     spa.add_css(formula_pop.CSS)  # 수식 클릭 → 원본 크롭 대조 · 다시 생성
@@ -3876,6 +3877,55 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         return {term_key(e.term) for e in coll_view["entries"]}
 
+    # 용어 예문 — 행의 따옴표 단추로 연다. 열린 용어(term_key)만 기억하고, 예문은 그릴 때 찾는다
+    # (정렬 행은 retrieval 캐시라 한 논문 안에서는 빠르다). 편집 중인 번역어로 번역 문장을 찾는다.
+    ex_open: set[str] = set()
+    ex_dialog: dict = {"dlg": None}   # 용어집 시트 — translate_run_panel이 지은 뒤 채운다
+
+    def goto_example_row(row: int) -> None:
+        """예문의 행 번호 → 시트를 닫고 본문의 그 행으로 스크롤·잠깐 강조."""
+        if ex_dialog["dlg"] is not None:
+            ex_dialog["dlg"].close()
+        ui.run_javascript(
+            "setTimeout(function(){var els=document.querySelectorAll('.sbs-grid .sbs-cell[data-row=\"%d\"]');"
+            "if(!els.length) els=document.querySelectorAll('[data-row=\"%d\"]');if(!els.length) return;"
+            "els[0].scrollIntoView({behavior:'smooth',block:'center'});"
+            "els.forEach(function(el){el.classList.remove('chat-cite-flash');void el.offsetWidth;"
+            "el.classList.add('chat-cite-flash');setTimeout(function(){el.classList.remove('chat-cite-flash');},1400);});"
+            "}, 250);" % (row, row))
+
+    def example_toggle(term: str, refresh) -> None:  # noqa: ANN001 — ui.refreshable
+        from md4paper.translate.glossary import term_key
+
+        key = term_key(term)
+        if not key:
+            ui.notify("원어를 먼저 입력하세요.", type="warning")
+            return
+        ex_open.symmetric_difference_update({key})
+        refresh.refresh()
+
+    def example_button(term: str, refresh) -> None:  # noqa: ANN001
+        from md4paper.translate.glossary import term_key
+
+        on = bool(term.strip()) and term_key(term) in ex_open
+        ui.button(icon="format_quote", on_click=lambda _, t=term: example_toggle(t, refresh)) \
+            .props(f"flat dense round size=sm color={'primary' if on else 'grey-6'}") \
+            .tooltip("이 용어가 쓰인 문장 (원문·번역) — 어떻게 옮기는 게 자연스러운지 문맥으로 보기")
+
+    def example_block(term: str, korean: str, policy: str) -> None:
+        from md4paper.translate.glossary import term_key
+
+        if not term.strip() or term_key(term) not in ex_open:
+            return
+        with ui.column().classes("w-full gap-0").style("padding:0 0 4px 12px"):
+            try:
+                ex, rows = term_examples.find(ctrl.wd, term, korean, policy)
+            except (OSError, ValueError) as e:
+                ui.label(f"본문을 읽지 못했습니다: {e}").classes("md4-tex-meta")
+                return
+            term_examples.render(ex, rows, goto=goto_example_row,
+                                 unaligned_note=term_examples.unaligned(ctrl.wd))
+
     @ui.refreshable
     def gloss_rows() -> None:
         from md4paper.translate.glossary import term_key
@@ -3901,9 +3951,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     .on("blur", lambda: gloss_autosave()).props("dense outlined" + strike).classes("w-40")
                 ui.select(_POLICY, value=d["policy"]).bind_value(d, "policy") \
                     .on("update:model-value", lambda: gloss_autosave()).props("dense outlined").classes("w-44")
+                example_button(d["term"], gloss_rows)
                 ui.button(icon="delete", on_click=lambda _, idx=i: (
                     gloss_entries.pop(idx), gloss_rows.refresh(), gloss_autosave())) \
                     .props("flat dense round size=sm")
+            example_block(d["term"], d["korean"], d["policy"])
 
     def add_gloss_row() -> None:
         gloss_entries.append({"term": "", "korean": "", "policy": "translate"})
@@ -4194,6 +4246,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                             ui.icon("arrow_forward", size="14px").classes("text-gray-400")
                             ui.label(f"{e.korean or '(빈 칸)'} · {_POLICY.get(e.policy, e.policy)}") \
                                 .classes("text-sm text-gray-700 truncate min-w-0")
+                            ui.space()
+                            example_button(e.term, coll_rows)
+                        example_block(e.term, e.korean, e.policy)
 
         def on_glossary_refresh(e) -> None:  # noqa: ANN001 — GenericEventArguments
             """에이전트가 컬렉션 용어집을 썼다 — 이 논문의 주 컬렉션이면 다시 그린다.
@@ -4224,6 +4279,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             with ui.column().classes("w-full gap-1 md4-scroll").style("overflow-y:auto; min-height:0"):
                 coll_rows()
                 gloss_rows()
+        ex_dialog["dlg"] = gloss_dialog
         gloss_dialog.on("hide", lambda: gloss_open_btn.refresh())
         ui.on(agent_panel.GLOSSARY_REFRESH_EVENT, on_glossary_refresh)
 

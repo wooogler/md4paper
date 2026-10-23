@@ -61,7 +61,7 @@ def conflict_rows(conflicts: list[glossary.Conflict], current: list[dict],
     """충돌 표에 그릴 데이터 — 용어마다 {key, term, current, papers, variants}.
 
     current: 컬렉션 용어집에 이미 있으면 그 행의 {korean, policy}(없으면 None). variants: 편수 많은 순
-    {korean, policy, n, titles(논문 제목들), chosen(지금 컬렉션 값과 같은지)}. titles는 {논문 키: 제목}.
+    {korean, policy, n, titles(논문 제목들), roots(논문 키들), chosen(지금 컬렉션 값과 같은지)}. titles는 {논문 키: 제목}.
     """
     titles = titles or {}
     have = {glossary.term_key(d["term"]): d for d in current if d["term"].strip()}
@@ -74,6 +74,7 @@ def conflict_rows(conflicts: list[glossary.Conflict], current: list[dict],
             "variants": [{
                 "korean": v.korean, "policy": v.policy, "n": len(v.papers),
                 "titles": [titles.get(p, str(p)) for p in v.papers],
+                "roots": list(v.papers),   # 예문 찾기 — 이 표기를 쓴 논문들
                 "chosen": cur_v is not None and cur_v["korean"].strip() == v.korean and cur_v["policy"] == v.policy,
             } for v in c.variants],
         })
@@ -121,7 +122,45 @@ def open_collection_glossary(state: dict, pid: str, *, on_change: Callable[[], N
     rows: list[dict] = [{"term": e.term, "korean": e.korean, "policy": e.policy}
                         for e in glossary.load_collection(pid).entries]
     st: dict = {"overview": None, "impact": None, "dirty_at": 0.0, "counting": False, "unified": set(),
-                "error": ""}
+                "error": "", "ex_open": set(), "ex": {}}
+    from md4paper.ui import spa, term_examples
+
+    spa.add_css(term_examples.CSS)  # 홈에서 열면 뷰어 CSS가 없다 — 같은 창이면 한 번만 들어간다
+
+    async def toggle_examples(key: str, term: str, papers: list[tuple], refresh) -> None:  # noqa: ANN001
+        """예문 열기/닫기 — 처음 열 때 논문들의 본문을 io_bound로 읽는다(논문마다 정렬 행을 만든다)."""
+        if key in st["ex_open"]:
+            st["ex_open"].discard(key)
+            refresh.refresh()
+            return
+        st["ex_open"].add(key)
+        if key not in st["ex"]:
+            st["ex"][key] = None   # 읽는 중
+            refresh.refresh()
+            try:
+                groups = await run.io_bound(term_examples.across, papers, term, per_paper=2, max_papers=4)
+            except Exception as e:  # noqa: BLE001 — 예문 하나 못 읽어도 대화상자는 산다
+                groups = [{"title": f"읽지 못했습니다: {e}", "examples": [], "rows": 0}]
+            if dlg.is_deleted:
+                return
+            st["ex"][key] = groups
+        refresh.refresh()
+
+    def examples_view(key: str) -> None:
+        if key not in st["ex_open"]:
+            return
+        with ui.column().classes("w-full gap-0").style("padding:0 0 6px 14px"):
+            groups = st["ex"].get(key)
+            if groups is None:
+                with ui.row().classes("items-center gap-2"):
+                    ui.spinner(size="xs")
+                    ui.label("본문에서 찾는 중…").classes("md4-tex-meta")
+                return
+            term_examples.render_across(groups)
+
+    def member_papers(korean: str, policy: str) -> list[tuple]:
+        """용어집 탭의 예문 — 주 컬렉션이 이 컬렉션인 논문들, 표시는 이 행의 번역어로."""
+        return [(Path(r["root"]), korean, policy) for r in glossary.members(pid, workspace)]
 
     def n_terms() -> int:
         return sum(1 for d in rows if d["term"].strip())
@@ -174,8 +213,15 @@ def open_collection_glossary(state: dict, pid: str, *, on_change: Callable[[], N
                     .on("blur", lambda: save()).props("dense outlined").classes("w-48")
                 ui.select(_POLICY, value=d["policy"]).bind_value(d, "policy") \
                     .on("update:model-value", lambda: save()).props("dense outlined").classes("w-44")
+                gkey = "g:" + glossary.term_key(d["term"]) + "|" + d["korean"]
+                ui.button(icon="format_quote", on_click=lambda _, d=d, k=gkey: (
+                    toggle_examples(k, d["term"], member_papers(d["korean"], d["policy"]), gloss_rows)
+                    if d["term"].strip() else ui.notify("원어를 먼저 입력하세요.", type="warning"))) \
+                    .props("flat dense round size=sm color=" + ("primary" if gkey in st["ex_open"] else "grey-6")) \
+                    .tooltip("이 용어가 쓰인 문장 — 이 컬렉션 논문들의 원문·번역")
                 ui.button(icon="delete", on_click=lambda _, idx=i: remove_row(idx)) \
                     .props("flat dense round size=sm")
+            examples_view("g:" + glossary.term_key(d["term"]) + "|" + d["korean"])
 
     def policy_label(p: str) -> str:
         return _POLICY.get(p, p)
@@ -217,7 +263,14 @@ def open_collection_glossary(state: dict, pid: str, *, on_change: Callable[[], N
                     continue
                 with ui.column().classes("gap-1 flex-grow min-w-0"):
                     for v in c["variants"]:
+                        vkey = f"v:{c['key']}|{v['korean']}|{v['policy']}"
                         with ui.row().classes("items-center gap-2 w-full no-wrap"):
+                            ui.button(icon="format_quote", on_click=lambda _, c=c, v=v, k=vkey: toggle_examples(
+                                k, c["term"], [(Path(r), v["korean"], v["policy"]) for r in v["roots"]],
+                                conflict_list)) \
+                                .props("flat dense round size=xs color="
+                                       + ("primary" if vkey in st["ex_open"] else "grey-6")).classes("shrink-0") \
+                                .tooltip("이 표기를 쓴 논문들이 실제로 옮긴 문장")
                             ui.label(f"{v['korean'] or '(빈 칸)'} · {policy_label(v['policy'])} · {v['n']}편") \
                                 .classes("text-sm truncate min-w-0" + (" text-green-8" if v["chosen"] else "")) \
                                 .tooltip(" · ".join(t[:40] for t in v["titles"][:10])
@@ -229,6 +282,7 @@ def open_collection_glossary(state: dict, pid: str, *, on_change: Callable[[], N
                                 ui.button("이 표기로 통일", on_click=lambda _, c=c, v=v: adopt(
                                     c["term"], v["korean"], v["policy"], c["key"])) \
                                     .props("outline dense no-caps size=sm color=primary").classes("shrink-0")
+                        examples_view(vkey)
         shared = ov["shared"]
         if shared:
             have = {glossary.term_key(d["term"]) for d in rows if d["term"].strip()}

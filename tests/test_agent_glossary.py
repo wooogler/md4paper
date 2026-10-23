@@ -304,3 +304,31 @@ def test_tools_registered_and_system_mentions_them():
     assert write.requires_approval
     for name in ("glossary_conflicts", "translation_impact", "write_collection_glossary"):
         assert name in SYSTEM
+
+
+def test_term_contexts_one_paper_and_collection(tmp_path):
+    """용어가 쓰인 문장 — 한 논문(용어집 번역어로 표시, 행 인용 등록)과 컬렉션(논문마다 자기 번역어)."""
+    from md4paper.ui.agent.glossary_tools import term_contexts
+
+    ws = tmp_path / "ws"
+    pid, wds = _library(ws)
+    ctx = _ctx_of(ws)
+    tok = ctx.deps.register(wds[0])
+    ctx.deps.current_token = tok
+    # 기본 대본 논문(agent_support.EN/KO)의 용어 — instructors/교수자
+    glossary.save(GlossaryList(entries=[_e("instructors", "교수자")]), wds[0])
+    out = asyncio.run(term_contexts(ctx, "instructors"))
+    assert "'instructors'이 3곳에 나옵니다" in out and "번역어 표시: 교수자" in out
+    assert "EN: We study how «instructors» customize chatbots." in out
+    assert "KO: 우리는 «교수자»가 챗봇을" in out
+    assert any(t == tok for t, _r in ctx.deps.cited_rows)
+    assert "찾지 못했습니다" in asyncio.run(term_contexts(ctx, "nonexistent term"))
+    assert asyncio.run(term_contexts(ctx, "")) == "용어(term)가 비어 있습니다."
+
+    glossary.save(GlossaryList(entries=[_e("instructors", "강사")]), wds[1])
+    out = asyncio.run(term_contexts(ctx, "instructors", collection="NIRVANA", limit=1))
+    assert "컬렉션 'NIRVANA'" in out and "이 논문 번역어: 교수자" in out and "이 논문 번역어: 강사" in out
+    assert "번역어가 안 보임" in out          # p1은 '강사'로 정했지만 번역문은 '교수자'로 옮겨져 있다
+    assert "Paper p3" not in out               # 다른 컬렉션 논문은 빠진다
+    assert "컬렉션이 없습니다" in asyncio.run(term_contexts(ctx, "x", collection="없음"))
+    assert "term_contexts" in SYSTEM and "term_contexts" in {getattr(t, "__name__", "") for t in TOOLS}
