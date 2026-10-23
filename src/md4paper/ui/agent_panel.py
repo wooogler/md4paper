@@ -204,6 +204,10 @@ body.ag-standalone .ag-list, body.ag-standalone .ag-foot {
 .ag-tool.full { white-space: pre-wrap; overflow-wrap: anywhere; }
 .ag-tool b { color: #6b6862; font-weight: 600; }
 .ag-tool .ag-tres { color: #5b8f5b; }
+/* 한 답의 tool 묶음 — 최근 한 줄만, 앞선 호출은 이 단추로 펼친다 */
+.ag-tools-more { display: block; border: none; background: none; padding: 0 2px; margin: 0 0 3px;
+  font-size: 10.5px; color: #9a968e; cursor: pointer; }
+.ag-tools-more:hover { color: #2383e2; }
 
 /* 인용 칩 — 작은 원형 숫자 (마크업은 서버 cites.render_html) */
 a.chat-cite { display: inline-block; min-width: 15px; height: 15px; padding: 0 3px; margin: 0 2px;
@@ -1175,6 +1179,28 @@ JS = r"""
     d.addEventListener('click', function(){ d.classList.toggle('full'); });
     return d;
   }
+  // 한 답의 tool 줄 묶음 — 평소엔 마지막(가장 최근) 호출 한 줄만 보이고, 앞선 호출은 '앞선 N개'를
+  // 눌러 펼친다. 펼침 상태는 key(턴 id·'live')별로 기억한다 — render()가 목록을 통째로 다시 그려서.
+  var toolOpen = {};
+  function toolGroup(tools, key){
+    var g = document.createElement('div');
+    g.className = 'ag-tools';
+    if (!tools || !tools.length) return g;
+    var open = !!toolOpen[key], n = tools.length - 1;
+    if (n > 0){
+      var more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'ag-tools-more';
+      more.textContent = open ? '▾ tool ' + tools.length + '개 — 접기' : '▸ 앞선 tool ' + n + '개';
+      more.addEventListener('click', function(){
+        toolOpen[key] = !open;
+        g.replaceWith(toolGroup(tools, key));
+      });
+      g.appendChild(more);
+    }
+    (open ? tools : tools.slice(-1)).forEach(function(t){ g.appendChild(toolNode(t)); });
+    return g;
+  }
   function citeOf(turn, chip){
     var cs = turn.citations || [], kind = chip.getAttribute('data-kind');
     var tok = chip.getAttribute('data-token') || '', row = parseInt(chip.getAttribute('data-row'), 10);
@@ -1224,11 +1250,11 @@ JS = r"""
       apprDone(wrap, t.id);
       // 승인 뒤 이어 돈 run이 다시 승인 대기로 끝났을 때 그 사이 부른 tool 줄 — 같은 카드가 왜 또
       // 떴는지(예: 실패한 호출 뒤 다시 시도) 보이게 잠긴 카드 뒤에 둔다
-      (toolsByTurn['u:' + t.id] || []).forEach(function(x){ wrap.appendChild(toolNode(x)); });
+      wrap.appendChild(toolGroup(toolsByTurn['u:' + t.id], 'u:' + t.id));
       return wrap;
     }
     wrap.className = 'ag-turn ag-bot';
-    (toolsByTurn[t.id] || []).forEach(function(x){ wrap.appendChild(toolNode(x)); });
+    wrap.appendChild(toolGroup(toolsByTurn[t.id], t.id));
     if (t.html || t.text){
       var a = document.createElement('div');
       a.className = 'ag-a';
@@ -1372,8 +1398,7 @@ JS = r"""
       u.appendChild(q); frag.appendChild(u);
     }
     var w = document.createElement('div'); w.className = 'ag-turn ag-bot';
-    liveTools = document.createElement('div');
-    live.tools.forEach(function(t){ liveTools.appendChild(toolNode(t)); });
+    liveTools = toolGroup(live.tools, 'live');
     w.appendChild(liveTools);
     liveText = document.createElement('div');
     liveText.className = 'ag-a ag-live';
@@ -1572,6 +1597,7 @@ JS = r"""
     }
     busy = true; errMsg = null; closeMenu();
     live = {q: q, text: '', tools: [], err: null, done: null, started: false};
+    toolOpen.live = false;
     render();
     var at = sid;
     fetch('/agent/sessions/' + encodeURIComponent(at) + '/turns', {method: 'POST',
@@ -1613,6 +1639,7 @@ JS = r"""
           // 서버가 저장한 것과 같은 모양으로 붙인다 (다시 읽지 않아도 칩·비용이 그대로)
           if (L.q) turns.push({id: 'local-' + Date.now(), role: 'user', text: L.q, html: ''});
           toolsByTurn[L.done.turn_id] = L.tools;
+          if (toolOpen.live) toolOpen[L.done.turn_id] = true;   // 흐르는 동안 펼쳐 뒀으면 그대로
           turns.push({id: L.done.turn_id, role: 'assistant', text: L.text, html: L.done.html,
                       citations: L.done.citations || [], model: modelLabel()});
           if (sess){ sess.usage = sess.usage || {}; sess.usage.cost_usd = L.done.session_cost_usd; }

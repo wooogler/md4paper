@@ -635,3 +635,14 @@ def test_answer_markdown_restores_list_markers_and_heading_weight():
     assert ".ag-a ul { list-style: disc; }" in css
     assert ".ag-a ol { list-style: decimal; }" in css
     assert re.search(r"\.ag-a h1, \.ag-a h2, \.ag-a h3[^{]*\{[^}]*font-weight: 700", css)
+
+
+def test_tool_lines_are_grouped_showing_only_the_latest():
+    """한 답의 tool 줄은 묶음 하나 — 접힌 채로는 최근 한 줄만, 앞선 호출은 '앞선 tool N개'로 펼친다.
+    진행 중(live)과 끝난 턴이 같은 묶음 함수를 쓴다."""
+    js = agent_panel.JS if hasattr(agent_panel, "JS") else agent_panel.HTML
+    assert "function toolGroup(tools, key)" in js
+    assert "tools.slice(-1)" in js
+    assert "toolGroup(live.tools, 'live')" in js
+    assert "toolGroup(toolsByTurn[t.id], t.id)" in js
+    assert ".ag-tools-more" in agent_panel.CSS
