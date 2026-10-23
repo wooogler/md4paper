@@ -635,7 +635,8 @@ def _advanced_panel(ui, run, state, on_change, save_global,  # noqa: ANN001, ANN
 # 프로젝트 하나 — 새로 만들기와 편집이 같은 대화상자
 # ====================================================================================
 def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, bool], object],
-                        on_delete: Callable[[str, Callable[[], None]], None] | None = None) -> None:
+                        on_delete: Callable[[str, Callable[[], None]], None] | None = None,
+                        parent: str | None = None) -> None:
     """프로젝트 대화상자 — pid가 None이면 새로 만들기, 있으면 그 프로젝트 편집.
 
     만드는 길과 고치는 길이 한 화면이다: 이름·폴더·'이 프로젝트만 다르게'를 여기서 다 정하고,
@@ -644,7 +645,9 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
 
     on_saved(proj, created)는 적용 뒤에 불린다(코루틴이어도 된다). on_delete(pid, close)는 편집 모드
     바닥의 '프로젝트 삭제'가 부른다 — 확인은 호출측이 받고(편수를 세는 것은 목록 쪽이라), 지우기로 하면
-    close()로 이 대화상자를 닫는다.
+    close()로 이 대화상자를 닫는다. `parent`는 새로 만들 때 미리 고를 상위 컬렉션(하위 컬렉션 만들기).
+
+    상위 컬렉션을 고르면 폴더·설정을 비워 둔 칸은 그 상위 것을 물려받는다(§projects).
     """
     import inspect
 
@@ -654,6 +657,13 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
 
     can_pick = _can_pick()
     editing = pid is not None and projects.exists(pid)
+    projs = projects.all_projects()
+    cur_parent = projects.parent_of(pid, projs) if editing else (parent if projects.exists(parent or "") else "")
+    # 고를 수 있는 상위 — 자기 자신·자기 하위는 뺀다(순환). 트리 순서, 경로 이름으로.
+    banned = {pid, *projects.descendants(pid, projs)} if editing else set()
+    parent_opts = {"": "없음 (맨 위)"}
+    parent_opts.update({p["id"]: projects.path_name(p["id"], projs)
+                        for p, _d in projects.tree(projs) if p["id"] not in banned})
     own = dict(projects.settings_of(pid)) if editing else {}
     pending = dict(own)  # 대화상자 안에서 고른 값 — 저장할 때 한꺼번에 쓴다
 
@@ -676,8 +686,9 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
             new_root = Path(raw).expanduser() if raw else None
             if projects.root_of(proj_id) != new_root:
                 projects.set_root(proj_id, raw or None)  # ko/·pdf/ 자리까지 만들어 준다
+            projects.set_parent(proj_id, parent_sel.value or "")
         else:
-            proj_id = projects.create(name, raw or None)["id"]
+            proj_id = projects.create(name, raw or None, parent=parent_sel.value or "")["id"]
         for key in projects.SETTINGS:
             if pending.get(key) != own.get(key):
                 projects.set_setting(proj_id, key, pending.get(key))
@@ -703,8 +714,12 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
         name_in = ui.input("이름", value=projects.name_of(pid) if editing else "") \
             .props('dense outlined autofocus placeholder="예: 튜터 챗봇 서베이"').classes("w-full")
         name_in.on("keydown.enter", save)
+        parent_sel = ui.select(parent_opts, value=cur_parent if cur_parent in parent_opts else "",
+                               label="상위 컬렉션") \
+            .props("dense outlined").classes("w-full")
         ui.label("폴더 (선택) — 폴더 하나만 정하면 영어 md는 루트, ko/·pdf/·references.bib가 자동으로 "
-                 "자리를 잡습니다. 비워 두면 공통 저장 위치에 쌓입니다.").classes("text-xs text-gray-500 q-mt-xs")
+                 "자리를 잡습니다. 비워 두면 상위 컬렉션의 폴더(없으면 공통 저장 위치)에 쌓입니다.") \
+            .classes("text-xs text-gray-500 q-mt-xs")
         with ui.row().classes("items-center gap-2 w-full no-wrap"):
             root_in = ui.input(value=str(projects.root_of(pid) or "") if editing else "",
                                placeholder="폴더를 고르거나 경로를 붙여넣으세요") \
@@ -717,18 +732,20 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
 
         # 이 프로젝트만 다르게 쓸 설정 — 저장·출력에 관한 것만. 기본은 **전역 따름**이고, 바꾼 항목만
         # 프로젝트에 저장된다. 그래서 전역 설정을 고치면 따로 정하지 않은 프로젝트들은 저절로 따라온다.
+        follow = "상위 따름" if cur_parent else "전역 따름"
         title = f"고급 — 이 컬렉션만 다르게 ({len(own)}개 지정됨)" if own else "고급 — 이 컬렉션만 다르게"
         with ui.expansion(title, icon="tune", value=False).classes("w-full").props("dense"):
-            ui.label("정하지 않은 항목은 전역 설정을 그대로 따릅니다.").classes("text-xs text-gray-400")
+            ui.label("정하지 않은 항목은 상위 컬렉션(없으면 전역 설정)을 그대로 따릅니다.") \
+                .classes("text-xs text-gray-400")
             with ui.row().classes("items-center gap-2 w-full no-wrap"):
                 ui.label("이름 규칙").classes("text-xs w-20 shrink-0")
                 nm = ui.input(value=own.get("naming", ""),
-                              placeholder=f"전역 따름 ({config.resolve_naming_template()})") \
+                              placeholder=f"{follow} ({config.resolve_naming_template(cur_parent or None)})") \
                     .props("dense outlined").classes("flex-grow min-w-0")
                 nm.on_value_change(lambda e: set_pending("naming", (e.value or "").strip() or None))
             with ui.row().classes("items-center gap-3 w-full no-wrap"):
                 ui.label("내보내기").classes("text-xs w-20 shrink-0")
-                ui.select({"": f"전역 따름 ({_EXPORT_TARGET[config.resolve_export_target()]})", **_EXPORT_TARGET},
+                ui.select({"": f"{follow} ({_EXPORT_TARGET[config.resolve_export_target(cur_parent or None)]})", **_EXPORT_TARGET},
                           value=own.get("export_target", ""),
                           on_change=lambda e: set_pending("export_target", e.value or None)) \
                     .props("dense outlined").classes("flex-grow")
@@ -738,8 +755,8 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
                        ("bib_lookup", "변환 직후 서지를 온라인 보강", config.resolve_bib_lookup))
             for key, text, global_value in toggles:
                 with ui.row().classes("items-center gap-3 w-full no-wrap"):
-                    glob = global_value()
-                    ui.select({"": f"전역 따름 ({'켜짐' if glob else '꺼짐'})", "on": "켜짐", "off": "꺼짐"},
+                    glob = global_value(cur_parent or None)  # 상위 컬렉션이 있으면 물려받는 값
+                    ui.select({"": f"{follow} ({'켜짐' if glob else '꺼짐'})", "on": "켜짐", "off": "꺼짐"},
                               value="" if key not in own else ("on" if own[key] else "off"),
                               on_change=lambda e, k=key: set_pending(k, None if not e.value else e.value == "on")) \
                         .props("dense outlined").classes("w-44 shrink-0")

@@ -46,16 +46,28 @@ from md4paper.workdir import WorkDir
 
 # 카드를 사이드바로 끌 때 dataTransfer에 싣는 형식 — 파일 끌기('Files')와 섞이지 않게 따로 둔다
 PAPER_MIME = "text/x-md4-paper"
+COLL_MIME = "text/x-md4-collection"  # 사이드바 컬렉션 행을 끌 때 — 다른 컬렉션 아래로 옮긴다
 
 HOME_CSS = """
 /* 홈 = 뷰어와 같은 2단. 높이·여백은 _CHROME_CSS의 .md4-body 규칙이 맡는다(창 전체는 스크롤되지 않는다). */
-.md4-hside { flex: 0 0 272px; width: 272px; height: 100%; background: #f4f3f1; border-right: 1px solid #e6e4e0;
-  flex-wrap: nowrap; }
+.md4-hside { flex: 0 0 var(--md4-side-w); width: var(--md4-side-w); height: 100%; background: #f4f3f1;
+  border-right: 1px solid #e6e4e0; flex-wrap: nowrap; position: relative; }
+/* 열 폭 — 사이드바·미리보기는 경계를 끌어 바꾸고(더블클릭 = 기본값) 다음 실행에도 기억한다(_COLGRIP_HTML).
+   값은 .md4-home의 CSS 변수 하나씩이라 끄는 동안 서버를 거치지 않는다. */
+.md4-home { --md4-side-w: 272px; --md4-prev-w: 360px; }
+.md4-colgrip { position: absolute; top: 0; bottom: 0; width: 9px; z-index: 6; cursor: col-resize; }
+.md4-hside > .md4-colgrip { right: -5px; }
+.md4-hprev > .md4-colgrip { left: -5px; }
+.md4-colgrip::after { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent;
+  transition: background .12s ease; }
+.md4-colgrip:hover::after, .md4-colgrip.dragging::after { background: #2383e2; width: 2px; left: 3.5px; }
+html.md4-colresize, html.md4-colresize * { cursor: col-resize !important; user-select: none !important; }
 /* 행은 사이드바 끝에서 끝까지 — 좌우 여백은 행 안(16px)에서 준다. hover·고른 행의 바탕이 가장자리까지 닿아
    어느 줄인지 한눈에 들어온다. 캡·'새 컬렉션'·바닥 줄도 같은 16px 들여쓰기에 맞춘다. */
 .md4-hside-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 0 6px; flex-wrap: nowrap; }
 .md4-hcap { padding: 16px 16px 6px; }
-.md4-prow { display: flex; align-self: stretch; align-items: center; gap: 10px; min-height: 38px; padding: 0 10px 0 16px; border-radius: 0;
+.md4-prow { position: relative; display: flex; align-self: stretch; align-items: center; gap: 10px; min-height: 38px;
+  padding: 0 10px 0 16px; border-radius: 0;
   cursor: pointer; color: #37352f; font-size: 14.5px; line-height: 1.3; user-select: none; transition: background .12s ease; }
 .md4-prow:hover { background: rgba(0,0,0,.05); }
 .md4-prow.on { background: rgba(35,131,226,.13); color: #2383e2; font-weight: 600; }
@@ -67,6 +79,16 @@ HOME_CSS = """
 .md4-prow-sub { font-size: 11.5px; color: #9a968e; font-weight: 400; margin-top: 1px; }
 .md4-prow-n { flex: 0 0 auto; min-width: 2ch; text-align: right; font-size: 12.5px; color: #9a968e; font-weight: 400;
   font-variant-numeric: tabular-nums; }
+/* 하위 컬렉션 — 깊이마다 16px 들여 쓰고(행 style의 padding-left), 접기 꺾쇠는 그 들여쓰기 안 왼쪽 빈자리에
+   둔다(아이콘 줄이 '모든 논문'·'미분류'와 같은 세로줄에 서게). */
+.md4-prow-tw { position: absolute; top: 50%; transform: translateY(-50%); width: 16px; height: 22px;
+  display: flex; align-items: center; justify-content: center; color: #9a968e; border-radius: 4px; }
+.md4-prow-tw:hover { color: #37352f; background: rgba(0,0,0,.07); }
+/* 컬렉션을 끌어 다른 컬렉션에 놓으면 그 아래로, '컬렉션' 캡에 놓으면 맨 위로 */
+.md4-hcap.hot { color: #2383e2; box-shadow: inset 0 -2px 0 #2383e2; }
+html.md4-colldrag .md4-prow[data-coll-drop] { box-shadow: inset 0 0 0 1px rgba(35,131,226,.35); }
+html.md4-colldrag .md4-prow.hot[data-coll-drop] { background: rgba(35,131,226,.18); box-shadow: inset 0 0 0 1.5px #2383e2; }
+html.md4-colldrag .md4-prow.dragsrc { opacity: .45; }
 /* ⋯ 자리는 늘 잡아 둔다(편수가 hover 때 옆으로 밀리지 않게). 폭이 넉넉해져 편수와 함께 보인다. */
 .md4-prow-more { flex: 0 0 auto; opacity: 0; color: #6b6862; margin: 0 -4px 0 -4px; }
 .md4-prow:hover .md4-prow-more, .md4-prow-more[aria-expanded=true] { opacity: 1; }
@@ -165,12 +187,12 @@ html.md4-filedrag .md4-dropov { display: flex; }
 .md4-ptag-add { opacity: 0; color: #9a968e; }
 .md4-pcard:hover .md4-ptag-add { opacity: 1; }
 /* 오른쪽 미리보기 열 — 뷰어 패널처럼 흰 바탕 + 왼쪽 경계선, 본문만 스크롤하고 단추 줄은 바닥에 고정 */
-.md4-hprev { flex: 0 0 360px; width: 360px; height: 100%; background: #fff; border-left: 1px solid #e6e4e0;
-  flex-wrap: nowrap; }
-/* 좁은 창(앱 창을 줄였을 때) — 세 열이 목록을 짓누르지 않게 사이드바·미리보기를 조금씩 좁힌다 */
+.md4-hprev { flex: 0 0 var(--md4-prev-w); width: var(--md4-prev-w); height: 100%; background: #fff;
+  border-left: 1px solid #e6e4e0; flex-wrap: nowrap; position: relative; }
+/* 좁은 창(앱 창을 줄였을 때) — 세 열이 목록을 짓누르지 않게 사이드바·미리보기 기본 폭을 조금씩 좁힌다
+   (사용자가 끌어 정한 폭(.md4-wset)이 있으면 그 값 그대로) */
 @media (max-width: 1100px) {
-  .md4-hside { flex-basis: 220px; width: 220px; }
-  .md4-hprev { flex-basis: 290px; width: 290px; }
+  .md4-home:not(.md4-wset) { --md4-side-w: 220px; --md4-prev-w: 290px; }
 }
 .md4-pv-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 18px 20px; flex-wrap: nowrap; }
 .md4-pv-body > * { flex-shrink: 0; }  /* 넘치면 줄이지 말고 스크롤 — 안 그러면 그림 칸이 min-height로 찌그러진다 */
@@ -292,27 +314,101 @@ _DRAG_HTML = """
   document.addEventListener('drop', function(e){ if (hasFiles(e)) off(); }, true);
   document.addEventListener('drop', function(e){ if (hasFiles(e)) e.preventDefault(); });
   document.addEventListener('dragend', off, true);
-  // 카드 끌기 — 카드의 data-md4-root를 싣는다 (카드마다 핸들러를 달지 않게 한곳에서)
+  // 카드 끌기 — 카드의 data-md4-root를 싣는다 (카드마다 핸들러를 달지 않게 한곳에서).
+  // 사이드바 컬렉션 행 끌기 — data-md4-coll(id)을 싣는다: 다른 행에 놓으면 그 아래로 옮긴다.
   document.addEventListener('dragstart', function(e){
-    var c = e.target && e.target.closest ? e.target.closest('[data-md4-root]') : null;
-    if (!c || !e.dataTransfer) return;
+    if (!e.target || !e.target.closest || !e.dataTransfer) return;
+    var k = e.target.closest('[data-md4-coll]');
+    if (k) {
+      e.dataTransfer.setData('%(coll)s', k.getAttribute('data-md4-coll'));
+      e.dataTransfer.effectAllowed = 'move';
+      k.classList.add('dragsrc');
+      html.classList.add('md4-colldrag');
+      return;
+    }
+    var c = e.target.closest('[data-md4-root]');
+    if (!c) return;
     e.dataTransfer.setData('%(mime)s', c.getAttribute('data-md4-root'));
     e.dataTransfer.effectAllowed = 'copy';
     html.classList.add('md4-carddrag');
   });
-  document.addEventListener('dragend', function(){ html.classList.remove('md4-carddrag'); }, true);
+  document.addEventListener('dragend', function(){
+    html.classList.remove('md4-carddrag', 'md4-colldrag');
+    document.querySelectorAll('.md4-prow.dragsrc, .md4-prow.hot, .md4-hcap.hot')
+      .forEach(function(el){ el.classList.remove('dragsrc', 'hot'); });
+  }, true);
 })();
 </script>
-""" % {"mime": PAPER_MIME}
+""" % {"mime": PAPER_MIME, "coll": COLL_MIME}
+
+# 열 폭 끌기 — 사이드바 오른쪽·미리보기 왼쪽 경계(.md4-colgrip[data-col=side|prev]). 끄는 동안은 .md4-home의
+# CSS 변수만 바꾸고(서버 왕복 없음), 놓을 때 한 번 'md4-home-colw'로 폭을 알려 설정에 기억시킨다.
+# 더블클릭 = 기본 폭으로(w=0). 목록 열이 320px 밑으로 줄지 않게 막는다. 문서 수준에서 한 번만 건다.
+_COLGRIP_HTML = """
+<script>
+(function(){
+  if (window.__md4ColGrip) return; window.__md4ColGrip = true;
+  var VAR = {side: '--md4-side-w', prev: '--md4-prev-w'}, LIM = {side: [180, 480], prev: [260, 640]};
+  function send(col, w){ if (typeof emitEvent === 'function') emitEvent('md4-home-colw', {col: col, w: w}); }
+  document.addEventListener('pointerdown', function(e){
+    var g = e.target && e.target.closest ? e.target.closest('.md4-colgrip') : null;
+    if (!g || e.button !== 0) return;
+    var home = g.closest('.md4-home'), col = g.parentElement, which = g.getAttribute('data-col');
+    if (!home || !VAR[which]) return;
+    e.preventDefault();
+    var x0 = e.clientX, w0 = col.getBoundingClientRect().width;
+    var otherSel = which === 'side' ? '.md4-hprev' : '.md4-hside';
+    g.setPointerCapture(e.pointerId);
+    g.classList.add('dragging');
+    document.documentElement.classList.add('md4-colresize');
+    function move(ev){
+      var dx = ev.clientX - x0, w = which === 'side' ? w0 + dx : w0 - dx;
+      var other = home.querySelector(otherSel), ow = other && other.offsetParent ? other.offsetWidth : 0;
+      w = Math.min(w, home.clientWidth - ow - 320);
+      w = Math.round(Math.max(LIM[which][0], Math.min(LIM[which][1], w)));
+      home.style.setProperty(VAR[which], w + 'px');
+      home.classList.add('md4-wset');
+    }
+    function up(ev){
+      try { g.releasePointerCapture(ev.pointerId); } catch (_) {}
+      g.classList.remove('dragging');
+      document.documentElement.classList.remove('md4-colresize');
+      g.removeEventListener('pointermove', move); g.removeEventListener('pointerup', up);
+      g.removeEventListener('pointercancel', up);
+      var w = parseInt(home.style.getPropertyValue(VAR[which]), 10);
+      if (w) send(which, w);
+    }
+    g.addEventListener('pointermove', move); g.addEventListener('pointerup', up);
+    g.addEventListener('pointercancel', up);
+  });
+  document.addEventListener('dblclick', function(e){
+    var g = e.target && e.target.closest ? e.target.closest('.md4-colgrip') : null;
+    if (!g) return;
+    var home = g.closest('.md4-home'), which = g.getAttribute('data-col');
+    if (!home || !VAR[which]) return;
+    home.style.removeProperty(VAR[which]);
+    if (!home.style.getPropertyValue('--md4-side-w') && !home.style.getPropertyValue('--md4-prev-w'))
+      home.classList.remove('md4-wset');
+    send(which, 0);
+  });
+})();
+</script>
+"""
 
 # 사이드바 프로젝트 행 — 카드를 끌어 올리면 표시하고, 놓으면 논문 경로만 서버로 보낸다
-_ROW_DRAGOVER_JS = ("(e) => { const t = e.dataTransfer && e.dataTransfer.types; "
-                    f"if (t && Array.from(t).includes('{PAPER_MIME}')) "
-                    "{ e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; e.currentTarget.classList.add('hot'); } }")
+# 논문 카드든 다른 컬렉션 행이든 받는다 — 놓으면 {paper, coll} 중 실린 쪽만 서버로 보낸다.
+# (컬렉션 행은 자기 자신 위에서는 표시하지 않는다 — dragsrc)
+_ROW_DRAGOVER_JS = ("(e) => { const t = e.dataTransfer && e.dataTransfer.types; if (!t) return; "
+                    "const a = Array.from(t), el = e.currentTarget; "
+                    f"const paper = a.includes('{PAPER_MIME}') && el.hasAttribute('data-drop'); "
+                    f"const coll = a.includes('{COLL_MIME}') && el.hasAttribute('data-coll-drop') "
+                    "&& !el.classList.contains('dragsrc'); "
+                    "if (paper || coll) { e.preventDefault(); e.dataTransfer.dropEffect = paper ? 'copy' : 'move'; "
+                    "el.classList.add('hot'); } }")
 _ROW_DRAGLEAVE_JS = "(e) => e.currentTarget.classList.remove('hot')"
-_ROW_DROP_JS = ("(e) => { e.currentTarget.classList.remove('hot'); "
-                f"const r = e.dataTransfer && e.dataTransfer.getData('{PAPER_MIME}'); "
-                "if (r) { e.preventDefault(); emit(r); } }")
+_ROW_DROP_JS = ("(e) => { e.currentTarget.classList.remove('hot'); const d = e.dataTransfer; if (!d) return; "
+                f"const r = d.getData('{PAPER_MIME}'), c = d.getData('{COLL_MIME}'); "
+                "if (r || c) { e.preventDefault(); emit({paper: r || '', coll: c || ''}); } }")
 _STOP_JS = "(e) => e.stopPropagation()"
 
 _SORTS = {"recent": "최근순", "name": "제목순", "year": "연도순", "translated": "번역됨 먼저"}
@@ -395,6 +491,29 @@ def _preview_module():  # noqa: ANN202 — md4paper.preview (없으면 None — 
     return preview
 
 
+_COL_KEYS = {"side": "home_side_w", "prev": "home_prev_w"}  # [ui]에 기억하는 열 폭 (0·없음 = 기본)
+
+
+def col_widths() -> dict[str, int]:
+    """사용자가 끌어 정한 열 폭 {side, prev} — 정한 적 없는 열은 빠진다(CSS 기본값을 쓴다)."""
+    ui_cfg = config.load_config().get("ui", {})
+    out = {}
+    for col, key in _COL_KEYS.items():
+        try:
+            w = int(ui_cfg.get(key) or 0)
+        except (TypeError, ValueError):
+            w = 0
+        if w > 0:
+            out[col] = w
+    return out
+
+
+def save_col_width(col: str, w: int) -> None:
+    """끌어 정한 폭을 기억 (w=0이면 기본값으로 되돌림)."""
+    if col in _COL_KEYS:
+        config.set_section_value("ui", _COL_KEYS[col], max(0, int(w)))
+
+
 def preview_open() -> bool:
     """미리보기 열을 펴 둘지 — 전역 설정 [ui].home_preview (뷰어 패널 구성처럼 다음 실행에도 기억)."""
     v = config.load_config().get("ui", {}).get("home_preview")
@@ -432,6 +551,7 @@ def build_home(state: dict) -> None:
     spa.add_css(settings_dialog.CSS)
     spa.add_body_html(_EXTLINK_HTML)  # 바깥 링크는 새 창(앱 창이면 시스템 브라우저)으로
     spa.add_body_html(_DRAG_HTML)
+    spa.add_body_html(_COLGRIP_HTML)
     spa.add_body_html(f"<script>{agent_panel.init_js(None)}</script>")  # 에이전트 창: 지금 연 논문 없음
     # 논문 화면에서 열어 둔 서랍·툴팁(본문 밖 오버레이라 화면을 갈아 끼워도 남는다)은 홈에서 닫는다
     # (에이전트 창은 닫지 않는다 — 논문을 가로지르는 대화라 홈에서도 이어 쓴다)
@@ -462,13 +582,17 @@ def build_home(state: dict) -> None:
     meta_lock = asyncio.Lock()  # 칸을 연달아 고칠 때 paper_meta.json 읽고-쓰기가 겹쳐 앞의 값을 잃지 않게
     loads: dict = {}  # (root, 종류, 언어) → asyncio.Task — 같은 것을 두 번 읽지 않게(EN/KO 토글이 즉시)
     preview = _preview_module()
-    data: dict = {"rows": [], "by_root": {}, "projs": [], "names": {}}
+    data: dict = {"rows": [], "by_root": {}, "projs": [], "names": {}, "tree": [], "up": {}, "sub": {}}
 
     # ===== 한 번 훑기 — 사이드바 편수와 목록이 같은 결과를 쓴다 =====
     def load_projects() -> None:
         """프로젝트 목록을 한 번 읽어 둔다 — 행마다 projects.normalize(파일 읽기)를 부르지 않게."""
-        data["projs"] = projects.all_projects()
-        data["names"] = {p["id"]: p["name"] for p in data["projs"]}
+        projs = data["projs"] = projects.all_projects()
+        data["names"] = {p["id"]: p["name"] for p in projs}
+        # 트리 — 사이드바 순서·들여쓰기, 조상(편수를 위로 올리기), 하위 전체(상위를 고르면 하위 논문까지)
+        data["tree"] = projects.tree(projs)
+        data["up"] = {p["id"]: projects.ancestors(p["id"], projs) for p in projs}
+        data["sub"] = {p["id"]: {p["id"], *projects.descendants(p["id"], projs)} for p in projs}
         valid = data["names"]
         for r in data["rows"]:  # 없어진 프로젝트는 어디서나 미분류로 (projects.normalize_many와 같은 규칙)
             r["pids"] = [p for p in dict.fromkeys(_stored_pids(r)) if p in valid]
@@ -496,14 +620,22 @@ def build_home(state: dict) -> None:
         return [r for r in data["rows"] if str(r["root"]) not in busy] if busy else list(data["rows"])
 
     def in_scope(r: dict, scope: str) -> bool:
+        """이 논문이 고른 범위에 드는지 — 컬렉션을 고르면 그 하위 컬렉션의 논문까지."""
         if scope == projects.ALL:
             return True
         if scope == projects.NONE:
             return not r["pids"]
-        return scope in r["pids"]
+        sub = data["sub"].get(scope) or {scope}
+        return any(p in sub for p in r["pids"])
+
+    def path_of(pid: str) -> str:
+        """'SCALE / 리뷰' — 태그 툴팁·메뉴용 (data에 든 트리로, 파일을 다시 읽지 않고)."""
+        chain = [pid, *data["up"].get(pid, [])]
+        return " / ".join(name_of(p) for p in reversed(chain))
 
     def counts() -> dict[str, int]:
-        """사이드바 편수 — 숨긴 논문은 빼고(목록에 보이는 것과 같게), 소속 프로젝트마다 한 번씩."""
+        """사이드바 편수 — 숨긴 논문은 빼고(목록에 보이는 것과 같게). 컬렉션은 하위 컬렉션까지 합친
+        **고유** 편수(상위·하위 둘 다에 든 논문은 한 번만)."""
         n = {projects.ALL: 0, projects.NONE: 0}
         for r in live_rows():
             if r["hidden"]:
@@ -511,7 +643,11 @@ def build_home(state: dict) -> None:
             n[projects.ALL] += 1
             if not r["pids"]:
                 n[projects.NONE] += 1
+            hit: set[str] = set()
             for p in r["pids"]:
+                hit.add(p)
+                hit.update(data["up"].get(p, []))
+            for p in hit:
                 n[p] = n.get(p, 0) + 1
         return n
 
@@ -546,12 +682,13 @@ def build_home(state: dict) -> None:
         projects.set_active(value)  # 다음 실행에도 같은 묶음을 보게
         refresh_views()
 
-    def new_project(for_root: str | None = None) -> None:
+    def new_project(for_root: str | None = None, parent: str | None = None) -> None:
         """새 프로젝트 — 만드는 길은 이 대화상자 하나뿐이다(사이드바 '새 프로젝트'와 카드 태그 메뉴의
         '새 프로젝트 만들기…'가 같은 것을 연다).
 
         카드에서 왔으면 보던 범위는 건드리지 않고 그 논문만 새 프로젝트에 더한다 — 논문 한 편을
         넣으려던 참인데 목록이 통째로 새 프로젝트로 좁혀지면 방금 보던 자리를 잃는다.
+        `parent`면 그 컬렉션의 하위로 만든다(사이드바 ⋯ '하위 컬렉션 만들기').
         """
         async def saved(proj: dict, created: bool) -> None:  # noqa: ARG001
             load_projects()
@@ -560,10 +697,33 @@ def build_home(state: dict) -> None:
                 await set_members([for_root], (r["pids"] if r else []) + [proj["id"]])
                 refresh_views()
             else:
+                if parent:  # 하위를 만들었으면 접혀 있던 상위를 펴서 새 행이 보이게
+                    projects.set_collapsed(parent, False)
+                    load_projects()
                 pick_scope(proj["id"])  # 만들자마자 그 묶음을 보고, 새 논문도 그리로 들어가게
 
         with host:
-            settings_dialog.open_project_dialog(state, None, saved)
+            settings_dialog.open_project_dialog(state, None, saved, parent=parent)
+
+    def move_project(pid: str, parent: str) -> None:
+        """컬렉션을 다른 컬렉션 아래로('' = 맨 위로) — 자기 하위 아래로는 못 간다."""
+        if projects.parent_of(pid, data["projs"]) == parent:
+            return
+        if not projects.set_parent(pid, parent):
+            ui.notify("자기 자신이나 자기 하위 컬렉션 아래로는 옮길 수 없습니다.", type="warning")
+            return
+        if parent:
+            projects.set_collapsed(parent, False)  # 옮긴 자리가 보이게
+        load_projects()
+        refresh_views()
+        where = f"'{path_of(parent)}' 아래로" if parent else "맨 위로"
+        ui.notify(f"'{name_of(pid)}'을(를) {where} 옮겼습니다", type="positive", timeout=1500)
+
+    def toggle_collapsed(pid: str) -> None:
+        cur = next((bool(p.get("collapsed")) for p in data["projs"] if p["id"] == pid), False)
+        projects.set_collapsed(pid, not cur)
+        load_projects()
+        sidebar_rows.refresh()
 
     def edit_project(pid: str) -> None:
         def saved(proj: dict, created: bool) -> None:  # noqa: ARG001
@@ -619,6 +779,7 @@ def build_home(state: dict) -> None:
         after는 프로젝트 대화상자에서 왔을 때 그 대화상자를 닫는 함수 (지우기로 했을 때만 부른다)."""
         name = name_of(pid)
         n = sum(1 for r in data["rows"] if pid in r["pids"])  # 숨긴 논문까지 — 소속이 풀리는 건 다 센다
+        kids = [p["id"] for p in data["projs"] if projects.parent_of(p["id"], data["projs"]) == pid]
 
         async def do_delete() -> None:
             dlg.close()
@@ -634,6 +795,11 @@ def build_home(state: dict) -> None:
             ui.label(f"'{name}' 컬렉션을 지울까요?").classes("font-bold")
             ui.label(f"그 논문 {n}편에서 이 소속만 떼어 냅니다 — 다른 컬렉션 소속과 폴더·파일은 그대로 "
                      "둡니다.").classes("text-xs text-gray-500")
+            if kids:
+                up = projects.parent_of(pid, data["projs"])
+                ui.label(f"하위 컬렉션 {len(kids)}개는 지우지 않고 "
+                         + (f"'{path_of(up)}' 아래로" if up else "맨 위로") + " 올립니다.") \
+                    .classes("text-xs text-gray-500")
             with ui.row().classes("justify-end w-full items-center gap-2"):
                 ui.button("취소", on_click=dlg.close).props("flat")
                 ui.button("컬렉션 삭제", icon="delete", on_click=do_delete) \
@@ -665,6 +831,14 @@ def build_home(state: dict) -> None:
         sidebar_rows.refresh()  # 편수만 — 목록은 메뉴를 닫을 때 다시 그린다(메뉴가 눈앞에서 사라지지 않게)
         head.refresh()
         return pid in (data["by_root"].get(root) or {}).get("pids", [])
+
+    async def row_dropped(args, pid: str) -> None:  # noqa: ANN001 — {paper, coll}
+        """사이드바 컬렉션 행에 무언가를 놓음 — 논문 카드면 그 컬렉션에 더하고, 컬렉션 행이면 그 아래로 옮긴다."""
+        args = args if isinstance(args, dict) else {"paper": str(args or "")}
+        if args.get("coll"):
+            move_project(str(args["coll"]), pid)
+        elif args.get("paper"):
+            await add_dropped(str(args["paper"]), pid)
 
     async def add_dropped(root: str, pid: str) -> None:
         """카드를 사이드바 프로젝트 행에 놓음 — N:M이니 옮기지 않고 **더한다**."""
@@ -901,11 +1075,26 @@ def build_home(state: dict) -> None:
             background_tasks.create(_process_queue(state))
 
     # ===== 왼쪽 — 프로젝트 사이드바 =====
-    def prow(value: str, label: str, n: int, icon: str, *, project: bool = False, sub: str = "") -> None:
-        """사이드바 한 줄. `sub`는 이름 아래 옅은 둘째 줄 — 폴더를 가진 컬렉션의 폴더 이름(어디로 쌓이는지)."""
+    def prow(value: str, label: str, n: int, icon: str, *, project: bool = False, sub: str = "",
+             depth: int = 0, kids: bool = False, collapsed: bool = False) -> None:
+        """사이드바 한 줄. `sub`는 이름 아래 옅은 둘째 줄 — 폴더를 가진 컬렉션의 폴더 이름(어디로 쌓이는지).
+
+        컬렉션 행은 깊이만큼 들여 쓰고, 하위가 있으면 들여쓰기 안 왼쪽에 접기 꺾쇠를 둔다. 행을 끌어 다른
+        행에 놓으면 그 아래로 옮겨지고(COLL_MIME), 논문 카드를 놓으면 그 컬렉션에 더해진다(PAPER_MIME).
+        """
         on = view["scope"] == value
         row = ui.element("div").classes("md4-prow" + (" on" if on else ""))
+        if depth:
+            row.style(f"padding-left:{16 + 16 * depth}px")
         with row:
+            if kids:
+                tw = ui.element("span").classes("md4-prow-tw").style(f"left:{16 * depth}px")
+                with tw:
+                    ui.icon("chevron_right" if collapsed else "expand_more", size="16px")
+                # 꺾쇠만 접고 편다 — 행 클릭(범위 고르기)까지 번지지 않게 막고 서버에 알린다
+                tw.on("click", lambda _, p=value: toggle_collapsed(p),
+                      js_handler="(e) => { e.stopPropagation(); emit(); }")
+                tw.tooltip("하위 컬렉션 펴기" if collapsed else "하위 컬렉션 접기")
             ui.icon(icon, size="18px").classes("md4-prow-i")
             with ui.element("div").classes("md4-prow-t"):
                 ui.label(label).classes("md4-prow-name")
@@ -917,6 +1106,25 @@ def build_home(state: dict) -> None:
                     .props("flat dense round size=sm").classes("md4-prow-more")
                 more.on("click", js_handler=_STOP_JS)  # 행 클릭(범위 고르기)까지 번지지 않게
                 with more, ui.menu().props("anchor='bottom right' self='top right'"):
+                    ui.menu_item("하위 컬렉션 만들기…", on_click=lambda _, p=value: new_project(parent=p)) \
+                        .props("dense")
+                    with ui.menu_item("위치 옮기기", auto_close=False).props("dense"):
+                        with ui.item_section().props("side"):
+                            ui.icon("keyboard_arrow_right")
+                        with ui.menu().props("anchor='top end' self='top start'"):
+                            cur_up = data["up"].get(value, [""])[0] if data["up"].get(value) else ""
+                            ui.menu_item(("✓ " if not cur_up else "") + "맨 위로",
+                                         on_click=lambda _, p=value: move_project(p, "")) \
+                                .props("dense" + (" disable" if not cur_up else ""))
+                            for q, d in data["tree"]:
+                                if q["id"] == value or q["id"] in (data["sub"].get(value) or ()):
+                                    continue  # 자기 자신·자기 하위 아래로는 못 간다
+                                here = q["id"] == cur_up
+                                ui.menu_item(("✓ " if here else "") + q["name"],
+                                             on_click=lambda _, p=value, t=q["id"]: move_project(p, t)) \
+                                    .props("dense" + (" disable" if here else "")) \
+                                    .style(f"padding-left:{16 + 14 * d}px")  # 하위는 들여 써서
+                    ui.separator()
                     ui.menu_item("이름 바꾸기", on_click=lambda _, p=value: rename_project(p)).props("dense")
                     ui.menu_item("폴더 정하기…", on_click=lambda _, p=value: pick_project_folder(p)).props("dense")
                     ui.menu_item("설정…", on_click=lambda _, p=value: edit_project(p)).props("dense")
@@ -927,10 +1135,12 @@ def build_home(state: dict) -> None:
             else:
                 ui.element("span").classes("md4-prow-gap")
         if project:
-            row.props("data-drop")
+            row.props(f'data-drop data-coll-drop draggable=true data-md4-coll="{value}"')
             row.on("dragover", js_handler=_ROW_DRAGOVER_JS)
             row.on("dragleave", js_handler=_ROW_DRAGLEAVE_JS)
-            row.on("drop", lambda e, p=value: add_dropped(e.args, p), js_handler=_ROW_DROP_JS)
+            row.on("drop", lambda e, p=value: row_dropped(e.args, p), js_handler=_ROW_DROP_JS)
+            if depth:  # 들여 쓴 행은 이름이 잘릴 수 있어 'SCALE / 리뷰' 경로를 툴팁으로
+                row.tooltip(path_of(value))
         if not on:
             row.on("click", lambda _, v=value: pick_scope(v))
 
@@ -938,15 +1148,33 @@ def build_home(state: dict) -> None:
     def sidebar_rows() -> None:
         n = counts()
         prow(projects.ALL, "모든 논문", n[projects.ALL], "library_books")
-        ui.label("컬렉션").classes("md4-panel-title md4-hcap")
-        for p in data["projs"]:  # 만든 순서대로
+        # '컬렉션' 캡 — 컬렉션 행을 여기에 놓으면 맨 위로 올라간다
+        cap = ui.label("컬렉션").classes("md4-panel-title md4-hcap")
+        cap.on("dragover", js_handler=(
+            "(e) => { const t = e.dataTransfer && e.dataTransfer.types; "
+            f"if (t && Array.from(t).includes('{COLL_MIME}')) "
+            "{ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('hot'); } }"))
+        cap.on("dragleave", js_handler=_ROW_DRAGLEAVE_JS)
+        cap.on("drop", lambda e: move_project(str(e.args), "") if e.args else None, js_handler=(
+            "(e) => { e.currentTarget.classList.remove('hot'); "
+            f"const c = e.dataTransfer && e.dataTransfer.getData('{COLL_MIME}'); "
+            "if (c) { e.preventDefault(); emit(c); } }"))
+        hidden_under: set[str] = set()  # 접어 둔 컬렉션의 하위 — 그리지 않는다
+        for p, depth in data["tree"]:  # 부모 바로 아래에 자식들 (만든 순서)
+            if p["id"] in hidden_under:
+                continue
+            kids = len(data["sub"].get(p["id"], ())) > 1
+            collapsed = kids and bool(p.get("collapsed"))
+            if collapsed:
+                hidden_under.update(data["sub"][p["id"]] - {p["id"]})
             root = str(p.get("root") or "").strip()  # projects.root_of와 같은 규칙 — 파일을 다시 읽지 않게
-            prow(p["id"], p["name"], n.get(p["id"], 0), "folder_special", project=True,
-                 sub=Path(root).expanduser().name if root else "")
+            prow(p["id"], p["name"], n.get(p["id"], 0), "folder_special" if not depth else "folder",
+                 project=True, sub=Path(root).expanduser().name if root else "",
+                 depth=depth, kids=kids, collapsed=collapsed)
         prow(projects.NONE, projects.NONE_LABEL, n[projects.NONE], "inbox")
         ui.button("새 컬렉션", icon="add", color=None, on_click=lambda: new_project()) \
             .props("flat dense no-caps").classes("md4-hnew w-full") \
-            .tooltip("이름만 정하면 만들어집니다 — 폴더는 나중에 정해도 됩니다")
+            .tooltip("이름만 정하면 만들어집니다 — 폴더는 나중에 정해도 됩니다. 하위 컬렉션은 컬렉션 ⋯에서")
 
     @ui.refreshable
     def ws_label() -> None:
@@ -974,11 +1202,16 @@ def build_home(state: dict) -> None:
                     .tooltip(f"지금 목록에 보이는 {len(roots)}편을 한꺼번에 " + ("풀기" if every else "체크")
                              + " — 일괄 동작(번역·zip·컬렉션)은 오른쪽 칸에")
         if s not in (projects.ALL, projects.NONE):
-            root = projects.root_of(s)
+            root = projects.folder_of(s)  # 하위 컬렉션은 상위 폴더를 물려받는다
+            heir = projects.inherited_from(s)
+            if data["up"].get(s):  # 하위 컬렉션이면 어디 밑인지 먼저
+                ui.label(" / ".join(name_of(p) for p in reversed(data["up"][s]))).classes("md4-hpath")
             with ui.row().classes("items-center gap-1 no-wrap w-full"):
                 ui.icon("folder" if root else "folder_off", size="15px").classes("text-grey-5")
-                ui.label(f"{root}  ·  ko/  ·  pdf/" if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다") \
-                    .classes("md4-hpath truncate").tooltip(str(root) if root else "")
+                text = (f"{root}  ·  ko/  ·  pdf/" if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다")
+                if heir is not None:
+                    text += f"  (상위 '{heir['name']}' 폴더)"
+                ui.label(text).classes("md4-hpath truncate").tooltip(str(root) if root else "")
                 ui.button(icon="edit", color=None, on_click=lambda: edit_project(s)) \
                     .props("flat dense round size=xs").classes("text-grey-6") \
                     .tooltip("이 컬렉션 설정 — 이름·폴더·이 컬렉션만 다르게")
@@ -1112,9 +1345,10 @@ def build_home(state: dict) -> None:
     def project_pick_menu(on_pick, only: set[str] | None = None, with_new: bool = False) -> None:  # noqa: ANN001
         """미리보기 일괄 동작 칸의 '컬렉션에 추가/빼기' 메뉴 — 프로젝트 이름만 늘어놓는다."""
         with ui.menu():
-            shown = [p for p in data["projs"] if only is None or p["id"] in only]
-            for p in shown:
-                ui.menu_item(p["name"], on_click=lambda _, v=p["id"]: on_pick(v)).props("dense")
+            shown = [(p, d) for p, d in data["tree"] if only is None or p["id"] in only]
+            for p, d in shown:  # 트리 순서, 하위는 들여 써서
+                ui.menu_item(p["name"], on_click=lambda _, v=p["id"]: on_pick(v)).props("dense") \
+                    .style(f"padding-left:{16 + 14 * d}px")
             if not shown:
                 ui.menu_item("컬렉션이 없습니다").props("dense disable")
             if with_new:
@@ -1181,9 +1415,9 @@ def build_home(state: dict) -> None:
         menu.clear()
         with menu:
             ui.label("컬렉션에 넣기").classes("md4-menucap")
-            for p in data["projs"]:
+            for p, d in data["tree"]:  # 트리 순서, 하위는 들여 써서
                 on = p["id"] in r["pids"]
-                with ui.menu_item(auto_close=False).props("dense") as item:
+                with ui.menu_item(auto_close=False).props("dense").style(f"padding-left:{16 + 14 * d}px") as item:
                     with ui.row().classes("items-center gap-2 no-wrap"):
                         ic = ui.icon("check_box" if on else "check_box_outline_blank", size="18px") \
                             .classes("text-primary" if on else "text-grey-6")
@@ -1207,7 +1441,9 @@ def build_home(state: dict) -> None:
         with tags_box:
             if r["pids"]:
                 for p in r["pids"]:
-                    ui.label(name_of(p)).classes("md4-ptag")
+                    tag = ui.label(name_of(p)).classes("md4-ptag")
+                    if data["up"].get(p):  # 하위 컬렉션은 어디 밑인지
+                        tag.tooltip(path_of(p))
             else:
                 ui.label(projects.NONE_LABEL).classes("md4-ptag none")
             ui.icon("add", size="14px").classes("md4-ptag-add")
@@ -1946,7 +2182,7 @@ def build_home(state: dict) -> None:
             ui.label(scope_label()).classes("md4-pv-title")
             ui.label(f"{len(rows)}편 · 번역 {n_ko}편").classes("md4-pv-stat")
             if s not in (projects.ALL, projects.NONE):
-                root = projects.root_of(s)
+                root = projects.folder_of(s)  # 하위 컬렉션은 상위 폴더를 물려받는다
                 with ui.row().classes("items-start gap-1 no-wrap w-full"):
                     ui.icon("folder" if root else "folder_off", size="15px").classes("text-grey-5 q-mt-xs")
                     ui.label(str(root) if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다") \
@@ -2012,9 +2248,23 @@ def build_home(state: dict) -> None:
 
     # ===== 틀 =====
     scan()
-    with ui.row().classes("w-full no-wrap gap-0 md4-body md4-home"):
+    widths = col_widths()
+    home_row = ui.row().classes("w-full no-wrap gap-0 md4-body md4-home" + (" md4-wset" if widths else ""))
+    if widths:  # 끌어 정한 폭 — 처음 그릴 때부터 그 폭으로 (깜빡임 없이)
+        home_row.style("; ".join(f"--md4-{c}-w:{w}px" for c, w in widths.items()))
+
+    def on_colw(e) -> None:  # noqa: ANN001 — 'md4-home-colw' {col, w}
+        args = e.args if isinstance(e.args, dict) else {}
+        try:
+            save_col_width(str(args.get("col")), int(args.get("w") or 0))
+        except (TypeError, ValueError):
+            pass
+
+    ui.on("md4-home-colw", on_colw)
+    with home_row:
         # ---- 왼쪽: 프로젝트 사이드바 ----
         with ui.column().classes("md4-hside gap-0"):
+            ui.element("div").classes("md4-colgrip").props('data-col="side"')  # 끌어서 폭 조절 · 더블클릭 = 기본 폭
             with ui.column().classes("md4-hside-rows md4-scroll gap-0 w-full"):
                 sidebar_rows()
             with ui.column().classes("md4-hfoot gap-0 w-full"):
@@ -2067,6 +2317,7 @@ def build_home(state: dict) -> None:
         # ---- 오른쪽 끝: 미리보기 (고른 논문 · 체크한 논문들의 일괄 동작 · 범위 요약) ----
         pv["col"] = ui.column().classes("md4-hprev gap-0")
         with pv["col"]:
+            ui.element("div").classes("md4-colgrip").props('data-col="prev"')  # 끌어서 폭 조절 · 더블클릭 = 기본 폭
             preview_pane()
         sync_preview()
 

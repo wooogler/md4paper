@@ -216,7 +216,7 @@ def bib_path(project: str | None = None) -> Path | None:
     """
     from md4paper.bibtex import BIB_NAME
 
-    root = projects.root_of(project) if project else None
+    root = projects.folder_of(project) if project else None  # 하위 컬렉션은 상위 폴더를 물려받는다
     if root is not None:
         return root / BIB_NAME
     for which in KINDS:
