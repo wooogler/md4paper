@@ -418,3 +418,27 @@ def test_agent_figure_names_and_approval_card(wd, monkeypatch):
     card = jobtools.describe_figures({"figures": ["Fig. 3"]}, Path(wd.root))
     assert card.startswith("그림 1장 글자 번역 (LLM 비용 ≈$") and "openai/gpt-6-luna" in card
     assert "translate_figures" in jobtools.DESCRIBE and jobtools.translate_figures in jobtools.TOOLS
+
+
+def test_translate_into_japanese_uses_language_name_font_and_file(wd):
+    """번역 언어가 일본어면 그림 이름·기록·글꼴·프롬프트가 일본어 것 — 한국어 파일은 건드리지 않는다."""
+    try:
+        font = ft.find_font("ja")
+    except ft.FigureTranslateError:
+        pytest.skip("일본어 글꼴 없음")
+    ko_md = wd.ko_md.read_text(encoding="utf-8")
+    wd.set_lang("ja")
+    wd.ko_md.write_text(ko_md.replace("캡션", "キャプション"), encoding="utf-8")
+    systems: list = []
+    fake = _fake(ko={"Accuracy": "精度", "Model A": "モデルA"})
+    inner = fake._parse_fn
+    fake._parse_fn = lambda system, user, schema: (systems.append(system), inner(system, user, schema))[1]
+    res = ft.translate(wd, "figure-3.png", fake, ocr=lambda png: [])
+    assert "replace it with Japanese" in systems[0] and "Korean" not in systems[0]
+    assert res["ko"] == "figure-3.ja.png" and res["translated"] == 2
+    assert (wd.out_images / "figure-3.ja.png").is_file() and not (wd.out_images / "figure-3.ko.png").exists()
+    assert (wd.extract / "figures-ja.json").is_file() and not (wd.extract / "figures-ko.json").exists()
+    assert "images/figure-3.ja.png" in wd.ko_md.read_text(encoding="utf-8")
+    assert {x["ko"] for x in ft.load(wd)["img-01.png"]["lines"] if x["action"] == "translate"} == {"精度", "モデルA"}
+    assert ft.info(wd, "figure-3.ja.png")["name"] == "figure-3.png"
+    assert "ヒラギノ" in font or "Noto" in font or "Yu" in font or "meiryo" in font

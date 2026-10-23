@@ -37,7 +37,7 @@ import json
 import time
 from pathlib import Path
 
-from md4paper import config, library, projects
+from md4paper import config, langs, library, projects
 from md4paper.ui import (
     agent_panel, batch_translate_dialog, collection_glossary_dialog, desktop, find_bar, jobs, scroll_memory,
     settings_dialog, spa, tabstore, translate_job, update_banner,
@@ -1208,7 +1208,7 @@ def build_home(state: dict) -> None:
                 ui.label(" / ".join(name_of(p) for p in reversed(data["up"][s]))).classes("md4-hpath")
             with ui.row().classes("items-center gap-1 no-wrap w-full"):
                 ui.icon("folder" if root else "folder_off", size="15px").classes("text-grey-5")
-                text = (f"{root}  ·  ko/  ·  pdf/" if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다")
+                text = (f"{root}  ·  {projects.translation_subdir()}/  ·  pdf/" if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다")
                 if heir is not None:
                     text += f"  (상위 '{heir['name']}' 폴더)"
                 ui.label(text).classes("md4-hpath truncate").tooltip(str(root) if root else "")
@@ -1558,9 +1558,10 @@ def build_home(state: dict) -> None:
                         .props("flat dense no-caps size=sm color=grey-7") \
                         .tooltip("영어 마크다운 zip (마크다운+이미지)")
                     if r["has_ko"]:
-                        ui.button("KO", on_click=lambda _, rt=r["root"]: download_zip(rt, "ko")) \
+                        ui.button(langs.short(r.get("lang") or "ko"),
+                                  on_click=lambda _, rt=r["root"]: download_zip(rt, "ko")) \
                             .props("flat dense no-caps size=sm color=primary") \
-                            .tooltip("한국어 번역 마크다운 zip (마크다운+이미지)")
+                            .tooltip(f"번역 마크다운 zip — {langs.get(r.get('lang') or 'ko').native} (마크다운+이미지)")
                     if r["hidden"]:  # 숨긴 논문은 삭제 대신 '다시 표시'
                         ui.button(icon="visibility", on_click=lambda _, item=r: hide_paper(item, False)) \
                             .props("flat dense round size=sm color=primary").tooltip("목록에 다시 표시")
@@ -2085,7 +2086,7 @@ def build_home(state: dict) -> None:
                         for k in ("en", "ko"):
                             sp = ui.element("span").classes("on" if k == lang else "")
                             with sp:
-                                ui.label(k.upper())
+                                ui.label("EN" if k == "en" else langs.short(r.get("lang") or "ko"))
                             sp.on("click", lambda _, k=k: set_lang(k))
                             pv["seg"][k] = sp
             abs_box = ui.column().classes("gap-1 w-full")
@@ -2121,9 +2122,9 @@ def build_home(state: dict) -> None:
             ui.button("EN", on_click=lambda: download_zip(r["root"], "en")) \
                 .props("flat dense no-caps size=sm color=grey-7").tooltip("영어 마크다운 zip (마크다운+이미지)")
             if r["has_ko"]:
-                ui.button("KO", on_click=lambda: download_zip(r["root"], "ko")) \
+                ui.button(langs.short(r.get("lang") or "ko"), on_click=lambda: download_zip(r["root"], "ko")) \
                     .props("flat dense no-caps size=sm color=primary") \
-                    .tooltip("한국어 번역 마크다운 zip (마크다운+이미지)")
+                    .tooltip(f"번역 마크다운 zip — {langs.get(r.get('lang') or 'ko').native} (마크다운+이미지)")
             ui.space()
             ui.button(icon="push_pin", on_click=lambda: toggle_pin(r)) \
                 .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-6")) \
@@ -2157,7 +2158,7 @@ def build_home(state: dict) -> None:
                     .tooltip("번역이 없거나 낡은 논문을 번역합니다 — 띄우기 전에 편수·대략 비용을 확인합니다")
                 ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")) \
                     .props("outline dense no-caps")
-                ui.button("한국어 zip", icon="download", on_click=lambda: download_bulk("ko")) \
+                ui.button("번역 zip", icon="download", on_click=lambda: download_bulk("ko")) \
                     .props("outline dense no-caps")
                 ui.button("모바일 HTML", icon="smartphone", on_click=download_mobile).props("outline dense no-caps") \
                     .tooltip("폰에서 읽는 HTML 한 장 (원문·번역·문단 대조) — iCloud Drive·구글 드라이브에 저장하면 "

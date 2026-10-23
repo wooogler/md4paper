@@ -1,0 +1,21 @@
+{
+ "진행 중인 변환·번역이 끝난 뒤에 업데이트하세요.": "Update after the running conversions and translations finish.",
+ "업데이트를 시작하지 못했습니다: {e}": "Could not start the update: {e}",
+ "업데이트를 받는 중입니다. 앱이 잠시 닫혔다가 다시 열립니다.": "Downloading the update. The app will close and reopen shortly.",
+ "업데이트 확인 중…": "Checking for updates…",
+ "업데이트 확인 실패 (오프라인?)": "Update check failed (offline?)",
+ "최신 버전": "Up to date",
+ "· 새 버전 {v} 건너뜀": "· Skipped new version {v}",
+ "알림 다시 켜기": "Notify me again",
+ "새 버전 있음 ({n}개 변경) — 업데이트": "New version ({n} changes) — Update",
+ "새 버전 있음 — 업데이트": "New version — Update",
+ "새 버전이 있습니다 ({n}개 변경)": "A new version is available ({n} changes)",
+ "새 버전이 있습니다": "A new version is available",
+ "이 버전 건너뛰기": "Skip this version",
+ "GitHub에 더 새 버전이 올라올 때까지 알리지 않습니다": "Don't notify until a newer version is on GitHub",
+ "나중에": "Later",
+ "업데이트하고 다시 시작": "Update and restart",
+ "화면 언어 — 창을 새로 열면 바뀝니다": "Display language — takes effect when you reopen the window",
+ "화면 언어": "Display language",
+ "메뉴·단추의 언어입니다. 아직 일부 화면만 옮겨져 있어 나머지는 한국어로 보입니다.": "Language of menus and buttons. Only some screens are translated so far; the rest still appear in Korean."
+}

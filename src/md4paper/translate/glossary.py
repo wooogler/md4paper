@@ -8,10 +8,14 @@ glossary.yaml은 편집 가능한 아티팩트다: 지금은 $EDITOR, 이후 웹
 137개 용어 중 81개가 어긋남). 컬렉션 용어집은 그 어긋남을 보고 일부러 고른 목록이라, 번역 때
 논문 용어집 위에 **주 컬렉션**(소속 첫 항목)의 것을 덮어쓴다 — 같은 용어(`term_key`)면 컬렉션이
 이긴다(`effective`). 논문 용어집 파일 자체는 건드리지 않는다(뷰어 표·자동 생성은 논문 것 그대로).
+
+**번역 언어**: 번역어는 언어마다 다르므로 논문 용어집은 `WorkDir.glossary_yaml`(언어별), 컬렉션 용어집은
+`<컬렉션 id>.<lang>.yaml`(한국어는 옛 이름 `<id>.yaml`)이다. 필드 이름 `korean`은 옛것이고 값은 그 언어의 번역어.
 """
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import re
@@ -22,6 +26,7 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
+from md4paper import langs
 from md4paper.ir import GlossaryEntry, GlossaryList
 from md4paper.llm.base import Provider
 from md4paper.workdir import WorkDir
@@ -35,6 +40,18 @@ paper's key technical terms and propose a Korean rendering for each. Each entry:
 Only terms that must be translated consistently in this paper's context, at most 25. Exclude common everyday words.
 Terms are case-insensitive — never list one twice in different capitalizations (e.g. both "Living Test Set" and
 "living test set"); pick one form. The `korean` field must be written in Korean."""
+
+# 한국어 밖 언어 — 필드 이름 `korean`은 그대로(GlossaryEntry), 값은 그 언어로 쓰라고 못 박는다
+_SYSTEM_GENERIC = """You build a glossary for translating an academic paper into {lang}.
+From the title and the excerpt below (abstract + introduction in full, plus section titles), pick this
+paper's key technical terms and propose a {lang} rendering for each. Each entry:
+- term: the English term (verbatim)
+- korean: its {lang} translation (or transliteration) — the field is named `korean` for historical reasons,
+  but its value must be written in {lang}, never in Korean
+- policy: translate | transliterate | keep | 병기-first-use  (병기 = show the English alongside on first use)
+Only terms that must be translated consistently in this paper's context, at most 25. Exclude common everyday words.
+Terms are case-insensitive — never list one twice in different capitalizations (e.g. both "Living Test Set" and
+"living test set"); pick one form."""
 
 _POLICY_LINE = "# policy: translate(의미번역) | transliterate(음역) | keep(원어유지) | 병기-first-use(첫등장시 병기)\n"
 _HEADER = "# 용어집 — 번역 전에 검토/수정하세요 (웹 UI에서도 편집 가능).\n" + _POLICY_LINE
@@ -113,7 +130,12 @@ def save(gloss: GlossaryList, wd: WorkDir) -> None:
         apply.migrate_cache(wd)
     except Exception as e:  # noqa: BLE001 — 캐시 이행은 덤이다; 용어집 저장을 막으면 안 된다
         logging.getLogger(__name__).warning("캐시 이행 실패 (%s) — 용어집은 그대로 저장한다: %s", wd.root, e)
-    dump(gloss, wd.glossary_yaml)
+    path = wd.glossary_yaml
+    dump(gloss, path)
+    # 언어를 적어 둔다 — 안 적으면 번역 전에 전역 언어를 바꿨을 때 이 용어집이 다른 언어 경로에 가려진다
+    with contextlib.suppress(OSError, ValueError):
+        if wd.status_json.exists():
+            wd.set_lang(wd.lang)
 
 
 def load(wd: WorkDir) -> GlossaryList:
@@ -129,21 +151,38 @@ only new ones. Each entry:
 Only newly added terms, at most 20. Exclude common everyday words. Terms are case-insensitive — a term whose
 capitalization differs from an existing one is NOT new. The `korean` field must be in Korean."""
 
+_SYSTEM_ADD_GENERIC = """You pick technical terms to ADD to a glossary for translating an academic paper into {lang}.
+From the body excerpt below, choose key technical terms, but EXCLUDE any already in the 'existing terms' list —
+only new ones. Each entry:
+- term: the English term
+- korean: its {lang} translation (or transliteration) — the field is named `korean` for historical reasons,
+  but its value must be written in {lang}, never in Korean
+- policy: translate | transliterate | keep | 병기-first-use
+Only newly added terms, at most 20. Exclude common everyday words. Terms are case-insensitive — a term whose
+capitalization differs from an existing one is NOT new."""
 
-def generate(provider: Provider, title: str, source: str, *, max_tokens: int = 4096) -> GlossaryList:
-    """LLM으로 용어집 초안 생성. source=초록·서론·섹션 제목·첫 문단 발췌."""
+
+def _system(lang: str, ko_prompt: str, generic: str) -> str:
+    return ko_prompt if lang == "ko" else generic.format(lang=langs.get(lang).english)
+
+
+def generate(provider: Provider, title: str, source: str, *, max_tokens: int = 4096,
+             lang: str = langs.DEFAULT) -> GlossaryList:
+    """LLM으로 용어집 초안 생성. source=초록·서론·섹션 제목·첫 문단 발췌. lang=번역 언어."""
     user = f"Title: {title}\n\nExcerpt:\n{source}"
-    result = provider.parse(_SYSTEM, user, GlossaryList, max_tokens=max_tokens)
+    result = provider.parse(_system(lang, _SYSTEM, _SYSTEM_GENERIC), user, GlossaryList, max_tokens=max_tokens)
     return GlossaryList(entries=dedupe(result.entries))
 
 
 def extend(
-    provider: Provider, title: str, text: str, existing_terms: list[str], *, max_tokens: int = 4096
+    provider: Provider, title: str, text: str, existing_terms: list[str], *, max_tokens: int = 4096,
+    lang: str = langs.DEFAULT,
 ) -> GlossaryList:
     """본문 발췌에서 '기존 용어에 없는' 새 용어만 뽑는다 (중복은 결정론적으로 한 번 더 거른다)."""
     have = ", ".join(existing_terms) or "(none)"
     user = f"Title: {title}\n\nExisting terms: {have}\n\nBody excerpt:\n{text}"
-    result = provider.parse(_SYSTEM_ADD, user, GlossaryList, max_tokens=max_tokens)
+    result = provider.parse(_system(lang, _SYSTEM_ADD, _SYSTEM_ADD_GENERIC), user, GlossaryList,
+                            max_tokens=max_tokens)
     have = {term_key(t) for t in existing_terms}
     fresh = [e for e in result.entries if term_key(e.term) not in have]
     return GlossaryList(entries=dedupe(fresh))  # 응답 안에서 대소문자만 다른 중복도 제거
@@ -155,7 +194,7 @@ def ensure(
     """glossary.yaml이 있으면 그걸(사용자 수정 반영), 없으면 생성해 저장."""
     if wd.glossary_yaml.exists() and not regenerate:
         return load(wd)
-    gloss = generate(provider, title, source)
+    gloss = generate(provider, title, source, lang=wd.lang)
     save(gloss, wd)
     return gloss
 
@@ -173,33 +212,47 @@ def collection_dir() -> Path:
     return Path(config.CONFIG_DIR) / "glossary"
 
 
-def collection_path(pid: str) -> Path:
-    return collection_dir() / f"{pid}.yaml"
+def _target(lang: str | None) -> str:
+    """컬렉션 용어집의 언어 — 안 주면 사용자 번역 언어(전역 설정). 화면·CLI·에이전트가 다루는 컬렉션 용어집."""
+    if lang:
+        return langs.normalize(lang)
+    from md4paper import config
+
+    return config.resolve_target_lang()
 
 
-def load_collection(pid: str) -> GlossaryList:
+def collection_path(pid: str, lang: str | None = None) -> Path:
+    """컬렉션 용어집 파일 — 언어별(`<id>.ja.yaml`), 한국어는 옛 이름 `<id>.yaml`."""
+    lang = _target(lang)
+    return collection_dir() / (f"{pid}.yaml" if lang == "ko" else f"{pid}.{lang}.yaml")
+
+
+def load_collection(pid: str, lang: str | None = None) -> GlossaryList:
     """컬렉션 용어집 — 파일이 없거나(아직 안 만든 컬렉션) id가 비었으면 빈 목록."""
     if not pid:
         return GlossaryList(entries=[])
-    path = collection_path(pid)
+    path = collection_path(pid, lang)
     if not path.exists():
         return GlossaryList(entries=[])
     return load_path(path)
 
 
-def save_collection(pid: str, gloss: GlossaryList) -> None:
-    dump(gloss, collection_path(pid), header=_COLLECTION_HEADER)
+def save_collection(pid: str, gloss: GlossaryList, lang: str | None = None) -> None:
+    dump(gloss, collection_path(pid, lang), header=_COLLECTION_HEADER)
 
 
 def delete_collection(pid: str) -> bool:
-    """컬렉션 용어집 파일을 지운다(컬렉션을 지울 때). 반환: 지운 파일이 있었는지 — 없으면 조용히."""
+    """컬렉션 용어집 파일을 모든 언어에 걸쳐 지운다(컬렉션을 지울 때). 반환: 지운 파일이 있었는지 — 없으면 조용히."""
     if not pid:
         return False
-    try:
-        collection_path(pid).unlink()
-        return True
-    except FileNotFoundError:
-        return False
+    removed = False
+    for path in [collection_dir() / f"{pid}.yaml", *collection_dir().glob(f"{pid}.*.yaml")]:
+        try:
+            path.unlink()
+            removed = True
+        except FileNotFoundError:
+            pass
+    return removed
 
 
 def effective(wd: WorkDir, pid: str | None = None) -> tuple[GlossaryList, dict[str, str]]:
@@ -218,7 +271,7 @@ def effective(wd: WorkDir, pid: str | None = None) -> tuple[GlossaryList, dict[s
 
         pid = library.project_of(wd)
     paper = load(wd).entries if wd.glossary_yaml.exists() else []
-    coll = load_collection(pid).entries
+    coll = load_collection(pid, wd.lang).entries  # 논문의 번역 언어로 쓴 컬렉션 용어집
     over = {term_key(e.term): e for e in coll}
     out: list[GlossaryEntry] = []
     origin: dict[str, str] = {}
@@ -350,17 +403,20 @@ def secondary_note(n: int) -> str:
     return f" (비주 소속 {n}편 제외)" if n else ""
 
 
-def collection_entries_by_paper(pid: str, workspace: Path) -> dict[Path, list[GlossaryEntry]]:
+def collection_entries_by_paper(pid: str, workspace: Path,
+                                lang: str | None = None) -> dict[Path, list[GlossaryEntry]]:
     """주 컬렉션이 이 컬렉션인 논문들의 논문 용어집 — {논문 root(Path): 항목들}. 용어집 없는 논문은 뺀다.
 
     키는 token이 아니라 root Path다: token 규칙(경로 sha1 앞 12자리)은 ui 쪽(`app.wd_token`,
     `agent.tools.token_of`)에 있고 이 모듈이 ui를 import하면 안 된다 — 호출자가 token으로 바꾼다.
     다중 소속이면 주 컬렉션(소속 첫 항목)이 이 컬렉션일 때만 센다(`members`). 숨긴 논문은 목록에서처럼 뺀다.
+    번역 언어(lang, 안 주면 전역 설정)가 같은 논문만 — 언어가 다르면 번역어가 어긋나는 게 당연하다.
     """
+    lang = _target(lang)
     out: dict[Path, list[GlossaryEntry]] = {}
     for row in members(pid, workspace):
         wd = WorkDir(row["root"])
-        if wd.glossary_yaml.exists():
+        if wd.lang == lang and wd.glossary_yaml.exists():
             out[wd.root] = load(wd).entries
     return out
 
@@ -369,7 +425,8 @@ _CHARS_PER_TOKEN = 3.5  # 영어 원문 글자 → 입력 토큰 (대략)
 _OUT_RATIO = 1.3        # 한국어 출력 토큰 ≈ 입력 × 1.3 (대략)
 
 
-def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | None = None) -> list[dict]:
+def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | None = None,
+           lang: str | None = None) -> list[dict]:
     """컬렉션 용어집이 바뀌면 어느 논문의 어느 섹션이 다시 번역되고 대략 얼마가 드는지 (LLM 호출 없음).
 
     주 컬렉션이 이 컬렉션인 논문(`members`) 중 번역(ko.md)이 있는 것마다 `apply.retranslate_units`
@@ -389,10 +446,11 @@ def impact(pid: str, workspace: Path, *, model_for: Callable[[WorkDir], str] | N
     from md4paper.translate import apply
     from md4paper.workdir import paper_title
 
+    lang = _target(lang)  # 이 언어의 컬렉션 용어집이 바뀐 것 — 다른 언어 논문은 영향 없음
     out: list[dict] = []
     for row in members(pid, workspace):
         wd = WorkDir(row["root"])
-        if not wd.ko_md.exists():
+        if wd.lang != lang or not wd.ko_md.exists():
             continue
         try:
             manifest = manifest_io.load(wd)

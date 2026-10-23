@@ -831,7 +831,7 @@ class UIController:
         from md4paper.translate import context, glossary
 
         source = context.extract_glossary_source(self.wd, self.manifest)
-        gloss = glossary.generate(provider, self.manifest.title, source)
+        gloss = glossary.generate(provider, self.manifest.title, source, lang=self.wd.lang)
         glossary.save(gloss, self.wd)
         return gloss.entries
 
@@ -858,7 +858,8 @@ class UIController:
         text = self.selected_sections_text()
         if not text:
             return []
-        return list(glossary.extend(provider, self.manifest.title, text, existing_terms).entries)
+        return list(glossary.extend(provider, self.manifest.title, text, existing_terms,
+                                    lang=self.wd.lang).entries)
 
     def translate(self, provider, korean_style: str | None = None, on_progress=None) -> dict:
         """현재 용어집·설정으로 번역 실행 → paper.ko.md."""

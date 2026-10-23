@@ -126,7 +126,7 @@ HTML = """
   }
   function base(c){ return '/figko/' + c.tok + '/' + encodeURIComponent(c.name); }
   function url(c, name){ return '/wdimages/' + c.tok + '/' + encodeURIComponent(name); }
-  function isKo(name){ return /\\.ko\\.png$/.test(name || ''); }
+  function isKo(name){ return /\\.[a-z]{2,3}(-[A-Za-z0-9]{2,8})*\\.png$/.test(name || ''); }   // 번역 그림 — figure-3.<언어>.png
   function hide(){ menu.classList.remove('open'); ed.classList.remove('open'); }
   function load(c){
     var my = ++seq;
@@ -195,7 +195,7 @@ HTML = """
     else if (i.has) h.push('<div class="note">줄 ' + i.translated + '개 번역 · ' + esc(i.model || '') +
         (i.edited ? ' · 직접 고침' : '') + (i.kind === 'screenshot' ? ' · 스크린샷: 화면 글자는 그대로' : '') +
         (i.has_ko_md ? '' : ' · 번역(ko.md)이 생기면 번역 열에 이 그림이 들어갑니다') + '</div>');
-    else h.push('<div class="note">축 라벨·범례·상자 글자를 한국어로 바꾼 그림을 만듭니다. 그림의 선·막대·숫자는 ' +
+    else h.push('<div class="note">축 라벨·범례·상자 글자를 번역 언어로 바꾼 그림을 만듭니다. 그림의 선·막대·숫자는 ' +
         '건드리지 않습니다 — AI는 글자의 번역만 정하고, 그림은 원본에서 그 글자 자리만 고쳐 그립니다.</div>');
     menu.innerHTML = h.join('');
   }

@@ -5,7 +5,7 @@
 
 - **AI** — 서비스·모델·키·연결 테스트 (번역·참고문헌 정리를 쓰려면 먼저 여기)
 - **저장 위치** — 공통 폴더 하나 고르기, 자동 저장, 작업 폴더. 영어·한국어·PDF를 따로 보내는 칸은 접어 둔다
-- **변환·번역** — 한국어 문체·섹션 제목 번역·내보내기 형식·OCR
+- **변환·번역** — 번역 언어·문체·섹션 제목 번역·내보내기 형식·OCR
 - **고급** — 표기 세부(캡션·소제목·저자·인용·참고문헌), BibTeX, 서지 보강, 이름 규칙
 
 설정 키와 config 함수는 예전 홈 왼쪽 패널과 같다 — 자리만 옮겼다. 상수(_PROVIDER_NAME 등)는
@@ -21,7 +21,7 @@ from typing import Callable
 from md4paper import config, library, projects
 from md4paper.ui import desktop
 
-_LIB_LABEL = {"en": "영어 마크다운", "ko": "한국어 마크다운", "pdf": "PDF 원본"}
+_LIB_LABEL = {"en": "영어 마크다운", "ko": "번역 마크다운", "pdf": "PDF 원본"}
 
 CSS = """
 /* 설정 대화상자 — 왼쪽 세로 탭 | 오른쪽 내용(그 안에서만 스크롤). 뷰어 사이드바와 같은 색 토큰. */
@@ -80,7 +80,7 @@ def build_settings(state: dict, on_change: Callable[[], None]) -> Callable[[str 
     from nicegui import run, ui
 
     from md4paper.ui.app import (
-        _CAPSTYLE_EX, _CAPSTYLE_NAME, _EXPORT_TARGET, _KEY_HINT, _KSTYLE, _PROVIDER_NAME, _RUNIN,
+        _CAPSTYLE_EX, _CAPSTYLE_NAME, _EXPORT_TARGET, _KEY_HINT, _PROVIDER_NAME, _RUNIN,
         _model_options, _short_provider,
     )
     from md4paper.workdir import recent_workdirs
@@ -109,7 +109,7 @@ def build_settings(state: dict, on_change: Callable[[], None]) -> Callable[[str 
                 with ui.tab_panel("library"):
                     _library_panel(ui, run, state, on_change, can_pick, recent_workdirs)
                 with ui.tab_panel("convert"):
-                    export_sel = _convert_panel(ui, save_global, _KSTYLE, _EXPORT_TARGET)
+                    export_sel = _convert_panel(ui, save_global, _EXPORT_TARGET)
                 with ui.tab_panel("advanced"):
                     refresh_scope = _advanced_panel(ui, run, state, on_change, save_global,
                                                     _CAPSTYLE_EX, _CAPSTYLE_NAME, _RUNIN)
@@ -238,7 +238,7 @@ def _library_panel(ui, run, state, on_change, can_pick, recent_workdirs) -> None
     async def pick_one_folder() -> None:
         """폴더 하나 → en/ko/pdf 세 칸을 한꺼번에 (프로젝트 폴더와 똑같은 배치)."""
         cur = library.dir_for("en") or state["upload_dir"]
-        picked = await desktop.choose_folder("공통 저장 폴더 선택 (영어는 루트 · 번역 ko/ · PDF pdf/)", str(cur))
+        picked = await desktop.choose_folder(f"공통 저장 폴더 선택 (영어는 루트 · 번역 {projects.translation_subdir()}/ · PDF pdf/)", str(cur))
         if not picked:
             return
         for which, path in projects.layout(picked).items():
@@ -246,7 +246,7 @@ def _library_panel(ui, run, state, on_change, can_pick, recent_workdirs) -> None
         projects.ensure_layout(picked)
         lib_rows.refresh()
         common_row.refresh()
-        ui.notify(f"저장 위치 → {picked} (영어는 루트 · 번역 ko/ · PDF pdf/)", type="positive")
+        ui.notify(f"저장 위치 → {picked} (영어는 루트 · 번역 {projects.translation_subdir()}/ · PDF pdf/)", type="positive")
 
     @ui.refreshable
     def common_row() -> None:
@@ -259,7 +259,7 @@ def _library_panel(ui, run, state, on_change, can_pick, recent_workdirs) -> None
             return
         layout = projects.layout(en) if en else {}
         if en and all(dirs.get(k) == layout.get(k) for k in library.KINDS):
-            ui.label(f"{en}  ·  ko/  ·  pdf/").classes("text-xs text-gray-500 break-all")
+            ui.label(f"{en}  ·  {projects.translation_subdir()}/  ·  pdf/").classes("text-xs text-gray-500 break-all")
         else:  # 세 칸을 따로 정해 둔 경우 — 각각 보여 준다
             for which in library.KINDS:
                 if dirs.get(which):
@@ -343,7 +343,7 @@ def _library_panel(ui, run, state, on_change, can_pick, recent_workdirs) -> None
     with ui.row().classes("items-center gap-2"):
         one_btn = ui.button("폴더 하나 고르기", icon="create_new_folder", on_click=pick_one_folder) \
             .props("dense outline no-caps") \
-            .tooltip("폴더 하나를 고르면 영어는 루트, 번역은 ko/, PDF는 pdf/로 자동 배치합니다")
+            .tooltip(f"폴더 하나를 고르면 영어는 루트, 번역은 {projects.translation_subdir()}/, PDF는 pdf/로 자동 배치합니다")
         if not can_pick:
             _no_dialog(one_btn)
     with ui.expansion("개별 지정 — 영어·한국어·PDF를 각각 다른 폴더로", value=False) \
@@ -364,16 +364,50 @@ def _library_panel(ui, run, state, on_change, can_pick, recent_workdirs) -> None
              "다른 폴더에서 변환해 둔 논문이 안 보이면 여기서 그 폴더를 고르세요.").classes("text-xs text-gray-400")
 
 
-def _convert_panel(ui, save_global, kstyle, export_target):  # noqa: ANN001, ANN202 — ui.select
+def _convert_panel(ui, save_global, export_target):  # noqa: ANN001, ANN202 — ui.select
     """변환·번역 — 자주 바꾸는 것만. 돌려주는 것은 내보내기 형식 select(열 때 값을 맞춘다)."""
     ui.label("앞으로 변환·번역하는 논문의 기본값입니다. 논문별 세부 조정은 논문 화면에서 언제든 바꿀 수 있어요.") \
         .classes("text-xs text-gray-500")
     ui.label("번역").classes("md4-setsub")
-    _ks = config.resolve_korean_style()
-    ui.select(kstyle, value=_ks if _ks in kstyle else "해라체", label="한국어 문체",
-              on_change=lambda e: save_global("translate", "korean_style", e.value, "한국어 문체")) \
+    from md4paper import langs
+
+    @ui.refreshable
+    def style_select() -> None:
+        """번역 문체 — 고른 번역 언어의 프리셋 (언어를 바꾸면 다시 그린다)."""
+        lang = config.resolve_target_lang()
+        opts = langs.style_options(lang)
+        cur = config.resolve_style(lang)
+        if cur not in opts:  # custom:"…" — 목록에 넣어 둬야 값이 지워지지 않는다
+            opts = {**opts, cur: cur}
+        ui.select(opts, value=cur, label=f"번역 문체 · {langs.get(lang).native}",
+                  on_change=lambda e: save_global("translate", config.style_key(lang), e.value, "번역 문체")) \
+            .props("dense outlined").classes("w-full")
+
+    def pick_lang(e) -> None:  # noqa: ANN001
+        if e.value == config.resolve_target_lang():
+            return
+        save_global("translate", "target_lang", e.value, f"번역 언어 · {langs.get(e.value).native}")
+        style_select.refresh()
+
+    from md4paper import i18n
+
+    def pick_ui_lang(e) -> None:  # noqa: ANN001
+        if e.value == i18n.ui_lang():
+            return
+        save_global("ui", "language", e.value, i18n.t("화면 언어 — 창을 새로 열면 바뀝니다"))
+
+    _ui = i18n.ui_lang()
+    ui.select({c: langs.get(c).native if c != "en" else "English" for c in i18n.available()}, value=_ui,
+              label=i18n.t("화면 언어"), on_change=pick_ui_lang).props("dense outlined").classes("w-full")
+    ui.label(i18n.t("메뉴·단추의 언어입니다. 아직 일부 화면만 옮겨져 있어 나머지는 한국어로 보입니다.")) \
+        .classes("text-xs text-gray-400")
+    _lang = config.resolve_target_lang()
+    ui.select(langs.language_options(_lang), value=_lang, label="번역 언어 (모국어)", on_change=pick_lang) \
         .props("dense outlined").classes("w-full")
-    ui.switch("섹션 제목도 한국어로 번역", value=config.resolve_translate_headers(),
+    ui.label("새로 번역하는 논문이 이 언어로 번역됩니다. 이미 번역한 논문은 그 언어를 그대로 둡니다. "
+             "그림 속 글자 번역은 아랍·데바나가리·태국 문자처럼 이어 쓰는 문자에선 아직 안 됩니다.").classes("text-xs text-gray-400")
+    style_select()
+    ui.switch("섹션 제목도 번역", value=config.resolve_translate_headers(),
               on_change=lambda e: save_global("translate", "translate_headers", e.value, "헤더 번역")) \
         .props("dense")
 
@@ -387,7 +421,7 @@ def _convert_panel(ui, save_global, kstyle, export_target):  # noqa: ANN001, ANN
 
     sel = ui.select(export_target, value=config.resolve_export_target(), label="내보내기 형식",
                     on_change=pick_target).props("dense outlined").classes("w-full")
-    ui.label("EN·KO 다운로드 zip과 저장 위치 사본에 적용합니다 (이미지 임베드·인용 표기).") \
+    ui.label("원문·번역 다운로드 zip과 저장 위치 사본에 적용합니다 (이미지 임베드·인용 표기).") \
         .classes("text-xs text-gray-400")
 
     ui.label("변환").classes("md4-setsub")
@@ -717,7 +751,7 @@ def open_project_dialog(state: dict, pid: str | None, on_saved: Callable[[dict, 
         parent_sel = ui.select(parent_opts, value=cur_parent if cur_parent in parent_opts else "",
                                label="상위 컬렉션") \
             .props("dense outlined").classes("w-full")
-        ui.label("폴더 (선택) — 폴더 하나만 정하면 영어 md는 루트, ko/·pdf/·references.bib가 자동으로 "
+        ui.label(f"폴더 (선택) — 폴더 하나만 정하면 영어 md는 루트, {projects.translation_subdir()}/·pdf/·references.bib가 자동으로 "
                  "자리를 잡습니다. 비워 두면 상위 컬렉션의 폴더(없으면 공통 저장 위치)에 쌓입니다.") \
             .classes("text-xs text-gray-500 q-mt-xs")
         with ui.row().classes("items-center gap-2 w-full no-wrap"):

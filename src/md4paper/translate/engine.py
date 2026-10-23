@@ -1,7 +1,12 @@
-"""번역 엔진 — 고정 시스템 프롬프트(문체+용어집+문서 컨텍스트) + 청크별 번역 + 재시도 사다리."""
+"""번역 엔진 — 고정 시스템 프롬프트(문체+용어집+문서 컨텍스트) + 청크별 번역 + 재시도 사다리.
+
+한국어 프롬프트(`build_system_prompt`의 ko 갈래, `glossary_line`)는 번역 캐시의 옛 키(v1·v2)가 그 글자로
+만들어지므로 바꾸지 않는다. 다른 언어는 영어로 쓴 같은 내용의 프롬프트(`_generic_*`)를 쓴다.
+"""
 
 from __future__ import annotations
 
+from md4paper import langs
 from md4paper.ir import GlossaryEntry, GlossaryList
 from md4paper.llm.base import Provider
 from md4paper.translate import chunker
@@ -34,10 +39,56 @@ def _glossary_block(gloss: GlossaryList) -> str:
     return "\n".join(glossary_line(e) for e in gloss.entries)
 
 
+def _generic_glossary_line(e: GlossaryEntry, lang: langs.Lang) -> str:
+    """한국어 밖 언어의 용어집 줄 — 캐시 해시는 언어와 무관하게 `glossary_line`(같은 정보)을 쓴다."""
+    if e.policy == "keep":  # 번역어를 보여주지 않는다(보여주면 LLM이 그걸로 번역함)
+        return f"- {e.term} → keep the English original (do not translate or transliterate)"
+    if e.policy == "transliterate":
+        return f"- {e.term} → {e.korean} (transliterate by sound)"
+    if e.policy == "병기-first-use":
+        # 꼴을 글자로 박는다 — postprocess.dedupe_first_use가 "번역어 (원어)"만 알아본다
+        return f'- {e.term} → {e.korean} (on first use write "{e.korean} ({e.term})")'
+    return f"- {e.term} → {e.korean} (use this rendering)"
+
+
+def _generic_system_prompt(style: str, gloss: GlossaryList, title: str, abstract: str, outline: str,
+                           lang: langs.Lang) -> str:
+    """한국어 밖 언어의 시스템 프롬프트 — 한국어 프롬프트와 같은 규칙을 영어로."""
+    outline_block = (
+        f"\n\n[Document outline — section structure, to see where the current part belongs]\n{outline}"
+        if outline else ""
+    )
+    block = "\n".join(_generic_glossary_line(e, lang) for e in gloss.entries) if gloss.entries else "(none)"
+    return f"""You are a professional translator of academic papers into {lang.english}.
+
+[Style] {langs.style_instruction(style, lang.code)}
+
+[Preserve structure — mandatory]
+- Keep the Markdown structure identical to the source: the number and level of heading #s, lists, and table | structure.
+- Never translate, alter or delete tokens of the form ⟦MD4_n⟧; keep them in place (placeholders for code, math, links, images).
+- Leave the contents of inline math $...$ and inline code `...` untranslated.
+- Keep citation markers ([1], [Author Year], etc.) and anchors (#ref-N) unchanged.
+- If the user message has a '{_CTX_HEAD_EN}' block, use it only as reference and never output it again. Translate only what is below '{_BODY_HEAD_EN}'.
+- Output only the translation. Add no explanations or notes.
+
+[Terminology] Follow the glossary below strictly (case-insensitive — the same term even when capitalized differently in titles or at sentence starts). Per the note in parentheses:
+- 'keep the English original': do not translate or transliterate; leave it in English (e.g. Data-Prompt Co-Evolution → Data-Prompt Co-Evolution).
+- 'use this rendering': use that {lang.english} rendering. 'transliterate by sound': render the sound in {lang.english} script.
+- 'on first use': write the rendering followed by the English term in parentheses, exactly as shown (e.g. "エンコーダ (encoder)"); post-processing removes repeats, so writing it every time is fine.
+{block}
+
+[Document context — use it to keep the topic and terminology consistent]
+Title: {title}
+Abstract: {abstract}{outline_block}"""
+
+
 def build_system_prompt(
-    korean_style: str, gloss: GlossaryList, title: str, abstract: str, outline: str = ""
+    korean_style: str, gloss: GlossaryList, title: str, abstract: str, outline: str = "",
+    lang: str = langs.DEFAULT,
 ) -> str:
-    """전 섹션 공통 고정 프롬프트 (프로바이더 캐싱 대상). outline=문서 섹션 제목 트리."""
+    """전 섹션 공통 고정 프롬프트 (프로바이더 캐싱 대상). outline=문서 섹션 제목 트리. korean_style=문체 값."""
+    if lang != "ko":
+        return _generic_system_prompt(korean_style, gloss, title, abstract, outline, langs.get(lang))
     outline_block = (
         f"\n\n[문서 개요 — 섹션 구조. 지금 번역하는 부분이 논문 어디에 속하는지 파악용]\n{outline}"
         if outline else ""
@@ -65,9 +116,16 @@ def build_system_prompt(
 초록: {abstract}{outline_block}"""
 
 
+# 유저 메시지의 앞 문맥/본문 구분 머리 — 한국어는 예전 그대로, 다른 언어는 영어(프롬프트가 이 글을 가리킨다)
+_CTX_HEAD = "=== 앞 문맥 (직전 섹션 끝 · 참고용, 다시 출력하지 말 것) ==="
+_BODY_HEAD = "=== 번역할 본문 (이 아래만 번역) ==="
+_CTX_HEAD_EN = "=== Preceding context (end of the previous section · reference only, do not output) ==="
+_BODY_HEAD_EN = "=== Text to translate (translate only below this line) ==="
+
+
 def translate_chunk(
     provider: Provider, system_prompt: str, source: str, *, max_tokens: int = 8192,
-    protect_headings: bool = False, context_tail: str = "",
+    protect_headings: bool = False, context_tail: str = "", lang: str = langs.DEFAULT,
 ) -> tuple[str, list[str]]:
     """한 청크 번역: 보호 → 호출 → 복원. context_tail=직전 섹션 원문 끝(참고용, 번역 안 함).
 
@@ -78,12 +136,8 @@ def translate_chunk(
     """
     protected, store = chunker.protect(source, protect_headings=protect_headings)
     if context_tail.strip():
-        user = (
-            "=== 앞 문맥 (직전 섹션 끝 · 참고용, 다시 출력하지 말 것) ===\n"
-            + context_tail.strip()
-            + "\n\n=== 번역할 본문 (이 아래만 번역) ===\n"
-            + protected
-        )
+        ctx_head, body_head = (_CTX_HEAD, _BODY_HEAD) if lang == "ko" else (_CTX_HEAD_EN, _BODY_HEAD_EN)
+        user = ctx_head + "\n" + context_tail.strip() + "\n\n" + body_head + "\n" + protected
     else:
         user = protected
     out = provider.complete(system_prompt, user, max_tokens=max_tokens)
@@ -94,7 +148,7 @@ def translate_chunk(
 _HINT_CHARS = 60  # 빠뜨린 토큰 앞뒤로 보여 줄 원문 길이
 
 
-def _missing_hint(source: str, missing: list[str], protect_headings: bool) -> str:
+def _missing_hint(source: str, missing: list[str], protect_headings: bool, lang: str = langs.DEFAULT) -> str:
     """빠뜨린 ⟦MD4_n⟧이 원문 어디에 있었는지 — '몇 개 빠뜨림'만으로는 같은 곳을 또 빠뜨린다.
 
     모델이 문장을 한국어 어순으로 재구성하며 문장 중간의 인용을 통째로 흘리는 일이 잦다
@@ -111,16 +165,21 @@ def _missing_hint(source: str, missing: list[str], protect_headings: bool) -> st
             continue
         before = protected[max(0, i - _HINT_CHARS):i].replace("\n", " ")
         after = protected[i + len(key):i + len(key) + _HINT_CHARS].replace("\n", " ")
-        lines.append(f"- {key}: 원문 「…{before}{key}{after}…」")
+        lines.append(f"- {key}: 원문 「…{before}{key}{after}…」" if lang == "ko"
+                     else f"- {key}: source “…{before}{key}{after}…”")
     if not lines:
         return ""
+    if lang != "ko":
+        return ("\nMissing tokens and where they were in the source — put each back unchanged at the place with "
+                "the same meaning in the translation (for a citation, right after the claim it supports):\n"
+                + "\n".join(lines))
     return ("\n빠뜨린 토큰과 원문 위치 — 번역문의 같은 의미 자리에 반드시 그대로 넣어라"
             "(인용이면 그 인용이 뒷받침하는 말 바로 뒤):\n" + "\n".join(lines))
 
 
 def translate_with_retry(
     provider: Provider, system_prompt: str, source: str, *, max_retries: int = 1,
-    protect_headings: bool = False, context_tail: str = "",
+    protect_headings: bool = False, context_tail: str = "", lang: str = langs.DEFAULT,
 ) -> tuple[str, str, list[str]]:
     """번역 + 구조 검증 재시도 사다리.
 
@@ -131,20 +190,21 @@ def translate_with_retry(
     problems: list[str] = []
     for attempt in range(max_retries + 1):
         translated, missing = translate_chunk(
-            provider, sys_prompt, source, protect_headings=protect_headings, context_tail=context_tail
+            provider, sys_prompt, source, protect_headings=protect_headings, context_tail=context_tail,
+            lang=lang,
         )
         problems = validate(source, translated)
         if missing:  # 진짜 원인을 앞에 세운다 — 재시도 메시지가 이걸 먼저 읽어야 한다
             problems.insert(0, f"플레이스홀더 유실(⟦MD4_n⟧ {len(missing)}개를 빠뜨림)")
         if not problems:
             return translated, ("ok" if attempt == 0 else "retried"), []
-        sys_prompt = (
-            system_prompt
-            + "\n\n[재시도] 직전 번역이 다음 구조를 어겼다: "
-            + ", ".join(problems)
-            + ". 이번엔 마크다운 구조를 정확히 보존하라."
-            + _missing_hint(source, missing, protect_headings)
-        )
+        # 위반 항목 이름(validate)은 한국어지만 다른 언어 번역에서도 모델이 읽기엔 충분하다
+        head, tail = (("\n\n[재시도] 직전 번역이 다음 구조를 어겼다: ", ". 이번엔 마크다운 구조를 정확히 보존하라.")
+                      if lang == "ko" else
+                      ("\n\n[Retry] The previous translation broke this structure: ",
+                       ". This time preserve the Markdown structure exactly."))
+        sys_prompt = (system_prompt + head + ", ".join(problems) + tail
+                      + _missing_hint(source, missing, protect_headings, lang))
     # 두 번 실패 → 영어 원문 통과 (구조는 확실히 보존). 위반 목록도 함께 돌려준다.
     # 위반 항목을 주석에 적어 둔다 — 이유를 문서 자체가 들고 있어야 나중에 왜 실패했는지 알 수 있다
     # (status.json에도 남기지만, ko.md만 손에 든 사람도 바로 보이도록).

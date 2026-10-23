@@ -337,7 +337,7 @@ def figure_names(wd: WorkDir, figures: list[str] | None, redo: bool) -> list[str
     by_stem = {n.rsplit(".", 1)[0].lower(): n for n in every}
     out, bad = [], []
     for raw in figures:
-        key = " ".join(str(raw).strip().lower().replace(".ko.png", "").split())
+        key = " ".join(re.sub(r"\.[a-z]{2,3}(?:-[a-z0-9]{2,8})*\.png$", "", str(raw).strip().lower()).split())
         key = key.rsplit(".", 1)[0] if key.endswith((".png", ".jpg", ".jpeg")) else key
         key = re.sub(r"^(figure|fig\.?)\s*-?\s*", "figure-", key)
         n = by_stem.get(key)

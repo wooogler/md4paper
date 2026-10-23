@@ -1,4 +1,8 @@
-"""그림 속 글자 번역 — 축 라벨·범례·다이어그램 상자 글자를 한국어로 바꾼 그림(`figure-3.ko.png`)을 만든다.
+"""그림 속 글자 번역 — 축 라벨·범례·다이어그램 상자 글자를 번역한 그림(`figure-3.ko.png`)을 만든다.
+
+**번역 언어.** 논문의 번역 언어(`wd.lang`)로 — 그림 이름은 `figure-3.<lang>.png`(한국어 `.ko.png`), 기록은
+`figures-<lang>.json`, 글꼴은 언어별 후보(`find_font`). 글자 모양을 이어 그리는 문자(아랍·데바나가리·태국 문자)는
+Pillow 기본 배치로는 깨지므로 막는다(`supported`). 아래 설명의 '한국어'는 '번역 언어'로 읽으면 된다.
 
 **LLM은 라벨만, 그림은 코드가.** 이미지 생성 모델(gpt-image 계열)로 그림을 다시 그리면 글자는 자연스럽지만
 데이터가 바뀐다 — 실측(2026-10, 5장)에서 유지하라고 한 축 라벨 `[1, 5)`를 `[1, 5]`로, UI 식별자
@@ -36,7 +40,8 @@ from pydantic import BaseModel
 from md4paper.workdir import WorkDir
 
 RENDERER = 1  # 그리는 방식을 바꾸면 올린다 — 기록의 값과 다르면 '다시 그리기'가 필요하다는 표시
-KO_SUFFIX = ".ko.png"
+# 번역 그림 이름 꼴 — `<원본 이름>.<언어 코드>.png`. 원본 그림 이름(figure-3.png·image-1.png)엔 가운데 점이 없다
+_TR_RE = re.compile(r"\.[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*\.png$")
 _OCR_MIN_SCORE = 0.5
 _PAD = 2  # 줄 상자 둘레 여백(px) — 안티에일리어싱 가장자리까지 지운다
 _FG_DIST = 50  # 배경색과 이만큼 떨어진 픽셀을 글자로 본다 (RGB 거리)
@@ -48,14 +53,33 @@ _LOCK = threading.RLock()  # 기록·ko.md를 함께 고친다 (UI 라우트·�
 _OCR_LOCK = threading.Lock()
 _OCR = None
 
+_NOTO_CJK = (
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+)
 _FONT_CANDIDATES = (
     "/System/Library/Fonts/AppleSDGothicNeo.ttc",        # macOS
     "/Library/Fonts/NanumGothic.ttf",
     "C:/Windows/Fonts/malgun.ttf",                       # Windows (맑은 고딕)
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    *_NOTO_CJK,
     "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
 )
+# 번역 언어별 글꼴 후보 — 없는 언어는 라틴·키릴 문자를 두루 갖춘 글꼴(_LATIN_FONTS)
+_LANG_FONTS = {
+    "ko": _FONT_CANDIDATES,
+    "ja": ("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", "C:/Windows/Fonts/YuGothM.ttc",
+           "C:/Windows/Fonts/meiryo.ttc", *_NOTO_CJK),
+    "zh-Hans": ("/System/Library/Fonts/Hiragino Sans GB.ttc", "/System/Library/Fonts/STHeiti Light.ttc",
+                "C:/Windows/Fonts/msyh.ttc", *_NOTO_CJK),
+    "zh-Hant": ("/System/Library/Fonts/STHeiti Light.ttc", "C:/Windows/Fonts/msjh.ttc", *_NOTO_CJK),
+}
+_LATIN_FONTS = (
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/Library/Fonts/Arial Unicode.ttf",
+    "/System/Library/Fonts/Helvetica.ttc", "C:/Windows/Fonts/arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", *_NOTO_CJK,
+)
+# 글자를 이어 그리거나 모양을 바꾸는 문자 — Pillow 기본 배치(raqm 없이)로는 깨진다
+_UNSUPPORTED = ("ar", "fa", "ur", "he", "hi", "bn", "th", "my", "km")
 
 
 class FigureTranslateError(ValueError):
@@ -65,13 +89,25 @@ class FigureTranslateError(ValueError):
 # --- 이름·기록 ---------------------------------------------------------------
 
 
-def ko_name(out_name: str) -> str:
-    """`figure-3.png` → `figure-3.ko.png` (번역 그림은 원본 형식과 상관없이 PNG)."""
-    return os.path.splitext(out_name)[0] + KO_SUFFIX
+def supported(lang: str) -> bool:
+    """이 번역 언어로 그림 글자를 그릴 수 있나 — 이어 쓰는 문자(아랍·데바나가리·태국 …)는 아직 못 한다."""
+    return lang.split("-")[0] not in _UNSUPPORTED
+
+
+def _require_supported(wd: WorkDir) -> None:
+    if not supported(wd.lang):
+        raise FigureTranslateError(f"이 번역 언어({wd.lang})는 그림 속 글자 번역을 아직 지원하지 않습니다 "
+                                   "— 글자를 이어 그리는 문자라 그림에 바르게 못 씁니다.")
+
+
+def ko_name(out_name: str, lang: str = "ko") -> str:
+    """`figure-3.png` → `figure-3.ko.png`(번역 언어별 `figure-3.ja.png`; 원본 형식과 상관없이 PNG)."""
+    return os.path.splitext(out_name)[0] + f".{lang}.png"
 
 
 def is_ko(name: str) -> bool:
-    return name.endswith(KO_SUFFIX)
+    """번역 그림 이름인가 (언어와 상관없이 `.<lang>.png`)."""
+    return bool(_TR_RE.search(name or ""))
 
 
 def is_candidate(name: str) -> bool:
@@ -105,7 +141,7 @@ def original_name(wd: WorkDir, name: str) -> str:
     for rec in load(wd).values():
         if rec.get("ko") == name and rec.get("out"):
             return rec["out"]
-    stem = name[: -len(KO_SUFFIX)]
+    stem = _TR_RE.sub("", name)
     if wd.out_images.is_dir():
         for f in sorted(wd.out_images.iterdir()):
             if os.path.splitext(f.name)[0] == stem and not is_ko(f.name):
@@ -397,7 +433,18 @@ def _glossary_block(wd: WorkDir, texts: list[str]) -> str:
     for e in entries:
         if e.term and e.term.lower() in blob:
             rows.append(f"- {e.term} → {e.term if e.policy == 'keep' else e.korean}")
-    return ("Glossary (use these Korean terms):\n" + "\n".join(rows[:60]) + "\n\n") if rows else ""
+    return (f"Glossary (use these {_lang_name(wd.lang)} terms):\n" + "\n".join(rows[:60]) + "\n\n") if rows else ""
+
+
+def _lang_name(lang: str) -> str:
+    from md4paper import langs
+
+    return langs.get(lang).english
+
+
+def _system(lang: str) -> str:
+    """라벨 프롬프트 — 한국어는 그대로, 다른 언어는 'Korean'을 그 언어 이름으로 (필드 이름 ko_lines는 그대로)."""
+    return _SYSTEM if lang == "ko" else _SYSTEM.replace("Korean", _lang_name(lang))
 
 
 def label(provider, wd: WorkDir, png: bytes, lines: list[dict]) -> tuple[str, list[dict]]:  # noqa: ANN001
@@ -407,7 +454,7 @@ def label(provider, wd: WorkDir, png: bytes, lines: list[dict]) -> tuple[str, li
     user = _glossary_block(wd, [x["en"] for x in lines]) + "Text blocks:\n" + "\n".join(
         json.dumps({"id": bi, "lines": [by_id[i]["en"] for i in ids]}, ensure_ascii=False)
         for bi, ids in enumerate(blocks))
-    res = provider.parse_image(_SYSTEM, user, [png], _Labels, max_tokens=8000)
+    res = provider.parse_image(_system(wd.lang), user, [png], _Labels, max_tokens=8000)
     items = {it.id: it for it in res.items}
     out = []
     for bi, ids in enumerate(blocks):
@@ -433,15 +480,17 @@ def label(provider, wd: WorkDir, png: bytes, lines: list[dict]) -> tuple[str, li
 # --- 그리기 -------------------------------------------------------------------------
 
 
-def find_font() -> str:
-    """한글 글꼴 파일 — `[figures] font` 설정 > 운영체제 기본 한글 글꼴."""
+def find_font(lang: str = "ko") -> str:
+    """번역 언어의 글꼴 파일 — `[figures] font_<lang>` > `[figures] font` > 운영체제 기본 글꼴 후보."""
     from md4paper import config
 
-    want = (config.load_config().get("figures") or {}).get("font")
-    for p in ([want] if want else []) + list(_FONT_CANDIDATES):
+    cfg = config.load_config().get("figures") or {}
+    want = [cfg.get(f"font_{lang}"), cfg.get("font")]
+    for p in [w for w in want if w] + list(_LANG_FONTS.get(lang, _LATIN_FONTS)):
         if p and Path(p).is_file():
             return str(p)
-    raise FigureTranslateError("한글 글꼴을 찾지 못했습니다 — config.toml의 [figures] font에 글꼴 파일 경로를 적으세요.")
+    key = f"font_{lang}" if lang != "ko" else "font"
+    raise FigureTranslateError(f"{lang} 글꼴을 찾지 못했습니다 — config.toml의 [figures] {key}에 글꼴 파일 경로를 적으세요.")
 
 
 def _bg_color(a, x0: int, y0: int, x1: int, y1: int):  # noqa: ANN001, ANN202 — 상자 둘레의 가장 흔한 색
@@ -563,7 +612,8 @@ def translate(wd: WorkDir, out_name: str, provider, *, ocr=None, link: bool = Tr
     """
     from md4paper.llm.base import Usage, cost_usd
 
-    font = find_font()
+    _require_supported(wd)
+    font = find_font(wd.lang)
     out_name = original_name(wd, out_name)
     src = _source(wd, out_name)
     png = (wd.extract_images / src).read_bytes()
@@ -575,7 +625,7 @@ def translate(wd: WorkDir, out_name: str, provider, *, ocr=None, link: bool = Tr
         cost = cost_usd(provider.model, Usage(input_tokens=provider.usage.input_tokens - u0[0],
                                               output_tokens=provider.usage.output_tokens - u0[1]))
         _align(lines)
-    rec = {"out": out_name, "ko": ko_name(out_name), "src_digest": _digest(png), "kind": kind,
+    rec = {"out": out_name, "ko": ko_name(out_name, wd.lang), "src_digest": _digest(png), "kind": kind,
            "lines": lines, "model": f"{getattr(provider, 'name', '')}/{provider.model}",
            "cost_usd": round(cost, 6), "at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     with _LOCK:
@@ -590,7 +640,7 @@ def translate(wd: WorkDir, out_name: str, provider, *, ocr=None, link: bool = Tr
 
 def edit(wd: WorkDir, out_name: str, edits: dict) -> dict:
     """한국어를 고쳐 다시 그린다 (LLM 없음). edits = {줄 id: 한국어} — 빈 글이면 그 줄은 원문 그대로."""
-    font = find_font()
+    font = find_font(wd.lang)
     with _LOCK:
         src, rec = _rec_for(wd, out_name)
         if rec is None:
@@ -636,7 +686,7 @@ def info(wd: WorkDir, out_name: str) -> dict:
     name = original_name(wd, out_name)
     src, rec = _rec_for(wd, name)
     if rec is None:
-        return {"name": name, "ko": ko_name(name), "has": False, "record": False}
+        return {"name": name, "ko": ko_name(name, wd.lang), "has": False, "record": False}
     st = stale(wd, src, rec)
     return {"name": name, "ko": rec.get("ko"), "record": True,
             "has": bool(rec.get("translated")) and (wd.out_images / rec.get("ko", "")).is_file() and not st,
@@ -677,6 +727,7 @@ def translate_many(wd: WorkDir, provider, names: list[str] | None = None,  # noq
 
     반환 {done(번역 그림 만든 수), empty(번역할 글자 없음), failed{이름: 까닭}, cost_usd}.
     """
+    _require_supported(wd)
     names = todo(wd) if names is None else names
     out = {"done": 0, "empty": 0, "failed": {}, "cost_usd": 0.0, "total": len(names)}
     for i, n in enumerate(names):

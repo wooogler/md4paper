@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 
-from md4paper import config, formula_fix, library, projects
+from md4paper import config, formula_fix, i18n, langs, library, projects
 from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
@@ -25,11 +25,15 @@ from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIControl
 from md4paper.workdir import WorkDir, left_panel, paper_title, set_left_panel, set_project
 
 # 설명이 붙은 옵션 (값 → 사람이 이해하기 쉬운 라벨)
-_KSTYLE = {"해라체": "해라체 (~한다 · 논문 표준)", "합니다체": "합니다체 (~합니다 · 경어)", "해요체": "해요체 (~해요 · 부드럽게)"}
 # 마크다운 내보내기 형식 — 다운로드 zip에 적용 (설명 없이 이름만)
 _EXPORT_TARGET = {"universal": "범용", "notion": "Notion", "obsidian": "Obsidian"}
-# 목차 제목 언어 — 영어만 / 한국어만 / 둘 다(두 줄)
+# 목차 제목 언어 — 영어만 / 번역만 / 둘 다(두 줄). "ko"의 표시는 논문 번역 언어 이름으로 바꿔 쓴다(_toc_lang_options)
 _TOC_LANG = {"en": "영어", "ko": "한국어", "both": "병기"}
+
+
+def _toc_lang_options(lang: str) -> dict[str, str]:
+    """목차 언어 토글 — 번역 쪽 이름은 논문 번역 언어로 (한국어는 예전 그대로)."""
+    return {**_TOC_LANG, "ko": langs.get(lang).native}
 # AI 서비스 — 비전문가용 이름 + 키 형식 힌트
 _PROVIDER_NAME = {
     "openai": "OpenAI (ChatGPT 계열)",
@@ -1455,7 +1459,7 @@ _IMG_ZOOM_HTML = """
   }
   function altOf(src){        // 번역 그림(figure-3.ko.png, figure_ko.py)은 원본 그림의 설명을 쓴다
     var m = window.__mdFigAlts || {}, f = fileOf(src);
-    return m[f] || m[f.replace(/\\.ko\\.png$/, '.png')] || '';
+    return m[f] || m[f.replace(/\\.[a-z]{2,3}(-[A-Za-z0-9]{2,8})*\\.png$/, '.png')] || '';
   }
   function markAlts(root){
     var imgs = root.querySelectorAll ? root.querySelectorAll('.md-preview img') : [];
@@ -1572,7 +1576,7 @@ _IMG_ZOOM_HTML = """
     var path = imgPath(), fig = new RegExp('^/wdimages/[^/]+/(?!formula-)[^/]+$').test(path);
     box.classList.toggle('can-recrop', !!window.__md4FigRecrop && fig);
     // 그림 속 글자 번역 단추 (figure_ko.py) — 번역 그림(.ko.png)에서 열어도 같은 메뉴
-    box.classList.toggle('can-figko', !!window.__md4FigKoOpen && fig);
+    box.classList.toggle('can-figko', !!window.__md4FigKoOpen && fig && window.__md4FigTrOk !== false);
     if (window.__md4FigKoOpen) window.__md4FigKoOpen(fig ? path : '');
     box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
     layoutFoot();
@@ -3486,7 +3490,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ui.space()
             if has_ko_titles:
                 # 작은 글자 셋만 — 목차의 주인공은 항목이지 이 스위치가 아니다(테두리·배경 없이, 고른 것만 파랗게)
-                ui.toggle(_TOC_LANG, value=mode, on_change=lambda e: set_toc_lang(e.value)) \
+                ui.toggle(_toc_lang_options(ctrl.wd.lang), value=mode, on_change=lambda e: set_toc_lang(e.value)) \
                     .props("flat dense no-caps toggle-color=primary") \
                     .classes("md4-toclang").tooltip("목차 제목을 어느 언어로 보일지")
         with ui.element("div").classes("vtoc"):
@@ -3916,6 +3920,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             else:
                 text_area(solo=True)
         ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")  # 하이라이트 다시 얹기
+        # 번역 언어 — 그림 글자를 그릴 수 없는 언어(이어 쓰는 문자)면 확대 뷰어의 '그림 속 글자 번역' 단추를 숨긴다
+        from md4paper import figure_translate
+
+        # 칸마다 lang — 일·중 한자는 언어에 따라 글자 모양이 달라 브라우저가 그 언어 글꼴을 고르게 한다
+        ui.run_javascript(f"window.__md4TrLang = {json.dumps(ctrl.wd.lang)}; "
+                          f"window.__md4FigTrOk = {json.dumps(figure_translate.supported(ctrl.wd.lang))}; "
+                          "setTimeout(function(){ document.querySelectorAll('[data-side=ko],[data-side=en]')"
+                          ".forEach(function(c){ c.lang = c.getAttribute('data-side') === 'ko' ? "
+                          "window.__md4TrLang : 'en'; }); }, 0)")
         place = viewer_state.pop("_place", None)  # 편집기에서 보던 자리 → 그리드의 같은 행·같은 비율
         if place and (show_en or show_ko):
             ui.run_javascript(_RESTORE_JS % json.dumps({"row": str(place[0]), "f": place[1], "off": 0, "ratio": 0}))
@@ -4077,7 +4090,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             with ui.button("내보내기", icon="download").props("flat dense no-caps color=primary"):
                 with ui.menu().props("anchor='bottom right' self='top right'").classes("md4-exportmenu"):
                     ui.menu_item("영어 마크다운 (zip)", on_click=download_en)
-                    item_ko = ui.menu_item("한국어 마크다운 (zip)", on_click=download_ko)
+                    item_ko = ui.menu_item(f"번역 마크다운 · {langs.get(ctrl.wd.lang).native} (zip)",
+                                           on_click=download_ko)
                     if not has_ko:
                         item_ko.disable()
                     ui.menu_item("하이라이트·메모 (md)", on_click=download_notes)
@@ -4574,7 +4588,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.button(icon="close", on_click=gloss_dialog.close).props("flat dense round")
             ui.markdown(
                 "변환할 때 **Abstract·Introduction 본문과 모든 섹션 제목**에서 핵심 용어를 자동으로 뽑아 만듭니다. "
-                "번역 전에 한국어 표기와 처리 방식(번역 / 음역 / 원문 유지 / 첫 등장 시 병기)을 검토·수정하세요. "
+                "번역 전에 번역어와 처리 방식(번역 / 음역 / 원문 유지 / 첫 등장 시 병기)을 검토·수정하세요. "
                 "고친 내용은 바로 저장됩니다.\n\n"
                 "컬렉션 용어집의 항목은 여기서 못 고칩니다 — 컬렉션 용어집에서 고치면 주 컬렉션이 그 컬렉션인 논문 전체에 적용됩니다."
             ).classes("text-xs text-gray-600")
@@ -4836,7 +4850,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.icon(icon, size="20px")
                 ui.label(label)
             b.on("click", lambda _, k=key: set_panel(k))
-            b.tooltip({"toc": "목차 — 섹션으로 이동 (원문·한국어 제목)",
+            b.tooltip({"toc": "목차 — 섹션으로 이동 (원문·번역 제목)",
                        "structure": "구조 — 헤더 레벨·섹션 트리·레이아웃 수정·다시 변환",
                        "translate": "번역 — 번역할 섹션·용어집·실행",
                        "settings": "설정 — 인용 표기·캡션·저자",
@@ -5030,15 +5044,20 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         def translate_method_panel() -> None:
             with ui.expansion("번역 방식 (문체·범위)", icon="tune").classes("w-full").props("dense"):
-                ui.select(_KSTYLE, value=m.korean_style if m.korean_style in _KSTYLE else "해라체",
-                          label="한국어 문체",
+                lang = ctrl.wd.lang
+                opts = langs.style_options(lang)
+                cur = langs.fit_style(lang, m.korean_style, config.resolve_style(lang))  # 다른 언어 문체가 남았으면
+                if cur not in opts:  # custom:"…" — 목록에 넣어 둬야 값이 지워지지 않는다
+                    opts = {**opts, cur: cur}
+                ui.select(opts, value=cur, label=f"번역 문체 · {langs.get(lang).native}",
                           on_change=lambda e: set_tsetting("korean_style", e.value)).props("dense outlined").classes("w-full")
-                cap("문장 끝맺음 말투. 논문은 보통 해라체(~한다)를 씁니다.")
+                cap("문장 끝맺음 말투. 논문은 보통 해라체(~한다)를 씁니다." if lang == "ko" else
+                    f"번역 언어는 {langs.get(lang).native}입니다 — 설정 › 변환·번역에서 새 논문의 언어를 바꿉니다.")
                 if ctrl.title_section() is not None:
                     ui.switch("논문 제목도 번역", value=ctrl.translate_title(),
                               on_change=lambda e: (ctrl.set_translate_title(e.value), ctrl.save()))
                     cap("문서 맨 위 논문 제목 한 줄. 끄면 영어 원제를 그대로 둡니다.")
-                ui.switch("섹션 제목도 한국어로 번역", value=m.translate_headers,
+                ui.switch("섹션 제목도 번역", value=m.translate_headers,
                           on_change=lambda e: set_tsetting("translate_headers", e.value))
                 cap("끄면 헤더(3.1 Method 등)는 영어 그대로 두고 본문만 번역합니다.")
                 ui.switch("참고문헌 목록도 번역", value=m.translate_references,
@@ -6205,7 +6224,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     @ui.page("/home")
     @ui.page("/review")
     def shell() -> None:
-        ui.add_head_html(spa.HEAD_HTML + _PREPAINT_HTML)
+        ui.add_head_html(spa.HEAD_HTML + _PREPAINT_HTML + i18n.head_html())  # 화면 언어 카탈로그(md4T)
         spa.make_header()
         # 에이전트 창 — 셸에 붙어 화면을 갈아 끼워도 대화가 남는다. 하위 화면보다 **먼저** 넣어야
         # 첫 화면(뷰어·홈)이 부르는 setPaper가 이미 떠 있는 창에 닿는다.
@@ -6242,5 +6261,6 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
     else:
         print(f"md4paper UI: http://127.0.0.1:{port}  (Ctrl+C로 종료)")
     ui.run(host="127.0.0.1", port=port, show=show and not native, reload=False, title="md4paper",
+           language=i18n.quasar_language(),  # Quasar 내장 문구(표·날짜 선택기)도 화면 언어로
            favicon=str(desktop.ICON) if desktop.ICON.is_file() else None,
            native=native, window_size=(1440, 900) if native else None)

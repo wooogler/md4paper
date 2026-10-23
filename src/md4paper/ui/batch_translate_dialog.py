@@ -112,7 +112,7 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
         if p.get("figures"):
             ui.checkbox(f"그림 속 글자도 번역 — 그림 {p['figures']}개 {_money(p.get('cost_figures', 0.0))}",
                         value=st["figures"], on_change=lambda e: (st.update(figures=e.value), body.refresh())) \
-                .props("dense").tooltip("본문 번역 뒤 축 라벨·범례·상자 글자를 한국어로 바꾼 그림을 만듭니다 "
+                .props("dense").tooltip("본문 번역 뒤 축 라벨·범례·상자 글자를 번역 언어로 바꾼 그림을 만듭니다 "
                                         "(그림 한 장에 AI 한 번, 몇 초~수십 초). 그림의 선·막대·숫자는 그대로 — "
                                         "AI는 글자 번역만 정하고 그림은 원본에서 그 자리만 고쳐 그립니다.")
         manual = [t for t in targets() if t.get("manual_ko")]

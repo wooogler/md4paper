@@ -139,6 +139,31 @@ def workspace(path: Path | None) -> None:
     click.echo(f"작업 폴더 설정됨: {config.resolve_workspace()}")
 
 
+@cli.command("language")
+@click.argument("code", required=False)
+@click.option("--style", default=None, help="이 언어의 기본 문체 (프리셋 이름 또는 custom:\"...\")")
+def language_cmd(code: str | None, style: str | None) -> None:
+    """번역 언어(모국어) 조회/설정 — 새 논문을 이 언어로 번역한다 (예: ko, ja, zh-Hans, es)."""
+    from md4paper import langs
+
+    if code is None:
+        cur = config.resolve_target_lang()
+        click.echo(f"번역 언어: {cur} ({langs.get(cur).native}) · 기본 문체: {config.resolve_style(cur)}")
+        for c in langs.presets():
+            click.echo(f"  {c:8s} {langs.get(c).native} — 문체: {' | '.join(langs.style_names(c))}")
+        click.echo("다른 언어도 코드로 됩니다 (문체는 학술체 하나 + custom:\"...\").")
+        click.echo("변경: md4paper language ja   ·   이미 번역한 논문은 자기 언어를 지킵니다 (translate --lang으로 바꿈)")
+        return
+    try:
+        lang = langs.normalize(code)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    config.set_section_value("translate", "target_lang", lang)
+    if style is not None:
+        config.set_section_value("translate", config.style_key(lang), style)
+    click.echo(f"번역 언어 설정됨: {lang} ({langs.get(lang).native}) · 기본 문체: {config.resolve_style(lang)}")
+
+
 # --- project --------------------------------------------------------------
 
 # 폴더 하나를 정하면 그 안에 자리가 잡힌다 — 어디로 가는지 보여줄 때 쓰는 라벨.
@@ -1195,12 +1220,13 @@ def cite(workdir: Path, style: str | None, no_links: bool, provider: str | None,
 @click.argument("workdir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--provider", type=click.Choice(config.PROVIDERS), default=None)
 @click.option("--model", default=None)
-def glossary(workdir: Path, provider: str | None, model: str | None) -> None:
+@click.option("--lang", default=None, help="번역 언어로 바꿔서 (예: ja, zh-Hans, es); 기본은 논문의 지금 언어")
+def glossary(workdir: Path, provider: str | None, model: str | None, lang: str | None) -> None:
     """번역 전 용어집 자동 생성 (검토·수정용). 웹 UI 검토 흐름의 CLI 버전."""
     wd = WorkDir(workdir)
     try:
         prov = config.build_provider(provider, model)
-        n = pipeline.run_glossary(wd, prov, regenerate=True)
+        n = pipeline.run_glossary(wd, prov, regenerate=True, lang=lang)
     except Exception as e:  # noqa: BLE001
         raise click.ClickException(str(e)) from e
     click.echo(f"용어집 {n}개 생성 → {wd.glossary_yaml}")
@@ -1211,16 +1237,23 @@ def glossary(workdir: Path, provider: str | None, model: str | None) -> None:
 @click.argument("workdir", type=click.Path(exists=True, file_okay=False, path_type=Path))
 @click.option("--provider", type=click.Choice(config.PROVIDERS), default=None)
 @click.option("--model", default=None)
-@click.option("--style", "korean_style", default=None, help="문체 override (해라체|합니다체|해요체|custom:...); 기본은 manifest 값")
+@click.option("--style", "korean_style", default=None,
+              help="문체 override (한국어: 해라체|합니다체|해요체, 다른 언어는 `md4paper language`; custom:...); 기본은 manifest 값")
+@click.option("--lang", default=None,
+              help="번역 언어를 바꿔서 번역 (예: ja, zh-Hans, es); 기본은 논문의 지금 언어(새 논문은 `md4paper language`)")
 @click.option("--yes", is_flag=True, help="용어집 편집 단계 건너뛰기")
 def translate(
-    workdir: Path, provider: str | None, model: str | None, korean_style: str | None, yes: bool
+    workdir: Path, provider: str | None, model: str | None, korean_style: str | None, lang: str | None, yes: bool
 ) -> None:
-    """한국어 번역 → paper.ko.md (Abstract 컨텍스트 주입, 구조 검증)."""
+    """번역 → paper.<언어>.md (한국어는 paper.ko.md; Abstract 컨텍스트 주입, 구조 검증)."""
+    from md4paper import langs
+
     wd = WorkDir(workdir)
     try:
         prov = config.build_provider(provider, model)
-    except RuntimeError as e:
+        if lang:
+            wd.set_lang(langs.normalize(lang))  # 용어집 경로가 언어를 따르므로 먼저 바꾼다
+    except (RuntimeError, ValueError) as e:
         raise click.ClickException(str(e)) from e
 
     # 용어집 생성 → 검토/수정 → 번역 (웹 UI가 이 흐름을 그대로 얹는다)

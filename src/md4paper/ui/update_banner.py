@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 
 from md4paper import updater
+from md4paper.i18n import t
 from md4paper.ui import jobs
 
 _CSS = """
@@ -47,15 +48,15 @@ def apply(state: dict) -> None:
     from nicegui import app, ui
 
     if list(jobs.running()) or state.get("queue"):
-        ui.notify("진행 중인 변환·번역이 끝난 뒤에 업데이트하세요.", type="warning")
+        ui.notify(t("진행 중인 변환·번역이 끝난 뒤에 업데이트하세요."), type="warning")
         return
     try:
         log = updater.spawn_update(state["update_src"])
     except Exception as e:  # noqa: BLE001
-        ui.notify(f"업데이트를 시작하지 못했습니다: {e}", type="negative")
+        ui.notify(t("업데이트를 시작하지 못했습니다: {e}", e=e), type="negative")
         return
     print(f"업데이트 시작 — 로그: {log}")
-    ui.notify("업데이트를 받는 중입니다. 앱이 잠시 닫혔다가 다시 열립니다.", type="info")
+    ui.notify(t("업데이트를 받는 중입니다. 앱이 잠시 닫혔다가 다시 열립니다."), type="info")
     ui.timer(1.2, app.shutdown, once=True)
 
 
@@ -79,12 +80,12 @@ def version_line(state: dict) -> None:
         if state.get("update_src") is None:
             return ""  # 개발본·pip 설치본 — 검사하지 않는다
         if upd is None:
-            return "업데이트 확인 중…"
+            return t("업데이트 확인 중…")
         if upd and state.get("update_skipped"):
             return "skipped"
         if upd:
             return None  # 버튼으로 그린다
-        return "업데이트 확인 실패 (오프라인?)" if state.get("update_error") else "최신 버전"
+        return t("업데이트 확인 실패 (오프라인?)") if state.get("update_error") else t("최신 버전")
 
     shown = {"sig": None}
 
@@ -105,13 +106,13 @@ def version_line(state: dict) -> None:
             ui.label(state["version_label"])
             st = status()
             if st == "skipped":
-                ui.label(f"· 새 버전 {state['update'].latest[:7]} 건너뜀")
-                ui.button("알림 다시 켜기", on_click=unskip).props("flat dense no-caps size=sm color=grey-7")
+                ui.label(t("· 새 버전 {v} 건너뜀", v=state['update'].latest[:7]))
+                ui.button(t("알림 다시 켜기"), on_click=unskip).props("flat dense no-caps size=sm color=grey-7")
             elif st:
                 ui.label(f"· {st}")
             elif st is None:
                 n = state["update"].ahead
-                ui.button(f"새 버전 있음{f' ({n}개 변경)' if n else ''} — 업데이트",
+                ui.button(t("새 버전 있음 ({n}개 변경) — 업데이트", n=n) if n else t("새 버전 있음 — 업데이트"),
                           icon="system_update", on_click=lambda: apply(state)) \
                     .props("flat dense no-caps size=sm color=indigo")
 
@@ -140,19 +141,19 @@ def install(state: dict) -> None:
             return
         box.classes("md4-update")
         with box:
-            n = f" ({upd.ahead}개 변경)" if upd.ahead else ""
-            ui.label(f"새 버전이 있습니다{n}").classes("font-bold")
+            ui.label(t("새 버전이 있습니다 ({n}개 변경)", n=upd.ahead) if upd.ahead else t("새 버전이 있습니다")) \
+                .classes("font-bold")
             if upd.messages:
                 with ui.element("ul"):
                     for m in upd.messages[:8]:
                         with ui.element("li"):
                             ui.label(m)
             with ui.row().classes("justify-end gap-1 mt-2 w-full"):
-                ui.button("이 버전 건너뛰기", on_click=lambda: (skip(state), dismiss())) \
+                ui.button(t("이 버전 건너뛰기"), on_click=lambda: (skip(state), dismiss())) \
                     .props("flat dense no-caps color=grey-7") \
-                    .tooltip("GitHub에 더 새 버전이 올라올 때까지 알리지 않습니다")
-                ui.button("나중에", on_click=dismiss).props("flat dense no-caps")
-                ui.button("업데이트하고 다시 시작", icon="system_update", on_click=lambda: apply(state)) \
+                    .tooltip(t("GitHub에 더 새 버전이 올라올 때까지 알리지 않습니다"))
+                ui.button(t("나중에"), on_click=dismiss).props("flat dense no-caps")
+                ui.button(t("업데이트하고 다시 시작"), icon="system_update", on_click=lambda: apply(state)) \
                     .props("dense unelevated no-caps color=indigo")
 
     timer = ui.timer(1.0, render)

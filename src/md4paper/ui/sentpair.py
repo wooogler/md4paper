@@ -98,14 +98,16 @@ JS = """
   function sentences(txt, s0, e0){
     var out = [], start = s0, i, r, inBracket = bracketMask(txt, s0, e0);
     for (i = s0; i < e0; i++){
-      if (inBracket[i - s0] || '.!?\\u2026'.indexOf(txt.charAt(i)) < 0) continue;
+      // 일본어·중국어 문장 끝(。！？)은 뒤에 공백 없이 다음 문장이 붙는다 — 약어·소수점 걱정도 없다
+      var cjk = '\\u3002\\uff01\\uff1f'.indexOf(txt.charAt(i)) >= 0;
+      if (inBracket[i - s0] || ('.!?\\u2026'.indexOf(txt.charAt(i)) < 0 && !cjk)) continue;
       var j = i + 1;
-      while (j < e0 && CLOSERS.indexOf(txt.charAt(j)) >= 0) j++;   // 닫는 따옴표·괄호까지 문장에 포함
-      if (j < e0 && !/\\s/.test(txt.charAt(j))) continue;          // 0.5 · 3.1 처럼 붙어 있으면 문장 끝이 아님
+      while (j < e0 && (CLOSERS + '\\u300d\\u300f\\uff09').indexOf(txt.charAt(j)) >= 0) j++;   // 닫는 따옴표·괄호까지 문장에 포함
+      if (!cjk && j < e0 && !/\\s/.test(txt.charAt(j))) continue;  // 0.5 · 3.1 처럼 붙어 있으면 문장 끝이 아님
       var head = txt.slice(start, i + 1);
-      if (ABBR.test(head) || /(^|[\\s(\\[])[A-Z]\\.$/.test(head)) continue;
+      if (!cjk && (ABBR.test(head) || /(^|[\\s(\\[])[A-Z]\\.$/.test(head))) continue;
       var k = j; while (k < e0 && /\\s/.test(txt.charAt(k))) k++;
-      if (k < e0 && /[a-z,;]/.test(txt.charAt(k))) continue;       // 소문자로 이어지면 아직 한 문장
+      if (!cjk && k < e0 && /[a-z,;]/.test(txt.charAt(k))) continue;  // 소문자로 이어지면 아직 한 문장
       r = trimRange(txt, start, j); if (r) out.push(r);
       start = k; i = k - 1;
     }

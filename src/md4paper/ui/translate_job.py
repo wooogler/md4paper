@@ -60,9 +60,9 @@ def start(wd: WorkDir, provider, *, title: str = "", style: str | None = None,  
         ctrl = UIController(wd)  # 문을 지난 뒤에 읽는다 — 기다리는 사이 고친 설정·용어집도 따라온다
         summary = ctrl.translate(provider, style, on_progress)
         figs = None
-        if figures:
-            from md4paper import figure_translate
+        from md4paper import figure_translate
 
+        if figures and figure_translate.supported(wd.lang):  # 못 그리는 문자(아랍·태국 …)는 빼고
             job.detail["figures"] = True
             figs = figure_translate.translate_many(wd, provider, on_progress=lambda d, t: job.progress(d, t))
             summary["figures"] = figs
@@ -149,7 +149,7 @@ def plan(roots: list[Path | str], model_for: Callable[[WorkDir], str] | None = N
         choice = pick(wd)
         model = choice.partition("/")[2] or choice
         item["model"] = choice
-        nfig = len(figure_translate.todo(wd))
+        nfig = len(figure_translate.todo(wd)) if figure_translate.supported(wd.lang) else 0  # 못 그리는 문자는 빼고
         item["figures"], item["est_figures_usd"] = nfig, figure_translate.estimate_usd(model, nfig)
         out["figures"] += nfig
         out["cost_figures"] += item["est_figures_usd"]

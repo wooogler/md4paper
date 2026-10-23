@@ -76,7 +76,7 @@ HTML = """
     var m = /^\\/wdimages\\/([^\\/]+)\\/([^\\/?#]+)$/.exec(path || '');
     if (!m || !window.__md4CropOpen) return;
     // 번역 그림(figure-3.ko.png, figure_ko.py)에서 열었으면 원본 그림을 다시 자른다
-    var tok = m[1], name = m[2].replace(/\\.ko\\.png$/, '.png');
+    var tok = m[1], name = m[2].replace(/\\.[a-z]{2,3}(-[A-Za-z0-9]{2,8})*\\.png$/, '.png');
     var base = '/figure/' + tok + '/' + encodeURIComponent(name);
     fetch(base).then(function(r){ if (!r.ok) throw 0; return r.json(); }).then(function(info){
       window.__md4CropOpen({

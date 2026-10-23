@@ -212,24 +212,47 @@ def run_cite(wd, provider, parts=None, reference_links=None, force: bool = False
     return summary
 
 
-def run_glossary(wd, provider, regenerate: bool = True) -> int:
-    """용어집만 생성/갱신 (번역 전 검토용). 항목 수 반환."""
+def _pin_lang(wd, lang) -> str:  # noqa: ANN001
+    """번역 언어를 정해 status.json에 적는다 — lang을 주면 그 언어로 바꾸고, 없으면 지금 언어(`wd.lang`)를 굳힌다.
+
+    용어집·캐시 경로가 언어에 따라 정해지므로 용어집을 만들기 **전에** 적어야 한다. 굳히지 않으면 번역 뒤에
+    사용자가 전역 언어를 바꿨을 때 이 논문이 새 언어 경로를 보게 된다.
+    """
+    from md4paper import langs
+
+    target = langs.normalize(lang) if lang else wd.lang
+    wd.set_lang(target)
+    return target
+
+
+def run_glossary(wd, provider, regenerate: bool = True, lang: str | None = None) -> int:
+    """용어집만 생성/갱신 (번역 전 검토용). 항목 수 반환. lang을 주면 논문의 번역 언어를 그 언어로 바꾼다."""
     from md4paper.translate.apply import run_glossary as _run
 
+    _pin_lang(wd, lang)
     return _run(wd, provider, regenerate=regenerate)
 
 
-def run_translate(wd, provider, korean_style=None, on_progress=None, force: bool = False) -> dict:
-    """Stage 6: 한국어 번역 → paper.ko.md. korean_style None이면 manifest 값(권위 소스)."""
+def run_translate(wd, provider, korean_style=None, on_progress=None, force: bool = False,
+                  lang: str | None = None) -> dict:
+    """Stage 6: 번역 → 번역 md(`wd.ko_md`, 논문 언어). korean_style None이면 manifest 값(권위 소스).
+
+    lang을 주면 논문의 번역 언어를 그 언어로 바꿔 번역한다(옛 언어 파일은 남는다). 문체가 다른 언어의
+    프리셋이면(언어를 바꾼 직후 manifest에 남은 것) 그 언어의 기본 문체로 바꿔 쓴다(`langs.fit_style`).
+    """
+    from md4paper import config, langs
     from md4paper.translate.apply import run_translate as _apply
 
+    lang = _pin_lang(wd, lang)
     manifest = manifest_io.load(wd)
-    style = korean_style or manifest.korean_style
+    style = langs.fit_style(lang, korean_style or manifest.korean_style, config.resolve_style(lang))
     summary = _apply(wd, provider, style, on_progress=on_progress)
     # 실패 이유를 status.json에 남긴다 — 안 남기면 세션이 끝나는 순간 "왜 영어로 남았는지"를
     # 알 방법이 사라진다(실패 청크는 캐시에도 안 들어가므로 사후 재구성이 불가능하다).
     # 어느 모델로 번역했는지도 남긴다 — 재번역 화면이 이걸 기본값으로 띄운다(모르면 매번 전역 기본).
-    wd.mark_done("translate", hash_text(f"{style}:{provider.model}"), style=style,
+    # input_hash는 한국어면 예전 그대로(`recover_translate`가 이 꼴로 옛 기록을 되찾는다)
+    key = f"{style}:{provider.model}" if lang == "ko" else f"{lang}:{style}:{provider.model}"
+    wd.mark_done("translate", hash_text(key), style=style, lang=lang,
                  provider=getattr(provider, "name", ""), model=provider.model,
                  passthrough=summary.get("passthrough", 0), failures=summary.get("failures", {}))
     return summary

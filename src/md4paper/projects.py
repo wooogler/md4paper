@@ -135,10 +135,19 @@ def settings_of(pid: str | None) -> dict:
     return {k: v for k, v in (p.get("settings") or {}).items() if k in SETTINGS} if p else {}
 
 
+def translation_subdir() -> str:
+    """번역 마크다운이 갈 하위 폴더 이름 — 사용자 번역 언어 코드(한국어는 예전 그대로 `ko`)."""
+    from md4paper.config import resolve_target_lang
+
+    return resolve_target_lang()
+
+
 def layout(root) -> dict[str, Path]:  # noqa: ANN001 — Path | str
-    """폴더 하나 → 종류별 자리 {en, ko, pdf}. 프로젝트와 '한 폴더로 정리'가 같이 쓴다."""
+    """폴더 하나 → 종류별 자리 {en, ko, pdf}. 프로젝트와 '한 폴더로 정리'가 같이 쓴다.
+    ko(번역) 자리는 사용자 번역 언어의 폴더(`ja/` 등; 한국어는 `ko/`)."""
     base = Path(str(root)).expanduser()
-    return {k: (base / sub if sub else base) for k, sub in SUBDIR.items()}
+    subs = {**SUBDIR, "ko": translation_subdir()}
+    return {k: (base / sub if sub else base) for k, sub in subs.items()}
 
 
 def ensure_layout(root) -> None:  # noqa: ANN001 — Path | str

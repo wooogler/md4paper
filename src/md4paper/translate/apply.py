@@ -13,6 +13,9 @@ paper.en.md(cite 후면 최종 인용 형태 반영) → paper.ko.md. 섹션을 
 `hash_text(source)`라 옛 캐시 항목과 같다. 옛 캐시 — v2(문서 키에 용어집 블록), v1(문서 키가 시스템
 프롬프트 전체의 해시; 실데이터 번역 대부분이 이것) — 는 `_load_cache`가 한 번 읽어 옮긴다. 논문
 용어집을 고치면 옛 키가 더는 안 맞으므로, 저장 전에 `migrate_cache`가 미리 v3로 옮겨 둔다.
+
+**번역 언어**: 논문의 언어(`wd.lang`)로 번역하고, 캐시·용어집 파일도 그 언어 것(`wd.cache_json` 등)을 쓴다.
+한국어 키는 예전 그대로(`v3|문체|…`)이고 다른 언어는 `v3|<lang>|문체|…`. 옛 v1·v2 캐시는 한국어에만 있다.
 """
 
 from __future__ import annotations
@@ -282,7 +285,7 @@ def _key_tail(model: str, manifest: Manifest) -> str:
 
 
 def _cache_keys(korean_style: str, paper_gloss: GlossaryList, model: str,
-                manifest: Manifest) -> tuple[str, str]:
+                manifest: Manifest, lang: str = "ko") -> tuple[str, str]:
     """(v3 키, 옛 v2 키). 캐시는 문체·모델·헤더/참고문헌 번역 여부가 같을 때만 재사용한다.
 
     용어집은 v3 키에서 뺐다 — 유닛 해시가 맡는다(모듈 docstring). 옛 v2 키(용어집 블록 전체 포함)는
@@ -292,6 +295,9 @@ def _cache_keys(korean_style: str, paper_gloss: GlossaryList, model: str,
     유지'도 함께 무너진다. 더 옛 v1 키까지 함께 맞춰 보려면 `_legacy_keys`.
     """
     tail = _key_tail(model, manifest)
+    if lang != "ko":  # 옛 v2는 한국어에만 있었다 — 둘째 값은 쓰이지 않는다
+        key = hash_text(f"v3|{lang}|{korean_style}|{tail}")
+        return key, key
     return (hash_text(f"v3|{korean_style}|{tail}"),
             hash_text(f"v2|{korean_style}|{engine._glossary_block(paper_gloss)}|{tail}"))
 
@@ -310,7 +316,10 @@ def _legacy_keys(wd: WorkDir, manifest: Manifest, korean_style: str, paper_gloss
 
     **v1 키는 지금의 `engine.build_system_prompt` 문구로 만든다** — 그 문구를 바꾸면 v1 캐시를 가진 논문이
     전부 재번역된다. golden 테스트(`test_v1_legacy_key_is_golden`)가 이를 지킨다.
+    한국어 밖 언어는 옛 키가 없다(빈 집합).
     """
+    if wd.lang != "ko":
+        return set()
     keys = {_cache_keys(korean_style, paper_gloss, model, manifest)[1]}
     try:
         title, abstract = context.title_abstract(wd, manifest)
@@ -524,7 +533,7 @@ def run_translate(
     wd: WorkDir, provider: Provider, korean_style: str, on_progress=None, workers: int | None = None,
     keep_cached: bool = True,
 ) -> dict:
-    """번역 실행 → paper.ko.md. 섹션 단위 병렬. on_progress(done, total, status)로 진행 보고.
+    """번역 실행 → 번역 md(`wd.ko_md`, 논문 언어). 섹션 단위 병렬. on_progress(done, total, status)로 진행 보고.
 
     status: {section_id: 'translating'|'done'|'passthrough'} — 섹션별 진행을 UI에 표시.
     keep_cached: 번역 대상에서 뺀(체크 해제) 섹션이라도 캐시에 같은 원문의 번역이 있으면 그대로 둔다.
@@ -535,6 +544,7 @@ def run_translate(
         raise TranslateError(f"paper.en.md 없음: {wd.en_md}. 먼저 convert를 실행하세요.")
 
     manifest = manifest_io.load(wd)
+    lang = wd.lang  # 번역 언어 — 언어를 바꿔 번역하려면 호출자(pipeline)가 먼저 wd.set_lang
     protect_headings = not manifest.translate_headers
     title, abstract = context.extract_context(wd, manifest)  # 초록은 청크마다 주입되는 문서 컨텍스트
     paper_gloss = glossary.ensure(provider, wd, title, context.extract_glossary_source(wd, manifest))
@@ -542,9 +552,9 @@ def run_translate(
     section_map = json.loads(wd.sections_map.read_text(encoding="utf-8")).get("sections", []) \
         if wd.sections_map.exists() else []
     outline = _build_outline(section_map)
-    system_prompt = engine.build_system_prompt(korean_style, gloss, title, abstract, outline)
+    system_prompt = engine.build_system_prompt(korean_style, gloss, title, abstract, outline, lang=lang)
 
-    cache_key, _v2 = _cache_keys(korean_style, paper_gloss, provider.model, manifest)
+    cache_key, _v2 = _cache_keys(korean_style, paper_gloss, provider.model, manifest, lang)
     cache = _load_cache(wd, v3_key=cache_key, paper_gloss=paper_gloss, eff_gloss=gloss,
                         legacy_keys=_legacy_keys(wd, manifest, korean_style, paper_gloss, provider.model))
 
@@ -590,7 +600,7 @@ def run_translate(
         else:
             translated, st, problems = engine.translate_with_retry(
                 provider, system_prompt, u["source"],
-                protect_headings=protect_headings, context_tail=u.get("context_tail", ""),
+                protect_headings=protect_headings, context_tail=u.get("context_tail", ""), lang=lang,
             )
         with lock:
             counts[st] += 1
