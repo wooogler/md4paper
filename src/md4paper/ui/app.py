@@ -17,7 +17,8 @@ from md4paper import config, formula_fix, library, projects
 from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
-    agent_panel, annotations, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, mdrender, reanchor,
+    agent_panel, annotations, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, live_preview, mdrender,
+    reanchor,
     scroll_memory, sentpair, spa, tabstore, term_examples, translate_job, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
@@ -1785,6 +1786,12 @@ def notes_editor_js(el_id: str, md: str) -> str:
     )
 
 
+def _live_preview_on() -> bool:
+    """편집기 '서식 보기'(라이브 프리뷰)를 켤지 — 전역 설정 [ui].md_live_preview, 기본 켜짐."""
+    v = config.load_config().get("ui", {}).get("md_live_preview", True)
+    return v if isinstance(v, bool) else True
+
+
 def notes_event_text(args: object, el_id: str) -> str | None:
     """'md4-notes' 이벤트 인자에서 저장할 마크다운을 꺼낸다 — 이 편집기(el_id)가 보낸 것만.
 
@@ -2827,6 +2834,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                     .tooltip("클릭하면 마크다운의 이 섹션으로 이동")
 
     spa.add_css(_PREVIEW_CSS)
+    spa.add_css(live_preview.CSS)  # 편집기 라이브 프리뷰(기호 숨기기·헤더·그림·표·수식)
     # 인용·각주 호버 툴팁: 맵 주입 → 툴팁 요소/스크립트 (같은 툴팁 UI를 #ref-·#fn- 둘 다 씀)
     spa.add_body_html(f"<script>{cite_tips_js(ctrl.citation_tooltips())}</script>")
     spa.add_body_html(f"<script>{fn_tips_js(ctrl.footnote_tooltips())}</script>")
@@ -2977,7 +2985,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 바뀐 블록만 갈아 끼워야 해서 통째로 다시 짓는 그리드와 성격이 다르다). 끄면 그리드로 돌아간다.
     # lang: 어느 쪽을 고치는지 — 'en'(원문 en.md) | 'ko'(번역 ko.md). 번역문도 같은 편집기로 손본다.
     edit_state: dict = {"on": False, "editor": None, "live": True, "lang": "en",
-                        "pending": None, "timer": None, "status": None}  # pending: (lang, 글) 자동 저장 대기
+                        "pending": None, "timer": None, "status": None,  # pending: (lang, 글) 자동 저장 대기
+                        "lp": _live_preview_on()}  # lp: 서식 보기(라이브 프리뷰) — 전역 설정에 기억
+
+    def set_live_preview(on: bool) -> None:
+        edit_state["lp"] = bool(on)
+        config.set_section_value("ui", "md_live_preview", bool(on))
+        ed = edit_state.get("editor")
+        if ed is not None:  # 다시 그리지 않고 켜고 끄기만 — 커서·스크롤이 그대로
+            ui.run_javascript(live_preview.live_preview_js(ed.id, tok, bool(on)))
 
     def edit_flush() -> None:
         """기다리던 마크다운 편집을 바로 파일에 — 타자가 멈췄을 때, 편집을 끄거나 대상을 바꾸거나 떠날 때."""
@@ -3059,6 +3075,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                           on_change=lambda e: toggle_edit(True, e.value)) \
                     .props("dense no-caps unelevated toggle-color=primary color=grey-3 text-color=grey-8") \
                     .classes("conv-viewtoggle").tooltip("어느 쪽 마크다운을 고칠지")
+            ui.switch("서식 보기", value=edit_state["lp"],
+                      on_change=lambda e: set_live_preview(e.value)).props("dense") \
+                .tooltip("켜면 편집기가 문서처럼 보입니다 — #·** 같은 기호와 링크 주소는 커서가 있는 줄에서만 보이고, "
+                         "그림·표·수식은 그 자리에 그려집니다. 끄면 마크다운 원문 그대로")
             ui.switch("실시간 반영", value=edit_state["live"],
                       on_change=lambda e: edit_state.update(live=e.value)).props("dense") \
                 .tooltip("끄면 프리뷰는 입력을 멈춰 자동 저장될 때만 갱신됩니다 (긴 문서에서 가볍게)")
@@ -3147,6 +3167,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             language="Markdown", line_wrapping=True, on_change=on_type,
         ).classes("w-full cm-en-editor").style("height:100%")
         edit_state["editor"] = editor
+        # 코드 편집기처럼 보이지 않게 — 글자는 그대로 두고 기호를 숨겨 문서처럼 보인다(§ui/live_preview.py)
+        ui.run_javascript(live_preview.live_preview_js(editor.id, tok, edit_state["lp"]))
 
         def revert() -> None:
             edit_state["pending"] = None  # 되돌리면 기다리던 편집은 버린다
@@ -5816,6 +5838,10 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         if cur is None:
             raise HTTPException(status_code=404)
         return {"items": annotations.load(cur)}
+
+    @fastapi_app.post("/md4math")
+    def _md4math(body: dict):  # noqa: ANN202 — 편집기 라이브 프리뷰의 수식 → MathML (§ui/live_preview.py)
+        return {"items": live_preview.mathml(body.get("tex"))}
 
     @fastapi_app.post("/annotations/{token}")
     def _put_annotations(token: str, body: dict):  # noqa: ANN202 — 뷰어에서 되저장
