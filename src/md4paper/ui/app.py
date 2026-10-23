@@ -3327,8 +3327,32 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def _sec_scroll_js(sid: str) -> str:  # 폴백 패널 — sec 앵커로 스크롤
         return f"document.getElementById('sec-{sid}')?.scrollIntoView({{behavior:'smooth', block:'start'}})"
 
+    def _edit_goto_js(sid: str) -> str:
+        """편집 중 섹션 이동 — 편집기를 그 섹션 헤더 줄로(커서도 그리로), 옆이 PDF면 그 쪽으로도.
+
+        섹션 맵에서 그 섹션이 몇 번째 헤더인지 세고, 편집기 문서의 헤더 줄(코드펜스 밖 `#`)을 같은 순서로 센다 —
+        직접 편집으로 줄 번호가 밀려도 헤더 순서는 그대로라서. 번역문도 원문과 헤더 순서가 같다(align_rows와 같은 가정).
+        옆이 미리보기면 편집기 스크롤에 미리보기가 따라온다(_md_sync_js)."""
+        ed = edit_state.get("editor")
+        ids = [e["id"] for e in layout_rows()["smap"]]
+        if ed is None or sid not in ids:
+            return ""
+        js = ("(function(id,k){var h=(typeof getElement==='function')?getElement(id):null,v=h&&h.editor;if(!v)return;"
+              "var d=v.state.doc,f=false,c=-1;for(var n=1;n<=d.lines;n++){var t=d.line(n).text;"
+              "if(/^\\s*(```|~~~)/.test(t)){f=!f;continue;}"
+              "if(!f&&/^#{1,6}\\s/.test(t)&&++c===k){var p=d.line(n).from;"
+              "v.dispatch({selection:{anchor:p},effects:v.constructor.scrollIntoView(p,{y:'start',yMargin:8})});"
+              "v.focus();return;}}})(%d,%d);" % (ed.id, ids.index(sid)))
+        pg = _sec_page0(sid)
+        if edit_side() == "pdf" and pg is not None:
+            js += f"document.getElementById('pdfpage-{pg}')?.scrollIntoView({{behavior:'instant', block:'start'}});"
+        return js
+
     def _toc_js(k: int) -> str:
-        """목차 항목 클릭 — 그리드의 그 행으로, PDF가 켜져 있으면 그 쪽으로도."""
+        """목차 항목 클릭 — 그리드의 그 행으로, PDF가 켜져 있으면 그 쪽으로도. 편집 중이면 편집기의 그 헤더로."""
+        if edit_state["on"]:
+            sid = layout_rows()["row_sid"].get(k)
+            return _edit_goto_js(sid) if sid else ""
         page0 = layout_rows()["row_page0"].get(k)
         js = _row_scroll_js(k)
         if viewer_state["pdf"] and ctrl.pdf_page_count() > 0 and page0 is not None:
@@ -4550,8 +4574,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     async def goto_md(sid: str) -> None:
         """섹션 클릭(구조 패널) → 캔버스의 그 섹션으로.
 
-        읽기 모드면 정렬 그리드의 그 행으로(PDF가 켜져 있으면 그 쪽으로도), 편집 모드면 프리뷰의
-        헤더 앵커로 + 에디터도 같은 소스 줄로. 텍스트가 꺼지고 PDF만 켜져 있으면 PDF의 해당 쪽으로.
+        읽기 모드면 정렬 그리드의 그 행으로(PDF가 켜져 있으면 그 쪽으로도), 편집 모드면 편집기의 그 헤더
+        줄로(옆 칸이 따라온다). 텍스트가 꺼지고 PDF만 켜져 있으면 PDF의 해당 쪽으로.
         임의로 다른 패널을 열지 않는다.
         """
         has_pdf = ctrl.pdf_page_count() > 0
@@ -4559,16 +4583,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         show_pdf = viewer_state["pdf"] and has_pdf
         pg = _sec_page0(sid)
         if edit_state["on"]:
-            if edit_state["lang"] != "en":
-                ui.notify("번역 편집 중에는 섹션 이동이 원문 기준으로만 됩니다 — 대상을 '원문'으로 바꿔 주세요.",
-                          type="info")
+            # 편집을 끄지 않는다 — 입력 맥락을 끊지 않는다. 편집기를 그 헤더로 옮기면 옆 칸(PDF·미리보기)이 따라온다.
+            # 예전엔 미리보기의 sec- 앵커로 옮겼는데, 옆이 PDF면 앵커가 없어 아무 일도 일어나지 않았다.
+            js = _edit_goto_js(sid)
+            if not js:
+                ui.notify("이 섹션은 지금 문서에 헤더로 남아 있지 않습니다.", type="info")
                 return
-            # 편집 중이어도 프리뷰가 나란히 살아 있으므로 편집을 끄지 않는다 — 입력 맥락을 끊지 않는 것이
-            # 분할 뷰의 순이익이다. 대신 에디터도 같은 소스 줄로 옮긴다(revealEditor).
-            js = f"document.getElementById('sec-{sid}')?.scrollIntoView({{behavior:'instant', block:'start'}});"
-            ln = next((e["out_line"] for e in ctrl.section_map() if e.get("id") == sid), None)
-            if isinstance(ln, int):
-                js += f" window.__mdsync && window.__mdsync.revealEditor({max(ln - 1, 0)});"
             await ui.run_javascript(js)
             return
         js = ""
