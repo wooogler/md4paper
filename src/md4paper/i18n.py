@@ -11,6 +11,7 @@
 f-string은 원문이 매번 달라 키가 안 되므로 `t("…{n}…", n=…)` 꼴로 바꿔 감싼다.
 
 **JS 문구**는 셸 페이지 head에 실린 `window.md4T(문구, {이름: 값})`로 — 같은 카탈로그를 쓴다(`head_html`).
+**HTML 덩어리**(모듈 상수)의 문구는 `⦃문구⦄`로 표시하고 넣는 자리에서 `html(상수)`.
 
 **카탈로그 관리**는 `tools/i18n_catalog.py`: 코드의 `t("…")`·`md4T('…')` 리터럴을 모아 카탈로그에 빈 항목을
 더하고 안 쓰는 항목을 알린다. 다른 세션들이 같은 파일을 고치고 있어 문구는 파일 하나씩 옮긴다.
@@ -103,6 +104,20 @@ def t(msg: str, /, **kw: object) -> str:
         return msg.format(**kw)  # 번역문의 자리표시가 틀렸으면 원문으로 — 화면이 깨지는 것보다 낫다
 
 
+_HTML_MARK = re.compile(r"⦃([^⦃⦄]+)⦄")
+
+
+def html(code: str) -> str:
+    """HTML·스크립트 덩어리(모듈 상수) 안의 `⦃문구⦄`를 화면 언어 문구로 — 속성·본문에 넣으므로 HTML 이스케이프한다.
+
+    모듈 상수는 import 때 정해져 t()를 못 부르므로, 상수에는 표시만 해 두고 페이지에 넣는 자리에서 이 함수를 거친다.
+    JS 문자열 리터럴 안의 문구는 이것 대신 `md4T('…')`(실행 때 번역)."""
+    from html import escape
+
+    cat = catalog()
+    return _HTML_MARK.sub(lambda m: escape(cat.get(m.group(1), m.group(1)), quote=True), code)
+
+
 def N_(msg: str) -> str:  # noqa: N802 — gettext 관례 이름
     """번역할 문구라고 표시만 한다(그대로 돌려준다) — 모듈 상수처럼 import 때 정해지는 문구는 화면 언어를 바꿔도
     따라가지 못하므로, 상수에는 `N_("…")`로 표시해 카탈로그에 올리고 쓰는 자리에서 `t(상수)`로 옮긴다."""
@@ -160,6 +175,9 @@ def collect(root: Path | None = None) -> dict[str, list[str]]:
         if path.name == "i18n.py":
             continue
         text = path.read_text(encoding="utf-8")
+        for m in _HTML_MARK.finditer(text):
+            line = text.count("\n", 0, m.start()) + 1
+            found.setdefault(m.group(1), []).append(f"{path.relative_to(root.parent)}:{line}")
         for rx in (_PY_CALL, _JS_CALL):
             for m in rx.finditer(text):
                 s = m.group("s") if rx is _JS_CALL else _unescape(m.group("s"))
