@@ -37,6 +37,7 @@ import json
 import time
 from pathlib import Path
 
+from md4paper.i18n import N_, t
 from md4paper import config, langs, library, projects
 from md4paper.ui import (
     agent_panel, batch_translate_dialog, collection_glossary_dialog, desktop, find_bar, jobs, scroll_memory,
@@ -411,7 +412,7 @@ _ROW_DROP_JS = ("(e) => { e.currentTarget.classList.remove('hot'); const d = e.d
                 "if (r || c) { e.preventDefault(); emit({paper: r || '', coll: c || ''}); } }")
 _STOP_JS = "(e) => e.stopPropagation()"
 
-_SORTS = {"recent": "최근순", "name": "제목순", "year": "연도순", "translated": "번역됨 먼저"}
+_SORTS = {"recent": N_("최근순"), "name": N_("제목순"), "year": N_("연도순"), "translated": N_("번역됨 먼저")}
 _PHASE_ICON = {"pending": "schedule", "extracting": "sync", "cite": "sync", "glossary": "sync",
                "meta": "sync", "bib": "sync", "done": "check_circle", "failed": "error"}
 _AI_PHASES = ("cite", "glossary", "meta")
@@ -461,7 +462,7 @@ def parse_field(key: str, raw) -> object:  # noqa: ANN001
         if not s:
             return None
         if not s.isdigit():
-            raise ValueError("연도는 숫자로 입력하세요 (예: 2024).")
+            raise ValueError(t("연도는 숫자로 입력하세요 (예: 2024)."))
         return int(s)
     if key == "title":
         return " ".join(s.split())
@@ -609,7 +610,7 @@ def build_home(state: dict) -> None:
         selected.intersection_update(data["by_root"])  # 사라진 논문은 선택에서도
 
     def name_of(pid: str) -> str:
-        return data["names"].get(pid, projects.NONE_LABEL)
+        return data["names"].get(pid, t("미분류"))
 
     def live_rows() -> list[dict]:
         """목록에 나올 수 있는 논문 — 아직 큐에서 처리 중인 것은 뺀다.
@@ -710,14 +711,15 @@ def build_home(state: dict) -> None:
         if projects.parent_of(pid, data["projs"]) == parent:
             return
         if not projects.set_parent(pid, parent):
-            ui.notify("자기 자신이나 자기 하위 컬렉션 아래로는 옮길 수 없습니다.", type="warning")
+            ui.notify(t("자기 자신이나 자기 하위 컬렉션 아래로는 옮길 수 없습니다."), type="warning")
             return
         if parent:
             projects.set_collapsed(parent, False)  # 옮긴 자리가 보이게
         load_projects()
         refresh_views()
-        where = f"'{path_of(parent)}' 아래로" if parent else "맨 위로"
-        ui.notify(f"'{name_of(pid)}'을(를) {where} 옮겼습니다", type="positive", timeout=1500)
+        msg = (t("'{v}'을(를) '{parent}' 아래로 옮겼습니다", v=name_of(pid), parent=path_of(parent)) if parent
+               else t("'{v}'을(를) 맨 위로 옮겼습니다", v=name_of(pid)))
+        ui.notify(msg, type="positive", timeout=1500)
 
     def toggle_collapsed(pid: str) -> None:
         cur = next((bool(p.get("collapsed")) for p in data["projs"] if p["id"] == pid), False)
@@ -748,30 +750,30 @@ def build_home(state: dict) -> None:
     def rename_project(pid: str) -> None:
         def save() -> None:
             if not projects.rename(pid, inp.value):
-                ui.notify("이름을 입력하세요.", type="warning")
+                ui.notify(t("이름을 입력하세요."), type="warning")
                 return
             dlg.close()
             load_projects()
             refresh_views()
 
         with host, ui.dialog() as dlg, ui.card().classes("gap-2").style("width:380px"):
-            ui.label("컬렉션 이름 바꾸기").classes("font-bold")
+            ui.label(t("컬렉션 이름 바꾸기")).classes("font-bold")
             inp = ui.input(value=name_of(pid)).props("dense outlined autofocus").classes("w-full")
             inp.on("keydown.enter", save)
             with ui.row().classes("justify-end w-full gap-2"):
-                ui.button("취소", on_click=dlg.close).props("flat")
-                ui.button("저장", on_click=save).props("unelevated no-caps color=primary")
+                ui.button(t("취소"), on_click=dlg.close).props("flat")
+                ui.button(t("저장"), on_click=save).props("unelevated no-caps color=primary")
         dlg.open()
 
     async def pick_project_folder(pid: str) -> None:
         cur = projects.root_of(pid) or ws()
-        picked = await desktop.choose_folder(f"'{name_of(pid)}' 컬렉션 폴더 선택", str(cur))
+        picked = await desktop.choose_folder(t("'{v}' 컬렉션 폴더 선택", v=name_of(pid)), str(cur))
         if not picked:  # 취소면 조용히 원래 값 유지
             return
         projects.set_root(pid, picked)  # ko/·pdf/ 자리까지 만들어 준다
         load_projects()
         refresh_views()
-        ui.notify(f"'{name_of(pid)}' 폴더 → {picked}", type="positive")
+        ui.notify(t("'{v}' 폴더 → {picked}", v=name_of(pid), picked=picked), type="positive")
 
     def confirm_delete_project(pid: str, after=None) -> None:  # noqa: ANN001 — () -> None
         """묶음만 지우고 논문·파일은 남긴다 — 되돌릴 수 없는 건 '소속'뿐이라 그것만 확인받는다.
@@ -788,21 +790,20 @@ def build_home(state: dict) -> None:
             # 논문에서 떼는 일까지 한곳에서(projects.delete) — 다른 프로젝트 소속은 그대로 남는다
             await run.io_bound(projects.delete, pid, ws())
             refresh_views(rescan=True)
-            ui.notify(f"'{name}' 컬렉션을 지웠습니다" + (f" · {n}편에서 소속을 뗐습니다" if n else ""),
+            ui.notify(t("'{name}' 컬렉션을 지웠습니다", name=name) + (t(" · {n}편에서 소속을 뗐습니다", n=n) if n else ""),
                       type="positive")
 
         with host, ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:420px"):
-            ui.label(f"'{name}' 컬렉션을 지울까요?").classes("font-bold")
-            ui.label(f"그 논문 {n}편에서 이 소속만 떼어 냅니다 — 다른 컬렉션 소속과 폴더·파일은 그대로 "
-                     "둡니다.").classes("text-xs text-gray-500")
+            ui.label(t("'{name}' 컬렉션을 지울까요?", name=name)).classes("font-bold")
+            ui.label(t("그 논문 {n}편에서 이 소속만 떼어 냅니다 — 다른 컬렉션 소속과 폴더·파일은 그대로 둡니다.", n=n)).classes("text-xs text-gray-500")
             if kids:
                 up = projects.parent_of(pid, data["projs"])
-                ui.label(f"하위 컬렉션 {len(kids)}개는 지우지 않고 "
-                         + (f"'{path_of(up)}' 아래로" if up else "맨 위로") + " 올립니다.") \
+                ui.label(t("하위 컬렉션 {n}개는 지우지 않고 '{v}' 아래로 올립니다.", n=len(kids), v=path_of(up)) if up
+                         else t("하위 컬렉션 {n}개는 지우지 않고 맨 위로 올립니다.", n=len(kids))) \
                     .classes("text-xs text-gray-500")
             with ui.row().classes("justify-end w-full items-center gap-2"):
-                ui.button("취소", on_click=dlg.close).props("flat")
-                ui.button("컬렉션 삭제", icon="delete", on_click=do_delete) \
+                ui.button(t("취소"), on_click=dlg.close).props("flat")
+                ui.button(t("컬렉션 삭제"), icon="delete", on_click=do_delete) \
                     .props("unelevated no-caps color=negative")
         dlg.open()
 
@@ -815,7 +816,7 @@ def build_home(state: dict) -> None:
             try:
                 copies += len(await run.io_bound(library.set_memberships, WorkDir(Path(root)), new))
             except Exception as ex:  # noqa: BLE001 — 한 편이 실패해도 나머지는 계속
-                ui.notify(f"소속을 바꾸지 못했습니다: {Path(root).stem} — {ex}", type="negative")
+                ui.notify(t("소속을 바꾸지 못했습니다: {stem} — {ex}", stem=Path(root).stem, ex=ex), type="negative")
                 continue
             r = data["by_root"].get(root)
             if r is not None:
@@ -846,16 +847,16 @@ def build_home(state: dict) -> None:
         if r is None:
             return
         if pid in r["pids"]:
-            ui.notify(f"이미 '{name_of(pid)}'에 들어 있습니다.", type="info", timeout=1500)
+            ui.notify(t("이미 '{v}'에 들어 있습니다.", v=name_of(pid)), type="info", timeout=1500)
             return
         await set_members([str(root)], r["pids"] + [pid])
         refresh_views()
-        ui.notify(f"'{name_of(pid)}'에 더했습니다", type="positive", timeout=1500)
+        ui.notify(t("'{v}'에 더했습니다", v=name_of(pid)), type="positive", timeout=1500)
 
     async def bulk_member(pid: str, add: bool) -> None:
         roots = sorted(selected)
         if not roots:
-            ui.notify("선택된 논문이 없습니다.", type="warning")
+            ui.notify(t("선택된 논문이 없습니다."), type="warning")
             return
         changed = 0
         copies = 0
@@ -866,8 +867,9 @@ def build_home(state: dict) -> None:
             changed += 1
             copies += await set_members([root], cur + [pid] if add else [p for p in cur if p != pid])
         refresh_views()
-        verb = "에 더했습니다" if add else "에서 뺐습니다"
-        ui.notify(f"{changed}편을 '{name_of(pid)}'{verb}" + (f" · 사본 {copies}개" if copies else ""),
+        msg = (t("{changed}편을 '{v}'에 더했습니다", changed=changed, v=name_of(pid)) if add
+               else t("{changed}편을 '{v}'에서 뺐습니다", changed=changed, v=name_of(pid)))
+        ui.notify(msg + (t(" · 사본 {copies}개", copies=copies) if copies else ""),
                   type="positive" if changed else "info")
 
     # ===== 카드 동작 =====
@@ -875,13 +877,13 @@ def build_home(state: dict) -> None:
         if WorkDir(root).sections_yaml.exists():
             ui.navigate.to(_review_url(root))
         else:
-            ui.notify("작업 디렉토리가 손상되었습니다.", type="negative")
+            ui.notify(t("작업 디렉토리가 손상되었습니다."), type="negative")
 
     async def download_zip(root: Path, which: str) -> None:
         ctrl = UIController(WorkDir(root))
         md = ctrl.en_markdown() if which == "en" else ctrl.ko_markdown()
         if not md:
-            ui.notify("해당 마크다운이 없습니다.", type="warning")
+            ui.notify(t("해당 마크다운이 없습니다."), type="warning")
             return
         name, payload = ctrl.export_zip(which, config.resolve_export_target())
         await desktop.deliver(name, payload)
@@ -889,7 +891,7 @@ def build_home(state: dict) -> None:
     def toggle_pin(r: dict) -> None:
         """목록 맨 위 '고정한 논문' 구역으로 올리기/내리기 (status.json에만 표시 — 탭과는 무관)."""
         if not set_pinned(r["root"], not r["pinned"]):
-            ui.notify("고정 처리 실패 (경로 확인).", type="negative")
+            ui.notify(t("고정 처리 실패 (경로 확인)."), type="negative")
             return
         r["pinned"] = not r["pinned"]
         r["pinned_at"] = time.time() if r["pinned"] else 0.0
@@ -899,7 +901,7 @@ def build_home(state: dict) -> None:
     def hide_paper(r: dict, hidden: bool = True) -> None:
         """목록 표시만 끄기/되돌리기 (파일은 그대로 — status.json에 표시)."""
         if not set_hidden(r["root"], hidden):
-            ui.notify("처리 실패 (경로 확인).", type="negative")
+            ui.notify(t("처리 실패 (경로 확인)."), type="negative")
             return
         r["hidden"] = hidden
         if hidden and r["pinned"]:  # 숨긴 논문이 고정 구역에 남아 있으면 앞뒤가 안 맞는다
@@ -907,33 +909,33 @@ def build_home(state: dict) -> None:
             r["pinned"], r["pinned_at"] = False, 0.0
         selected.discard(str(r["root"]))  # 숨기면 일괄 다운로드 선택에서도 빠진다
         refresh_views()
-        ui.notify("목록에서 숨겼습니다 — 파일은 그대로입니다." if hidden else "목록에 다시 표시합니다.",
+        ui.notify(t("목록에서 숨겼습니다 — 파일은 그대로입니다.") if hidden else t("목록에 다시 표시합니다."),
                   type="positive")
 
     def confirm_delete(r: dict) -> None:
         """목록에서 없애는 두 가지 방법을 고르게 한다 — 표시만 숨기기(안전) vs 파일 영구 삭제."""
         with host, ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:460px"):
-            ui.label("이 논문을 목록에서 없앨까요?").classes("font-bold")
+            ui.label(t("이 논문을 목록에서 없앨까요?")).classes("font-bold")
             ui.label(r["title"]).classes("text-sm text-gray-500")
-            ui.label("· 목록에서 숨기기 — 파일은 그대로 두고 목록에서만 감춥니다. "
-                     "나중에 ⋯ 메뉴의 '숨긴 논문 보기'에서 되돌릴 수 있습니다.").classes("text-xs text-gray-500")
-            ui.label("· 파일 삭제 — 작업 디렉토리(원본 PDF·마크다운·이미지)까지 지웁니다. 되돌릴 수 없습니다.") \
+            ui.label(t("· 목록에서 숨기기 — 파일은 그대로 두고 목록에서만 감춥니다. "
+                     "나중에 ⋯ 메뉴의 '숨긴 논문 보기'에서 되돌릴 수 있습니다.")).classes("text-xs text-gray-500")
+            ui.label(t("· 파일 삭제 — 작업 디렉토리(원본 PDF·마크다운·이미지)까지 지웁니다. 되돌릴 수 없습니다.")) \
                 .classes("text-xs text-gray-500")
             # 저장 위치 사본은 작업 폴더 밖(사용자 볼트)이라, 안 지우면 고아로 남는다 → 기본 켬.
             # 사본은 **폴더를 가진 소속 프로젝트마다** 있고, 그런 소속이 없으면 공통 폴더에 있다.
             targets = [p for p in r["pids"] if projects.has_dirs(p)] or [""]
             lib_dirs = [str(d) for t in targets for d in library.dirs_for(t).values() if d]
-            drop_lib = ui.checkbox("저장 위치의 사본도 함께 삭제", value=True) \
+            drop_lib = ui.checkbox(t("저장 위치의 사본도 함께 삭제"), value=True) \
                 .props("dense").classes("text-sm") if lib_dirs else None
             for d in dict.fromkeys(lib_dirs):  # 어느 폴더가 지워지는지 경로를 그대로 (중복 제거)
                 ui.label(d).classes("text-xs text-gray-400 ml-8 break-all leading-tight")
             if any(library.bib_path(t) is not None for t in targets):
-                ui.label("references.bib의 이 논문 항목도 함께 지웁니다.") \
+                ui.label(t("references.bib의 이 논문 항목도 함께 지웁니다.")) \
                     .classes("text-xs text-gray-400 ml-8 leading-tight")
             # 실제 삭제(delete_workdir → remove_stem_everywhere)는 공통 + **모든** 프로젝트 폴더를
             # 훑는다 — 소속을 바꿔 온 논문의 옛 사본까지 정리하기 위해서다. 미리 밝혀 둔다.
             if lib_dirs and any(projects.has_dirs(p["id"]) for p in data["projs"] if p["id"] not in targets):
-                ui.label("전에 다른 컬렉션에 넣어 뒀다면 그 폴더에 남은 사본도 함께 정리합니다.") \
+                ui.label(t("전에 다른 컬렉션에 넣어 뒀다면 그 폴더에 남은 사본도 함께 정리합니다.")) \
                     .classes("text-xs text-gray-400 ml-8 leading-tight")
 
             def do_delete() -> None:
@@ -944,19 +946,19 @@ def build_home(state: dict) -> None:
                     data["rows"] = [x for x in data["rows"] if x is not r]
                     data["by_root"].pop(str(r["root"]), None)
                     refresh_views()
-                    ui.notify("삭제됨", type="positive")
+                    ui.notify(t("삭제됨"), type="positive")
                 else:
-                    ui.notify("삭제 실패 (경로 확인).", type="negative")
+                    ui.notify(t("삭제 실패 (경로 확인)."), type="negative")
 
             def do_hide() -> None:
                 dlg.close()
                 hide_paper(r, True)
 
             with ui.row().classes("justify-end w-full items-center gap-2"):
-                ui.button("취소", on_click=dlg.close).props("flat")
-                ui.button("파일 삭제", icon="delete_forever", on_click=do_delete) \
+                ui.button(t("취소"), on_click=dlg.close).props("flat")
+                ui.button(t("파일 삭제"), icon="delete_forever", on_click=do_delete) \
                     .props("flat no-caps color=negative")
-                ui.button("목록에서 숨기기", icon="visibility_off", on_click=do_hide) \
+                ui.button(t("목록에서 숨기기"), icon="visibility_off", on_click=do_hide) \
                     .props("unelevated no-caps color=primary")
         dlg.open()
 
@@ -966,7 +968,7 @@ def build_home(state: dict) -> None:
 
         roots = [Path(p) for p in selected]
         if not roots:
-            ui.notify("선택된 논문이 없습니다.", type="warning")
+            ui.notify(t("선택된 논문이 없습니다."), type="warning")
             return
         name, payload = bulk_zip(roots, which, config.resolve_export_target())
         await desktop.deliver(name, payload)
@@ -977,13 +979,13 @@ def build_home(state: dict) -> None:
 
         roots = [Path(p) for p in selected]
         if not roots:
-            ui.notify("선택된 논문이 없습니다.", type="warning")
+            ui.notify(t("선택된 논문이 없습니다."), type="warning")
             return
-        n = ui.notification(f"모바일 HTML 만드는 중… ({len(roots)}편)", spinner=True, timeout=None)
+        n = ui.notification(t("모바일 HTML 만드는 중… ({n}편)", n=len(roots)), spinner=True, timeout=None)
         try:
             html = await run.io_bound(mobile.build, roots)
         except Exception as e:  # noqa: BLE001
-            ui.notify(f"모바일 HTML을 만들지 못했습니다: {e}", type="negative")
+            ui.notify(t("모바일 HTML을 만들지 못했습니다: {e}", e=e), type="negative")
             return
         finally:
             n.dismiss()
@@ -992,14 +994,14 @@ def build_home(state: dict) -> None:
     async def save_to_library(roots: list[Path]) -> None:
         """논문들을 각자의 자리(소속 프로젝트 폴더들 > 공통 저장 위치)로 내보내기."""
         if not settings_dialog.any_library_dirs():
-            ui.notify("저장 위치가 지정돼 있지 않습니다 — ⚙ 설정의 '저장 위치'나 컬렉션 폴더를 정하세요.",
+            ui.notify(t("저장 위치가 지정돼 있지 않습니다 — ⚙ 설정의 '저장 위치'나 컬렉션 폴더를 정하세요."),
                       type="warning")
             return
         if not roots:
-            ui.notify("내보낼 논문이 없습니다.", type="warning")
+            ui.notify(t("내보낼 논문이 없습니다."), type="warning")
             return
         ok, failed = await run.io_bound(library.export_many, roots)
-        ui.notify(f"{ok}편 저장됨" + (f" · {failed}편 실패" if failed else ""),
+        ui.notify(t("{ok}편 저장됨", ok=ok) + (t(" · {failed}편 실패", failed=failed) if failed else ""),
                   type="positive" if ok else "warning")
 
     def clear_selection() -> None:
@@ -1031,7 +1033,7 @@ def build_home(state: dict) -> None:
     def translate_selection() -> None:
         roots = sorted(selected)
         if not roots:
-            ui.notify("선택된 논문이 없습니다.", type="warning")
+            ui.notify(t("선택된 논문이 없습니다."), type="warning")
             return
 
         def started(n: int) -> None:
@@ -1052,14 +1054,14 @@ def build_home(state: dict) -> None:
     def set_export_target(value: str) -> None:
         config.set_section_value("output", "export_target", value)
         more_menu.refresh()
-        ui.notify(f"내보내기 형식 · {_EXPORT_TARGET[value]}", type="positive", timeout=1200)
+        ui.notify(t("내보내기 형식 · {v}", v=_EXPORT_TARGET[value]), type="positive", timeout=1200)
 
     # ===== 업로드 → 큐 =====
     async def handle(e) -> None:  # noqa: ANN001 — NiceGUI upload 이벤트 (파일마다 발화)
         fname = e.file.name
         payload = await e.file.read()
         if any(q["name"] == fname and q["status"] in _QUEUE_ACTIVE for q in state["queue"]):
-            ui.notify(f"{fname} 은(는) 이미 대기열에 있습니다.", type="info")
+            ui.notify(t("{fname} 은(는) 이미 대기열에 있습니다.", fname=fname), type="info")
             return
         pages = _pdf_page_count(payload) if fname.lower().endswith(".pdf") else 0
         src = await run.io_bound(save_source, payload, fname, ws())
@@ -1094,7 +1096,7 @@ def build_home(state: dict) -> None:
                 # 꺾쇠만 접고 편다 — 행 클릭(범위 고르기)까지 번지지 않게 막고 서버에 알린다
                 tw.on("click", lambda _, p=value: toggle_collapsed(p),
                       js_handler="(e) => { e.stopPropagation(); emit(); }")
-                tw.tooltip("하위 컬렉션 펴기" if collapsed else "하위 컬렉션 접기")
+                tw.tooltip(t("하위 컬렉션 펴기") if collapsed else t("하위 컬렉션 접기"))
             ui.icon(icon, size="18px").classes("md4-prow-i")
             with ui.element("div").classes("md4-prow-t"):
                 ui.label(label).classes("md4-prow-name")
@@ -1106,14 +1108,14 @@ def build_home(state: dict) -> None:
                     .props("flat dense round size=sm").classes("md4-prow-more")
                 more.on("click", js_handler=_STOP_JS)  # 행 클릭(범위 고르기)까지 번지지 않게
                 with more, ui.menu().props("anchor='bottom right' self='top right'"):
-                    ui.menu_item("하위 컬렉션 만들기…", on_click=lambda _, p=value: new_project(parent=p)) \
+                    ui.menu_item(t("하위 컬렉션 만들기…"), on_click=lambda _, p=value: new_project(parent=p)) \
                         .props("dense")
-                    with ui.menu_item("위치 옮기기", auto_close=False).props("dense"):
+                    with ui.menu_item(t("위치 옮기기"), auto_close=False).props("dense"):
                         with ui.item_section().props("side"):
                             ui.icon("keyboard_arrow_right")
                         with ui.menu().props("anchor='top end' self='top start'"):
                             cur_up = data["up"].get(value, [""])[0] if data["up"].get(value) else ""
-                            ui.menu_item(("✓ " if not cur_up else "") + "맨 위로",
+                            ui.menu_item(("✓ " if not cur_up else "") + t("맨 위로"),
                                          on_click=lambda _, p=value: move_project(p, "")) \
                                 .props("dense" + (" disable" if not cur_up else ""))
                             for q, d in data["tree"]:
@@ -1125,12 +1127,12 @@ def build_home(state: dict) -> None:
                                     .props("dense" + (" disable" if here else "")) \
                                     .style(f"padding-left:{16 + 14 * d}px")  # 하위는 들여 써서
                     ui.separator()
-                    ui.menu_item("이름 바꾸기", on_click=lambda _, p=value: rename_project(p)).props("dense")
-                    ui.menu_item("폴더 정하기…", on_click=lambda _, p=value: pick_project_folder(p)).props("dense")
-                    ui.menu_item("설정…", on_click=lambda _, p=value: edit_project(p)).props("dense")
-                    ui.menu_item("용어집…", on_click=lambda _, p=value: open_collection_glossary(p)).props("dense")
+                    ui.menu_item(t("이름 바꾸기"), on_click=lambda _, p=value: rename_project(p)).props("dense")
+                    ui.menu_item(t("폴더 정하기…"), on_click=lambda _, p=value: pick_project_folder(p)).props("dense")
+                    ui.menu_item(t("설정…"), on_click=lambda _, p=value: edit_project(p)).props("dense")
+                    ui.menu_item(t("용어집…"), on_click=lambda _, p=value: open_collection_glossary(p)).props("dense")
                     ui.separator()
-                    ui.menu_item("컬렉션 삭제", on_click=lambda _, p=value: confirm_delete_project(p)) \
+                    ui.menu_item(t("컬렉션 삭제"), on_click=lambda _, p=value: confirm_delete_project(p)) \
                         .props("dense").classes("text-negative")
             else:
                 ui.element("span").classes("md4-prow-gap")
@@ -1147,9 +1149,9 @@ def build_home(state: dict) -> None:
     @ui.refreshable
     def sidebar_rows() -> None:
         n = counts()
-        prow(projects.ALL, "모든 논문", n[projects.ALL], "library_books")
+        prow(projects.ALL, t("모든 논문"), n[projects.ALL], "library_books")
         # '컬렉션' 캡 — 컬렉션 행을 여기에 놓으면 맨 위로 올라간다
-        cap = ui.label("컬렉션").classes("md4-panel-title md4-hcap")
+        cap = ui.label(t("컬렉션")).classes("md4-panel-title md4-hcap")
         cap.on("dragover", js_handler=(
             "(e) => { const t = e.dataTransfer && e.dataTransfer.types; "
             f"if (t && Array.from(t).includes('{COLL_MIME}')) "
@@ -1171,20 +1173,20 @@ def build_home(state: dict) -> None:
             prow(p["id"], p["name"], n.get(p["id"], 0), "folder_special" if not depth else "folder",
                  project=True, sub=Path(root).expanduser().name if root else "",
                  depth=depth, kids=kids, collapsed=collapsed)
-        prow(projects.NONE, projects.NONE_LABEL, n[projects.NONE], "inbox")
-        ui.button("새 컬렉션", icon="add", color=None, on_click=lambda: new_project()) \
+        prow(projects.NONE, t("미분류"), n[projects.NONE], "inbox")
+        ui.button(t("새 컬렉션"), icon="add", color=None, on_click=lambda: new_project()) \
             .props("flat dense no-caps").classes("md4-hnew w-full") \
-            .tooltip("이름만 정하면 만들어집니다 — 폴더는 나중에 정해도 됩니다. 하위 컬렉션은 컬렉션 ⋯에서")
+            .tooltip(t("이름만 정하면 만들어집니다 — 폴더는 나중에 정해도 됩니다. 하위 컬렉션은 컬렉션 ⋯에서"))
 
     @ui.refreshable
     def ws_label() -> None:
         cur = str(ws())
-        ui.label("\u200e" + cur).classes("md4-hws").tooltip(f"작업 폴더 — {cur}\n(⚙ 설정 → 저장 위치에서 바꿉니다)")
+        ui.label("\u200e" + cur).classes("md4-hws").tooltip(t("작업 폴더 — {cur}\n(⚙ 설정 → 저장 위치에서 바꿉니다)", cur=cur))
 
     # ===== 오른쪽 — 머리 =====
     def scope_label() -> str:
         s = view["scope"]
-        return "모든 논문" if s == projects.ALL else (projects.NONE_LABEL if s == projects.NONE else name_of(s))
+        return t("모든 논문") if s == projects.ALL else (t("미분류") if s == projects.NONE else name_of(s))
 
     @ui.refreshable
     def head() -> None:
@@ -1192,15 +1194,16 @@ def build_home(state: dict) -> None:
         n = sum(1 for r in live_rows() if not r["hidden"] and in_scope(r, s))
         with ui.row().classes("items-baseline gap-2 no-wrap w-full"):
             ui.label(scope_label()).classes("md4-htitle truncate min-w-0")
-            ui.label(f"{n}편").classes("md4-hcount shrink-0")
+            ui.label(t("{n}편", n=n)).classes("md4-hcount shrink-0")
             roots = selectable_roots()
             if roots:
                 every = all(rt in selected for rt in roots)
-                ui.button("선택 해제" if every else "전체 선택", icon="deselect" if every else "select_all",
+                ui.button(t("선택 해제") if every else t("전체 선택"), icon="deselect" if every else "select_all",
                           color=None, on_click=toggle_select_all) \
                     .props("flat dense no-caps size=sm").classes("text-grey-7 shrink-0") \
-                    .tooltip(f"지금 목록에 보이는 {len(roots)}편을 한꺼번에 " + ("풀기" if every else "체크")
-                             + " — 일괄 동작(번역·zip·컬렉션)은 오른쪽 칸에")
+                    .tooltip((t("지금 목록에 보이는 {n}편을 한꺼번에 풀기", n=len(roots)) if every
+                              else t("지금 목록에 보이는 {n}편을 한꺼번에 체크", n=len(roots)))
+                             + t(" — 일괄 동작(번역·zip·컬렉션)은 오른쪽 칸에"))
         if s not in (projects.ALL, projects.NONE):
             root = projects.folder_of(s)  # 하위 컬렉션은 상위 폴더를 물려받는다
             heir = projects.inherited_from(s)
@@ -1208,27 +1211,28 @@ def build_home(state: dict) -> None:
                 ui.label(" / ".join(name_of(p) for p in reversed(data["up"][s]))).classes("md4-hpath")
             with ui.row().classes("items-center gap-1 no-wrap w-full"):
                 ui.icon("folder" if root else "folder_off", size="15px").classes("text-grey-5")
-                text = (f"{root}  ·  {projects.translation_subdir()}/  ·  pdf/" if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다")
+                text = (f"{root}  ·  {projects.translation_subdir()}/  ·  pdf/" if root
+                        else t("폴더 미지정 — 공통 저장 위치에 쌓입니다"))
                 if heir is not None:
-                    text += f"  (상위 '{heir['name']}' 폴더)"
+                    text += t("  (상위 '{name}' 폴더)", name=heir['name'])
                 ui.label(text).classes("md4-hpath truncate").tooltip(str(root) if root else "")
                 ui.button(icon="edit", color=None, on_click=lambda: edit_project(s)) \
                     .props("flat dense round size=xs").classes("text-grey-6") \
-                    .tooltip("이 컬렉션 설정 — 이름·폴더·이 컬렉션만 다르게")
+                    .tooltip(t("이 컬렉션 설정 — 이름·폴더·이 컬렉션만 다르게"))
         if not any(config.key_status().values()):
-            ui.label("⚠ AI 키가 없어 참고문헌 정리·번역 기능이 꺼져 있습니다 — 눌러서 키 넣기") \
+            ui.label(t("⚠ AI 키가 없어 참고문헌 정리·번역 기능이 꺼져 있습니다 — 눌러서 키 넣기")) \
                 .classes("md4-hwarn ai q-mt-xs").on("click", lambda: open_settings("ai"))
         if not backend_ready:
-            ui.label("⚠ 추출 엔진(docling)이 설치되지 않았습니다. `uv sync`로 설치하세요 — "
-                     "PDF 변환이 되지 않습니다(.md 입력은 가능).").classes("md4-hwarn err q-mt-xs")
+            ui.label(t("⚠ 추출 엔진(docling)이 설치되지 않았습니다. `uv sync`로 설치하세요 — "
+                     "PDF 변환이 되지 않습니다(.md 입력은 가능).")).classes("md4-hwarn err q-mt-xs")
 
     @ui.refreshable
     def drop_caption() -> None:
         target = projects.assign_target(view["scope"])
         ui.icon("cloud_upload", size="44px")
-        ui.label(f"여기에 놓으면 '{name_of(target)}'에 추가" if target else "여기에 놓으면 미분류로 올리기") \
+        ui.label(t("여기에 놓으면 '{v}'에 추가", v=name_of(target)) if target else t("여기에 놓으면 미분류로 올리기")) \
             .classes("md4-dropov-t")
-        ui.label("PDF·마크다운 여러 개를 한꺼번에 — 순서대로 변환합니다").classes("md4-dropov-s")
+        ui.label(t("PDF·마크다운 여러 개를 한꺼번에 — 순서대로 변환합니다")).classes("md4-dropov-s")
 
     @ui.refreshable
     def more_menu() -> None:
@@ -1238,17 +1242,17 @@ def build_home(state: dict) -> None:
         cur_target = config.resolve_export_target()
         with ui.menu().props("anchor='bottom right' self='top right'"):
             if n_hidden:  # 되돌릴 길이 늘 있도록 (숨김이 '영영 사라짐'이 되지 않게)
-                ui.menu_item(f"숨긴 논문 {n_hidden}편 " + ("접기" if view["show_hidden"] else "보기"),
+                ui.menu_item(t("숨긴 논문 {n}편 접기", n=n_hidden) if view["show_hidden"] else t("숨긴 논문 {n}편 보기", n=n_hidden),
                              on_click=toggle_hidden_view).props("dense")
             else:
-                ui.menu_item("숨긴 논문 없음").props("dense disable")
+                ui.menu_item(t("숨긴 논문 없음")).props("dense disable")
             ui.separator()
-            ui.label("내보내기 형식 (EN·KO zip·폴더 저장)").classes("md4-menucap")
+            ui.label(t("내보내기 형식 (EN·KO zip·폴더 저장)")).classes("md4-menucap")
             for key, label in _EXPORT_TARGET.items():
                 ui.menu_item(("✓ " if key == cur_target else "    ") + label,
                              on_click=lambda _, k=key: set_export_target(k)).props("dense")
             ui.separator()
-            ui.menu_item("이 목록의 논문을 폴더로 저장",
+            ui.menu_item(t("이 목록의 논문을 폴더로 저장"),
                          on_click=lambda: save_to_library([r["root"] for r in visible_rows()])).props("dense")
 
     def toggle_hidden_view() -> None:
@@ -1263,7 +1267,7 @@ def build_home(state: dict) -> None:
         q = state["queue"]
         running_jobs = jobs.running()
         if running_jobs:  # 논문 화면에서 띄운 번역 등 — 화면을 떠나도 서버에서 계속 돈다
-            ui.label("백그라운드 작업").classes("md4-listcap")
+            ui.label(t("백그라운드 작업")).classes("md4-listcap")
             # 일괄 번역은 수십 편이 문 앞에서 기다린다 — 대기 카드는 앞쪽 몇 개만, 나머지는 한 줄로 센다
             waiting = [j for j in running_jobs if j.detail.get("queued")]
             hidden_waits = {id(j) for j in waiting[5:]}
@@ -1274,9 +1278,10 @@ def build_home(state: dict) -> None:
                 queued = bool(j.detail.get("queued"))  # 동시 실행 문(translate_job.gate) 앞에서 기다리는 중
                 if queued:
                     n_ahead = translate_job.ahead(j)
-                    sub = f"{j.label} 대기 중" + (f" · 앞에 {n_ahead}개" if n_ahead > 0 else "") + " · 눌러서 열기"
+                    sub = (t("{label} 대기 중 · 앞에 {n}개 · 눌러서 열기", label=j.label, n=n_ahead) if n_ahead > 0
+                           else t("{label} 대기 중 · 눌러서 열기", label=j.label))
                 else:
-                    sub = f"{j.label} 중…{pct} · 눌러서 열기"
+                    sub = t("{label} 중…{pct} · 눌러서 열기", label=j.label, pct=pct)
                 with ui.card().classes("w-full q-pa-sm cursor-pointer").on(
                         "click", lambda _, r=j.root: ui.navigate.to(_review_url(Path(r)))):
                     with ui.row().classes("items-center w-full no-wrap gap-2"):
@@ -1286,43 +1291,43 @@ def build_home(state: dict) -> None:
                             ui.label(j.title or Path(j.root).stem).classes("text-sm truncate w-full")
                             ui.label(sub).classes("text-xs text-gray-400")
             if hidden_waits:
-                ui.label(f"외 {len(hidden_waits)}편 번역 대기 중 — 동시에 {translate_job.gate().limit}편씩 차례로 돕니다") \
+                ui.label(t("외 {n}편 번역 대기 중 — 동시에 {limit}편씩 차례로 돕니다", n=len(hidden_waits), limit=translate_job.gate().limit)) \
                     .classes("text-xs text-gray-400 q-px-sm")
         if not q:
             return
-        ui.label("변환 중").classes("md4-listcap")
+        ui.label(t("변환 중")).classes("md4-listcap")
         pend = 0
         for it in q:
             st = it["status"]
             el = int(time.monotonic() - it["since"]) if it["since"] else 0
             if st == "pending":
                 pend += 1
-                sub = f"대기 {pend}번째"
+                sub = t("대기 {n}번째", n=pend)
             elif st == "extracting":
-                sub = f"① 추출 중… {el}초" + (f" · {it['pages']}페이지" if it["pages"] else "")
+                sub = t("① 추출 중… {el}초", el=el) + (t(" · {n}페이지", n=it["pages"]) if it["pages"] else "")
             elif st == "cite":
-                sub = f"② 참고문헌 정리 중… (AI) {el}초"
+                sub = t("② 참고문헌 정리 중… (AI) {el}초", el=el)
             elif st == "glossary":
-                sub = f"③ 용어집 만드는 중… (AI) {el}초"
+                sub = t("③ 용어집 만드는 중… (AI) {el}초", el=el)
             elif st == "meta":
-                sub = f"④ 서지 정보 추출 중… (AI) {el}초"
+                sub = t("④ 서지 정보 추출 중… (AI) {el}초", el=el)
             elif st == "bib":
-                sub = f"⑤ 서지 정보 보강 중… (온라인) {el}초"
+                sub = t("⑤ 서지 정보 보강 중… (온라인) {el}초", el=el)
             elif st == "done":
-                sub = "완료 → 아래 목록에서 열기"
+                sub = t("완료 → 아래 목록에서 열기")
                 boost = it.get("boost") or {}
                 bits = []
                 if boost.get("record"):
-                    bits.append("출판 기록")
+                    bits.append(t("출판 기록"))
                 filled = (boost.get("refs") or {}).get("filled") or 0
                 if filled:
-                    bits.append(f"참고문헌 DOI {filled}건")
+                    bits.append(t("참고문헌 DOI {n}건", n=filled))
                 if bits:
-                    sub += " · 서지 " + "·".join(bits)
+                    sub += t(" · 서지 ") + "·".join(bits)
                 if boost.get("retracted"):  # 철회 논문은 조용히 넘기면 안 된다
-                    sub = "⚠ 철회된 논문입니다 — 인용 전 확인하세요 · " + sub
+                    sub = t("⚠ 철회된 논문입니다 — 인용 전 확인하세요 · ") + sub
             else:
-                sub = f"실패: {it['error']}"[:80]
+                sub = t("실패: {error}", error=it["error"])[:80]
             if it.get("project"):
                 sub += f" · {name_of(it['project'])}"
             color = "text-green-600" if st == "done" else ("text-red-500" if st == "failed" else "text-primary")
@@ -1335,12 +1340,12 @@ def build_home(state: dict) -> None:
                         ui.label(sub).classes("text-xs " + ("text-red-500" if st == "failed" else "text-gray-400"))
                     if it.get("garbled"):
                         ui.icon("warning", size="18px").classes("text-orange-500 shrink-0") \
-                            .tooltip(f"깨진 문자 {it['garbled']}개 — 다른 변환 방식을 시도해 보세요")
+                            .tooltip(t("깨진 문자 {garbled}개 — 다른 변환 방식을 시도해 보세요", garbled=it['garbled']))
                     if st in ("pending", "failed"):
                         ui.button(icon="close", on_click=lambda _, it=it: (
                             state["queue"].remove(it) if it in state["queue"] else None, queue_panel.refresh())) \
                             .props("flat dense round size=sm color=grey").classes("shrink-0") \
-                            .tooltip("취소" if st == "pending" else "닫기")
+                            .tooltip(t("취소") if st == "pending" else t("닫기"))
 
     def project_pick_menu(on_pick, only: set[str] | None = None, with_new: bool = False) -> None:  # noqa: ANN001
         """미리보기 일괄 동작 칸의 '컬렉션에 추가/빼기' 메뉴 — 프로젝트 이름만 늘어놓는다."""
@@ -1350,10 +1355,10 @@ def build_home(state: dict) -> None:
                 ui.menu_item(p["name"], on_click=lambda _, v=p["id"]: on_pick(v)).props("dense") \
                     .style(f"padding-left:{16 + 14 * d}px")
             if not shown:
-                ui.menu_item("컬렉션이 없습니다").props("dense disable")
+                ui.menu_item(t("컬렉션이 없습니다")).props("dense disable")
             if with_new:
                 ui.separator()
-                ui.menu_item("새 컬렉션 만들기…", on_click=lambda: new_project_for_selection()).props("dense")
+                ui.menu_item(t("새 컬렉션 만들기…"), on_click=lambda: new_project_for_selection()).props("dense")
 
     def new_project_for_selection() -> None:
         roots = sorted(selected)
@@ -1414,7 +1419,7 @@ def build_home(state: dict) -> None:
 
         menu.clear()
         with menu:
-            ui.label("컬렉션에 넣기").classes("md4-menucap")
+            ui.label(t("컬렉션에 넣기")).classes("md4-menucap")
             for p, d in data["tree"]:  # 트리 순서, 하위는 들여 써서
                 on = p["id"] in r["pids"]
                 with ui.menu_item(auto_close=False).props("dense").style(f"padding-left:{16 + 14 * d}px") as item:
@@ -1424,9 +1429,9 @@ def build_home(state: dict) -> None:
                         ui.label(p["name"])
                 item.on("click", lambda _, pid=p["id"], i=ic: flip(pid, i))
             if not data["projs"]:
-                ui.label("아직 컬렉션이 없습니다").classes("text-xs text-gray-400 q-px-md q-py-xs")
+                ui.label(t("아직 컬렉션이 없습니다")).classes("text-xs text-gray-400 q-px-md q-py-xs")
             ui.separator()
-            ui.menu_item("새 컬렉션 만들기…", on_click=lambda: new_project(for_root=root)).props("dense")
+            ui.menu_item(t("새 컬렉션 만들기…"), on_click=lambda: new_project(for_root=root)).props("dense")
         menu.props(f'target="#c{anchor.id}"')
         menu.open()
 
@@ -1445,7 +1450,7 @@ def build_home(state: dict) -> None:
                     if data["up"].get(p):  # 하위 컬렉션은 어디 밑인지
                         tag.tooltip(path_of(p))
             else:
-                ui.label(projects.NONE_LABEL).classes("md4-ptag none")
+                ui.label(t("미분류")).classes("md4-ptag none")
             ui.icon("add", size="14px").classes("md4-ptag-add")
 
     @ui.refreshable
@@ -1456,26 +1461,25 @@ def build_home(state: dict) -> None:
             # 안내하면 엉뚱한 곳을 만지게 된다(방금 만든 프로젝트는 당연히 비어 있다).
             s, q = view["scope"], (view["q"] or "").strip()
             if q:
-                ui.label("검색 결과가 없습니다.").classes("text-sm text-gray-400 q-mt-md")
+                ui.label(t("검색 결과가 없습니다.")).classes("text-sm text-gray-400 q-mt-md")
                 return
             with ui.column().classes("md4-empty w-full gap-1"):
                 ui.icon("cloud_upload", size="44px").classes("text-primary")
-                ui.label("PDF를 창 위로 끌어다 놓거나 '올리기'로 선택하세요").classes("text-base")
+                ui.label(t("PDF를 창 위로 끌어다 놓거나 '올리기'로 선택하세요")).classes("text-base")
                 if s == projects.NONE:
-                    ui.label("미분류 논문이 없습니다 — 모든 논문이 컬렉션에 들어가 있습니다.") \
+                    ui.label(t("미분류 논문이 없습니다 — 모든 논문이 컬렉션에 들어가 있습니다.")) \
                         .classes("text-xs text-gray-400")
                 elif s:
-                    ui.label(f"'{name_of(s)}' 컬렉션에 아직 논문이 없습니다 — 여기서 올리거나, 다른 목록의 "
-                             "카드를 왼쪽 이 컬렉션 행으로 끌어 놓으세요.").classes("text-xs text-gray-400")
+                    ui.label(t("'{v}' 컬렉션에 아직 논문이 없습니다 — 여기서 올리거나, 다른 목록의 카드를 왼쪽 이 컬렉션 행으로 끌어 놓으세요.", v=name_of(s))).classes("text-xs text-gray-400")
                 else:
-                    ui.label("아직 변환한 논문이 없습니다. 여러 개를 올리면 순서대로 변환합니다.") \
+                    ui.label(t("아직 변환한 논문이 없습니다. 여러 개를 올리면 순서대로 변환합니다.")) \
                         .classes("text-xs text-gray-400")
                     if not any(r["hidden"] for r in data["rows"]):
                         # 다른 폴더에서 변환해 둔 논문이 안 보이는 것일 수 있다 — 실행 방식에 따라 작업 폴더
                         # 기본값이 달랐다. 어느 폴더를 보고 있는지와 바꾸는 길을 같이 알려 준다.
-                        ui.label(f"보고 있는 작업 폴더: {ws()}").classes("text-xs text-gray-400 break-all")
-                        ui.label("다른 폴더에서 변환했다면 ⚙ 설정의 '저장 위치 → 작업 폴더'에서 그 폴더를 "
-                                 "고르세요.").classes("text-xs text-gray-400")
+                        ui.label(t("보고 있는 작업 폴더: {v}", v=ws())).classes("text-xs text-gray-400 break-all")
+                        ui.label(t("다른 폴더에서 변환했다면 ⚙ 설정의 '저장 위치 → 작업 폴더'에서 그 폴더를 "
+                                 "고르세요.")).classes("text-xs text-gray-400")
             return
         now = time.monotonic()
         new_roots = state.get("recent_new", {})
@@ -1517,7 +1521,7 @@ def build_home(state: dict) -> None:
                     # 긴 제목이 카드·화면 밖으로 흘러넘친다.
                     with ui.row().classes("items-center gap-1.5 no-wrap w-full min-w-0"):
                         if unopened:
-                            ui.element("span").classes("md4-new-dot").tooltip("아직 열지 않음")
+                            ui.element("span").classes("md4-new-dot").tooltip(t("아직 열지 않음"))
                         title_lbl = ui.label(r["title"]).classes("md4-ptitle truncate min-w-0"
                                                                  + (" unopened" if unopened else ""))
                         with title_lbl:
@@ -1528,13 +1532,13 @@ def build_home(state: dict) -> None:
                     card_refs[root] = {"title": title_lbl, "tip": title_tip, "bib": bib_lbl}
                     with ui.row().classes("items-center gap-x-2 gap-y-1 w-full q-mt-xs"):
                         if r["has_ko"]:
-                            ui.badge("번역 완료", color="green").props("outline")
+                            ui.badge(t("번역 완료"), color="green").props("outline")
                         else:
-                            ui.badge("영어 변환", color="blue").props("outline")
+                            ui.badge(t("영어 변환"), color="blue").props("outline")
                         if unopened:
                             ui.badge("NEW", color="primary")
                         if r["hidden"]:
-                            ui.badge("숨김", color="grey").props("outline")
+                            ui.badge(t("숨김"), color="grey").props("outline")
                         ui.label(_relative_time(r["mtime"])).classes("md4-pmeta")
                         # 소속 프로젝트 = 이 논문의 저장 폴더까지 정하는 값이라 카드에서 바로 바꾼다.
                         tags_box = ui.element("div").classes("md4-ptags")
@@ -1544,30 +1548,30 @@ def build_home(state: dict) -> None:
                                     js_handler="(e) => { e.stopPropagation(); emit(); }")
                         tags_box.on("dblclick", js_handler=_STOP_JS)
                 if r["pinned"]:
-                    ui.icon("push_pin", size="16px").classes("md4-pinmark").tooltip("고정한 논문")
+                    ui.icon("push_pin", size="16px").classes("md4-pinmark").tooltip(t("고정한 논문"))
                 acts = ui.row().classes("md4-pacts items-center gap-0 no-wrap")
                 acts.on("click", js_handler=_STOP_JS).on("dblclick", js_handler=_STOP_JS)
                 with acts:
                     # 고정 = 목록 맨 위 '고정한 논문' 구역. 관심 논문을 모아 두고 매번 찾지 않도록.
                     ui.button(icon="push_pin", on_click=lambda _, item=r: toggle_pin(item)) \
                         .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-6")) \
-                        .tooltip("고정 해제" if r["pinned"] else "목록 맨 위에 고정")
+                        .tooltip(t("고정 해제") if r["pinned"] else t("목록 맨 위에 고정"))
                     new_window_button(r["root"], state, r["title"], small=True)
                     # 번역된 문서는 원문(EN)·번역(KO)을 각각 버튼으로. 미번역은 영어 하나만.
                     ui.button("EN", on_click=lambda _, rt=r["root"]: download_zip(rt, "en")) \
                         .props("flat dense no-caps size=sm color=grey-7") \
-                        .tooltip("영어 마크다운 zip (마크다운+이미지)")
+                        .tooltip(t("영어 마크다운 zip (마크다운+이미지)"))
                     if r["has_ko"]:
                         ui.button(langs.short(r.get("lang") or "ko"),
                                   on_click=lambda _, rt=r["root"]: download_zip(rt, "ko")) \
                             .props("flat dense no-caps size=sm color=primary") \
-                            .tooltip(f"번역 마크다운 zip — {langs.get(r.get('lang') or 'ko').native} (마크다운+이미지)")
+                            .tooltip(t("번역 마크다운 zip — {native} (마크다운+이미지)", native=langs.get(r.get('lang') or 'ko').native))
                     if r["hidden"]:  # 숨긴 논문은 삭제 대신 '다시 표시'
                         ui.button(icon="visibility", on_click=lambda _, item=r: hide_paper(item, False)) \
-                            .props("flat dense round size=sm color=primary").tooltip("목록에 다시 표시")
+                            .props("flat dense round size=sm color=primary").tooltip(t("목록에 다시 표시"))
                     else:
                         ui.button(icon="delete", on_click=lambda _, item=r: confirm_delete(item)) \
-                            .props("flat dense round size=sm color=grey-6").tooltip("목록에서 숨기기 / 파일 삭제")
+                            .props("flat dense round size=sm color=grey-6").tooltip(t("목록에서 숨기기 / 파일 삭제"))
 
         pinned = [r for r in items if r["pinned"]]
         rest = [r for r in items if not r["pinned"]]
@@ -1583,11 +1587,11 @@ def build_home(state: dict) -> None:
             for proj in data["projs"]:  # 만든 순서대로
                 rows = by_pid.get(proj["id"])
                 if rows:
-                    groups.append((f"{proj['name']} {len(rows)}편", rows))
+                    groups.append((t("{name} {n}편", name=proj['name'], n=len(rows)), rows))
             if by_pid.get(""):  # 미분류는 맨 끝
-                groups.append((f"{projects.NONE_LABEL} {len(by_pid[''])}편", by_pid[""]))
+                groups.append((t("{name} {n}편", name=t("미분류"), n=len(by_pid[''])), by_pid[""]))
         if pinned:
-            cap(f"고정한 논문 {len(pinned)}편", icon="push_pin")
+            cap(t("고정한 논문 {n}편", n=len(pinned)), icon="push_pin")
             for r in pinned:
                 card(r)
         if groups:
@@ -1597,7 +1601,7 @@ def build_home(state: dict) -> None:
                     card(r)
         else:
             if pinned and rest:
-                cap("나머지 논문")
+                cap(t("나머지 논문"))
             for r in rest:
                 card(r)
 
@@ -1739,9 +1743,9 @@ def build_home(state: dict) -> None:
             return
 
         def go() -> None:
-            for t in library.export_targets(wd):
+            for tgt in library.export_targets(wd):
                 try:
-                    library.export_bib(wd, t)
+                    library.export_bib(wd, tgt)
                 except Exception:  # noqa: BLE001 — bib 한 곳이 실패해도 서지 저장은 이미 끝났다
                     pass
 
@@ -1792,13 +1796,13 @@ def build_home(state: dict) -> None:
             async with meta_lock:
                 meta = await run.io_bound(paper_meta.update_fields, wd, {key: value})
         except ValueError as ex:  # 빈 제목·범위 밖 연도 등 — 칸은 옛 값으로
-            ui.notify(f"저장하지 않았습니다 — {ex}", type="warning")
+            ui.notify(t("저장하지 않았습니다 — {ex}", ex=ex), type="warning")
             return fail
         except Exception as ex:  # noqa: BLE001
-            ui.notify(f"저장하지 못했습니다: {ex}", type="negative")
+            ui.notify(t("저장하지 못했습니다: {ex}", ex=ex), type="negative")
             return fail
         after_meta_change(r, meta)
-        ui.notify("저장됨", type="positive", timeout=1200)
+        ui.notify(t("저장됨"), type="positive", timeout=1200)
         if key == "doi":
             return meta.get("doi") or effective_doi(wd, meta)
         return meta.get(key)
@@ -1808,12 +1812,12 @@ def build_home(state: dict) -> None:
         try:
             await run.io_bound(preview.set_abstract, wd, lang, text)
         except Exception as ex:  # noqa: BLE001
-            ui.notify(f"초록을 저장하지 못했습니다: {ex}", type="negative")
+            ui.notify(t("초록을 저장하지 못했습니다: {ex}", ex=ex), type="negative")
             return fail
         done = asyncio.get_running_loop().create_future()  # 다시 그려도 디스크를 다시 읽지 않게 캐시도
         done.set_result(text)
         loads[(str(r["root"]), "abs", lang)] = done
-        ui.notify("초록 저장됨", type="positive", timeout=1200)
+        ui.notify(t("초록 저장됨"), type="positive", timeout=1200)
         return text
 
     def draw_abs(box, text) -> None:  # noqa: ANN001
@@ -1821,16 +1825,16 @@ def build_home(state: dict) -> None:
         r, lang = picked_row(), pick.get("abs_lang") or "en"
         with box:
             if preview is None or r is None:
-                ui.label(text or "초록을 찾지 못했습니다").classes("md4-pv-abs" + ("" if text else " none"))
+                ui.label(text or t("초록을 찾지 못했습니다")).classes("md4-pv-abs" + ("" if text else " none"))
                 return
-            edit_field("md4-pv-abs w-full", "abstract", text or "", "초록을 찾지 못했습니다 — 눌러서 입력",
+            edit_field("md4-pv-abs w-full", "abstract", text or "", t("초록을 찾지 못했습니다 — 눌러서 입력"),
                        lambda _k, v, r=r, lang=lang: commit_abs(r, lang, v), multiline=True)
 
     def draw_ok(box, doi: str) -> None:  # noqa: ANN001
         box.clear()
         if doi:
             with box:
-                ui.label("서지 ✓").classes("md4-pv-ok").tooltip(f"서지 정보 보강됨 — DOI {doi}")
+                ui.label(t("서지 ✓")).classes("md4-pv-ok").tooltip(t("서지 정보 보강됨 — DOI {doi}", doi=doi))
 
     def draw_hint(box, r: dict) -> None:  # noqa: ANN001
         """이름 규칙대로면 폴더 이름이 달라질 때만 한 줄 — 서지를 고친 뒤 폴더도 맞출 수 있게."""
@@ -1842,16 +1846,16 @@ def build_home(state: dict) -> None:
             return
         box.set_visibility(True)
         with box:
-            ui.label("이름 규칙대로면")
+            ui.label(t("이름 규칙대로면"))
             ui.label(base).classes("md4-pv-hint-n")
-            ui.button("폴더 이름 바꾸기", on_click=lambda: confirm_rename(r, base)) \
+            ui.button(t("폴더 이름 바꾸기"), on_click=lambda: confirm_rename(r, base)) \
                 .props("flat dense no-caps color=primary")
 
     def confirm_rename(r: dict, base: str) -> None:
         old = Path(r["root"])
         running = {str(Path(j.root).resolve()) for j in jobs.running()}
         if str(old.resolve()) in running:  # 번역 등이 이 폴더에 쓰는 중 — 옮기면 그 작업이 길을 잃는다
-            ui.notify("이 논문에서 작업(번역 등)이 도는 중입니다 — 끝난 뒤에 바꾸세요.", type="warning")
+            ui.notify(t("이 논문에서 작업(번역 등)이 도는 중입니다 — 끝난 뒤에 바꾸세요."), type="warning")
             return
 
         async def do_rename() -> None:
@@ -1859,28 +1863,28 @@ def build_home(state: dict) -> None:
             try:
                 new_wd = await run.io_bound(paper_meta.rename_to_naming, WorkDir(old), ws())
             except Exception as ex:  # noqa: BLE001
-                ui.notify(f"폴더 이름을 바꾸지 못했습니다: {ex}", type="negative")
+                ui.notify(t("폴더 이름을 바꾸지 못했습니다: {ex}", ex=ex), type="negative")
                 return
             new = Path(new_wd.root)
             if new == old:
-                ui.notify("이미 이름 규칙대로입니다.", type="info")
+                ui.notify(t("이미 이름 규칙대로입니다."), type="info")
                 preview_pane.refresh()
                 return
             tabstore.rename_tab(old, new)  # rename_workdir도 부르지만, 두 번이어도 무해(옛 키가 없으면 그냥 끝)
             rekey(r, old, new)
             tabs_bar.refresh()
             refresh_views()
-            ui.notify(f"폴더 이름을 바꿨습니다 → {new.stem}", type="positive")
+            ui.notify(t("폴더 이름을 바꿨습니다 → {stem}", stem=new.stem), type="positive")
 
         with host, ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:440px"):
-            ui.label("폴더 이름을 이름 규칙대로 바꿀까요?").classes("font-bold")
+            ui.label(t("폴더 이름을 이름 규칙대로 바꿀까요?")).classes("font-bold")
             with ui.column().classes("gap-0 w-full"):
                 ui.label(old.stem).classes("text-sm text-gray-500 break-all")
                 ui.label("→ " + base).classes("text-sm break-all")
-            ui.label("폴더·PDF·저장 위치 사본·열린 탭이 함께 옮겨집니다.").classes("text-xs text-gray-500")
+            ui.label(t("폴더·PDF·저장 위치 사본·열린 탭이 함께 옮겨집니다.")).classes("text-xs text-gray-500")
             with ui.row().classes("justify-end w-full items-center gap-2"):
-                ui.button("취소", on_click=dlg.close).props("flat")
-                ui.button("이름 바꾸기", icon="drive_file_rename_outline", on_click=do_rename) \
+                ui.button(t("취소"), on_click=dlg.close).props("flat")
+                ui.button(t("이름 바꾸기"), icon="drive_file_rename_outline", on_click=do_rename) \
                     .props("unelevated no-caps color=primary")
         dlg.open()
 
@@ -1911,25 +1915,25 @@ def build_home(state: dict) -> None:
         """'온라인에서 다시 찾기' — 출판 기록을 새로 받는다(손으로 고친 칸은 기록 위에 다시 덮인다)."""
         root, wd = str(r["root"]), WorkDir(r["root"])
         if root in busy_meta:
-            ui.notify("이 논문의 서지를 이미 다시 받는 중입니다.", type="info", timeout=1500)
+            ui.notify(t("이 논문의 서지를 이미 다시 받는 중입니다."), type="info", timeout=1500)
             return
         busy_meta.add(root)
         set_busy(btn, True)
         try:
             rec = await run.io_bound(bibsource.refetch, wd, mailto=config.resolve_enrich_mailto() or None)
         except Exception as ex:  # noqa: BLE001 — 오프라인·레이트리밋
-            ui.notify(f"온라인 조회에 실패했습니다: {ex}", type="negative")
+            ui.notify(t("온라인 조회에 실패했습니다: {ex}", ex=ex), type="negative")
             return
         finally:
             busy_meta.discard(root)
             set_busy(btn, False)
         if not rec:
-            ui.notify("출판 기록을 찾지 못했습니다 — 제목·저자·연도를 고친 뒤 다시 찾아 보세요.", type="info")
+            ui.notify(t("출판 기록을 찾지 못했습니다 — 제목·저자·연도를 고친 뒤 다시 찾아 보세요."), type="info")
             return
         bits = [str(x) for x in (rec.get("venue"), rec.get("year")) if x]
         if rec.get("doi"):
             bits.append(f"DOI {rec['doi']}")
-        ui.notify("출판 기록을 받았습니다" + (" — " + " · ".join(bits) if bits else ""), type="positive")
+        ui.notify(t("출판 기록을 받았습니다") + (" — " + " · ".join(bits) if bits else ""), type="positive")
         after_meta_change(r, paper_meta.load(wd) or {})
         if pick["root"] == root:
             preview_pane.refresh()  # DOI 칸·서지 ✓
@@ -1938,7 +1942,7 @@ def build_home(state: dict) -> None:
         """'AI로 다시 추출' — 앞부분에서 서지를 다시 뽑는다(손으로 고친 칸은 그대로)."""
         root, wd = str(r["root"]), WorkDir(r["root"])
         if root in busy_meta:
-            ui.notify("이 논문의 서지를 이미 다시 받는 중입니다.", type="info", timeout=1500)
+            ui.notify(t("이 논문의 서지를 이미 다시 받는 중입니다."), type="info", timeout=1500)
             return
         try:
             provider = config.build_provider()
@@ -1951,16 +1955,16 @@ def build_home(state: dict) -> None:
             async with meta_lock:
                 meta = await run.io_bound(paper_meta.reextract, wd, provider)
         except Exception as ex:  # noqa: BLE001
-            ui.notify(f"서지를 다시 뽑지 못했습니다: {ex}", type="negative")
+            ui.notify(t("서지를 다시 뽑지 못했습니다: {ex}", ex=ex), type="negative")
             return
         finally:
             busy_meta.discard(root)
             set_busy(btn, False)
         if not meta:
-            ui.notify("본문 앞부분이 비어 있어 서지를 뽑지 못했습니다.", type="warning")
+            ui.notify(t("본문 앞부분이 비어 있어 서지를 뽑지 못했습니다."), type="warning")
             return
         after_meta_change(r, meta)
-        ui.notify("AI로 서지를 다시 뽑았습니다 — 손으로 고친 칸은 그대로 두었습니다.", type="positive")
+        ui.notify(t("AI로 서지를 다시 뽑았습니다 — 손으로 고친 칸은 그대로 두었습니다."), type="positive")
         if pick["root"] == root:
             preview_pane.refresh()
 
@@ -1976,7 +1980,7 @@ def build_home(state: dict) -> None:
         if not text:
             return
         with box:
-            ui.label("메모").classes("md4-panel-title")
+            ui.label(t("메모")).classes("md4-panel-title")
             ui.label(text).classes("md4-pv-notes w-full")
 
     async def fill(seq: int, box, root: str, kind: str, lang: str, draw) -> None:  # noqa: ANN001
@@ -2001,7 +2005,7 @@ def build_home(state: dict) -> None:
         background_tasks.create(fill(pick["seq"], box, root, kind, lang, draw), name="md4-preview")
 
     def abs_skeleton() -> None:
-        ui.label("불러오는 중…").classes("md4-pv-bib")
+        ui.label(t("불러오는 중…")).classes("md4-pv-bib")
         for w in ("100%", "96%", "88%"):
             ui.skeleton("text").style(f"width:{w}")
 
@@ -2032,7 +2036,7 @@ def build_home(state: dict) -> None:
         pick["abs_lang"] = lang
         with ui.column().classes("md4-pv-body md4-scroll gap-3 w-full"):
             if selected:
-                ui.label(f"☑ {len(selected)}편 체크됨 — 일괄 동작 보기 ›").classes("md4-pv-selnote") \
+                ui.label(t("☑ {n}편 체크됨 — 일괄 동작 보기 ›", n=len(selected))).classes("md4-pv-selnote") \
                     .on("click", show_bulk)
             thumb = ui.element("div").classes("md4-pv-thumb")
             load_into(thumb, root, "thumb", "", draw_thumb, lambda: ui.skeleton("rect"))
@@ -2045,21 +2049,21 @@ def build_home(state: dict) -> None:
                 return commit_meta(r, key, value)
 
             with ui.column().classes("gap-1 w-full"):
-                edit_field("md4-pv-title w-full", "title", r["title"], "제목 없음 — 눌러서 입력", commit,
+                edit_field("md4-pv-title w-full", "title", r["title"], t("제목 없음 — 눌러서 입력"), commit,
                            multiline=True)
                 edit_field("md4-pv-auth w-full", "authors", r.get("authors") or [],
-                           "저자 없음 — 눌러서 입력 (한 줄에 한 명)", commit, multiline=True)
+                           t("저자 없음 — 눌러서 입력 (한 줄에 한 명)"), commit, multiline=True)
             with ui.element("div").classes("md4-pv-kv w-full"):
                 for key, label, val, tip in (
-                        ("year", "연도", r.get("year"), ""),
-                        ("venue", "venue", r.get("venue"), "학회·저널 이름"),
-                        ("doi", "DOI", doi, "BibTeX·온라인 조회에 쓰는 DOI — https://doi.org/ 접두는 떼어 저장합니다"),
-                        ("short_title", "약칭", pm.get("short_title"),
-                         "파일·폴더 이름에 쓰는 제목 약칭(이름 규칙의 {title}) — 비우면 제목에서 만듭니다")):
+                        ("year", t("연도"), r.get("year"), ""),
+                        ("venue", "venue", r.get("venue"), t("학회·저널 이름")),
+                        ("doi", "DOI", doi, t("BibTeX·온라인 조회에 쓰는 DOI — https://doi.org/ 접두는 떼어 저장합니다")),
+                        ("short_title", t("약칭"), pm.get("short_title"),
+                         t("파일·폴더 이름에 쓰는 제목 약칭(이름 규칙의 {title}) — 비우면 제목에서 만듭니다"))):
                     k = ui.label(label).classes("md4-pv-k")
                     if tip:
                         k.tooltip(tip)
-                    edit_field("md4-pv-v", key, val, "비어 있음 — 눌러서 입력", commit)
+                    edit_field("md4-pv-v", key, val, t("비어 있음 — 눌러서 입력"), commit)
             pv["hint"] = ui.element("div").classes("md4-pv-hint w-full")
             draw_hint(pv["hint"], r)
             tags_box = ui.element("div").classes("md4-ptags")
@@ -2067,18 +2071,18 @@ def build_home(state: dict) -> None:
             tags_box.on("click", lambda _, item=r, t=tags_box: open_member_menu(item, t, t))
             with ui.row().classes("items-center gap-x-2 gap-y-1 w-full"):
                 if r["has_ko"]:
-                    ui.badge("번역 완료", color="green").props("outline")
+                    ui.badge(t("번역 완료"), color="green").props("outline")
                 else:
-                    ui.badge("영어 변환", color="blue").props("outline")
+                    ui.badge(t("영어 변환"), color="blue").props("outline")
                 if unopened:
                     ui.badge("NEW", color="primary")
                 if r["hidden"]:
-                    ui.badge("숨김", color="grey").props("outline")
+                    ui.badge(t("숨김"), color="grey").props("outline")
                 ui.label(_relative_time(r["mtime"])).classes("md4-pmeta")
                 pv["ok"] = ui.element("div")
                 draw_ok(pv["ok"], doi)
             with ui.row().classes("items-center w-full no-wrap q-mt-xs"):
-                ui.label("초록").classes("md4-panel-title")
+                ui.label(t("초록")).classes("md4-panel-title")
                 ui.space()
                 pv["seg"] = {}
                 if r["has_ko"]:
@@ -2097,82 +2101,82 @@ def build_home(state: dict) -> None:
         foot = ui.column().classes("md4-pv-foot gap-1 w-full")
         with foot, ui.row().classes("md4-pv-redo items-center gap-1 w-full no-wrap"):
             # 서지 다시 받기 — 손으로 고친 칸은 어느 쪽도 덮지 않는다(user_fields)
-            online = ui.button("온라인에서 다시 찾기", icon="travel_explore",
+            online = ui.button(t("온라인에서 다시 찾기"), icon="travel_explore",
                                on_click=lambda: redo_online(r, online)) \
                 .props("flat dense no-caps size=sm color=grey-8") \
-                .tooltip("OpenAlex·Crossref 등에서 출판 기록(BibTeX용)을 새로 받습니다 — 손으로 고친 칸은 그대로")
+                .tooltip(t("OpenAlex·Crossref 등에서 출판 기록(BibTeX용)을 새로 받습니다 — 손으로 고친 칸은 그대로"))
             ai_ok = ai_ready()
             # 툴팁은 감싼 span에 — 비활성 <button>은 마우스 이벤트를 받지 않아 '왜 꺼졌는지'가 안 뜬다
             with ui.element("span").tooltip(
-                    "본문 앞부분에서 제목·저자·연도·venue를 AI로 다시 뽑습니다 — 손으로 고친 칸은 그대로"
-                    if ai_ok else "AI 키가 없어 쓸 수 없습니다 — ⚙ 설정 → AI에서 키를 넣으세요"):
-                ai = ui.button("AI로 다시 추출", icon="auto_awesome", on_click=lambda: redo_ai(r, ai)) \
+                    t("본문 앞부분에서 제목·저자·연도·venue를 AI로 다시 뽑습니다 — 손으로 고친 칸은 그대로")
+                    if ai_ok else t("AI 키가 없어 쓸 수 없습니다 — ⚙ 설정 → AI에서 키를 넣으세요")):
+                ai = ui.button(t("AI로 다시 추출"), icon="auto_awesome", on_click=lambda: redo_ai(r, ai)) \
                     .props("flat dense no-caps size=sm color=grey-8")
             if not ai_ok:
                 ai.disable()
         with foot, ui.row().classes("items-center gap-1 w-full no-wrap"):
-            ui.button("열기", icon="menu_book", on_click=lambda: open_wd(r["root"])) \
+            ui.button(t("열기"), icon="menu_book", on_click=lambda: open_wd(r["root"])) \
                 .props("unelevated dense no-caps color=primary").classes("q-px-sm") \
-                .tooltip("논문 화면으로 — 카드를 두 번 눌러도 됩니다")
+                .tooltip(t("논문 화면으로 — 카드를 두 번 눌러도 됩니다"))
             new_window_button(r["root"], state, r["title"], small=True)
             if _has_source_pdf(wd):
                 ui.button(icon="picture_as_pdf", on_click=lambda: open_source_pdf(UIController(wd))) \
                     .props("flat dense round size=sm color=grey-7") \
-                    .tooltip("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서")
+                    .tooltip(t("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서"))
             ui.button("EN", on_click=lambda: download_zip(r["root"], "en")) \
-                .props("flat dense no-caps size=sm color=grey-7").tooltip("영어 마크다운 zip (마크다운+이미지)")
+                .props("flat dense no-caps size=sm color=grey-7").tooltip(t("영어 마크다운 zip (마크다운+이미지)"))
             if r["has_ko"]:
                 ui.button(langs.short(r.get("lang") or "ko"), on_click=lambda: download_zip(r["root"], "ko")) \
                     .props("flat dense no-caps size=sm color=primary") \
-                    .tooltip(f"번역 마크다운 zip — {langs.get(r.get('lang') or 'ko').native} (마크다운+이미지)")
+                    .tooltip(t("번역 마크다운 zip — {native} (마크다운+이미지)", native=langs.get(r.get('lang') or 'ko').native))
             ui.space()
             ui.button(icon="push_pin", on_click=lambda: toggle_pin(r)) \
                 .props("flat dense round size=sm " + ("color=primary" if r["pinned"] else "color=grey-6")) \
-                .tooltip("고정 해제" if r["pinned"] else "목록 맨 위에 고정")
+                .tooltip(t("고정 해제") if r["pinned"] else t("목록 맨 위에 고정"))
             if r["hidden"]:
                 ui.button(icon="visibility", on_click=lambda: hide_paper(r, False)) \
-                    .props("flat dense round size=sm color=primary").tooltip("목록에 다시 표시")
+                    .props("flat dense round size=sm color=primary").tooltip(t("목록에 다시 표시"))
             else:
                 ui.button(icon="delete", on_click=lambda: confirm_delete(r)) \
-                    .props("flat dense round size=sm color=grey-6").tooltip("목록에서 숨기기 / 파일 삭제")
+                    .props("flat dense round size=sm color=grey-6").tooltip(t("목록에서 숨기기 / 파일 삭제"))
 
     def draw_bulk() -> None:
         """체크한 논문들 — 예전 목록 위 선택 툴바가 하던 일괄 동작을 이 칸에 세로로."""
         n = len(selected)
         with ui.column().classes("md4-pv-body md4-scroll gap-2 w-full"):
             with ui.row().classes("items-baseline w-full no-wrap"):
-                ui.label(f"{n}편 선택").classes("md4-pv-title")
+                ui.label(t("{n}편 선택", n=n)).classes("md4-pv-title")
                 ui.space()
-                ui.button("선택 해제", on_click=clear_selection).props("flat dense no-caps size=sm")
+                ui.button(t("선택 해제"), on_click=clear_selection).props("flat dense no-caps size=sm")
             rows = [data["by_root"][x] for x in selected if x in data["by_root"]]
             rows.sort(key=lambda x: x["title"].lower())
             with ui.column().classes("gap-0 w-full"):
                 for x in rows[:8]:
                     ui.label("· " + x["title"]).classes("md4-pv-sel truncate w-full").tooltip(x["title"])
                 if len(rows) > 8:
-                    ui.label(f"외 {len(rows) - 8}편").classes("md4-pv-sel")
-            ui.label("일괄 동작").classes("md4-panel-title q-mt-sm")
+                    ui.label(t("외 {v}편", v=len(rows) - 8)).classes("md4-pv-sel")
+            ui.label(t("일괄 동작")).classes("md4-panel-title q-mt-sm")
             with ui.column().classes("md4-pv-bulk gap-1 w-full"):
-                ui.button(f"번역 ({n}편)", icon="translate", on_click=translate_selection) \
+                ui.button(t("번역 ({n}편)", n=n), icon="translate", on_click=translate_selection) \
                     .props("outline dense no-caps color=secondary") \
-                    .tooltip("번역이 없거나 낡은 논문을 번역합니다 — 띄우기 전에 편수·대략 비용을 확인합니다")
-                ui.button("영어 zip", icon="download", on_click=lambda: download_bulk("en")) \
+                    .tooltip(t("번역이 없거나 낡은 논문을 번역합니다 — 띄우기 전에 편수·대략 비용을 확인합니다"))
+                ui.button(t("영어 zip"), icon="download", on_click=lambda: download_bulk("en")) \
                     .props("outline dense no-caps")
-                ui.button("번역 zip", icon="download", on_click=lambda: download_bulk("ko")) \
+                ui.button(t("번역 zip"), icon="download", on_click=lambda: download_bulk("ko")) \
                     .props("outline dense no-caps")
-                ui.button("모바일 HTML", icon="smartphone", on_click=download_mobile).props("outline dense no-caps") \
-                    .tooltip("폰에서 읽는 HTML 한 장 (원문·번역·문단 대조) — iCloud Drive·구글 드라이브에 저장하면 "
-                             "밖에서도 열립니다")
+                ui.button(t("모바일 HTML"), icon="smartphone", on_click=download_mobile).props("outline dense no-caps") \
+                    .tooltip(t("폰에서 읽는 HTML 한 장 (원문·번역·문단 대조) — iCloud Drive·구글 드라이브에 저장하면 "
+                             "밖에서도 열립니다"))
                 # 추가 = 다른 소속은 그대로 두고 더하기, 빼기 = 그 소속만 떼기(그 폴더의 사본도 정리)
-                with ui.button("컬렉션에 추가 ▾", icon="playlist_add").props("outline dense no-caps"):
+                with ui.button(t("컬렉션에 추가 ▾"), icon="playlist_add").props("outline dense no-caps"):
                     project_pick_menu(lambda v: bulk_member(v, True), with_new=True)
                 member_of = {p for root in selected for p in (data["by_root"].get(root) or {}).get("pids", [])}
-                with ui.button("컬렉션에서 빼기 ▾", icon="playlist_remove").props("outline dense no-caps"):
+                with ui.button(t("컬렉션에서 빼기 ▾"), icon="playlist_remove").props("outline dense no-caps"):
                     project_pick_menu(lambda v: bulk_member(v, False), only=member_of)
                 if settings_dialog.any_library_dirs():
-                    ui.button("폴더로 저장", icon="drive_file_move",
+                    ui.button(t("폴더로 저장"), icon="drive_file_move",
                               on_click=lambda: save_to_library([Path(p) for p in selected])) \
-                        .props("outline dense no-caps").tooltip("저장 위치로 내보내기")
+                        .props("outline dense no-caps").tooltip(t("저장 위치로 내보내기"))
 
     def draw_summary() -> None:
         """아무것도 고르지 않았을 때 — 이 범위 요약 + 미리보기 안내."""
@@ -2181,17 +2185,17 @@ def build_home(state: dict) -> None:
         n_ko = sum(1 for r in rows if r["has_ko"])
         with ui.column().classes("md4-pv-body md4-scroll gap-2 w-full"):
             ui.label(scope_label()).classes("md4-pv-title")
-            ui.label(f"{len(rows)}편 · 번역 {n_ko}편").classes("md4-pv-stat")
+            ui.label(t("{n}편 · 번역 {n_ko}편", n=len(rows), n_ko=n_ko)).classes("md4-pv-stat")
             if s not in (projects.ALL, projects.NONE):
                 root = projects.folder_of(s)  # 하위 컬렉션은 상위 폴더를 물려받는다
                 with ui.row().classes("items-start gap-1 no-wrap w-full"):
                     ui.icon("folder" if root else "folder_off", size="15px").classes("text-grey-5 q-mt-xs")
-                    ui.label(str(root) if root else "폴더 미지정 — 공통 저장 위치에 쌓입니다") \
+                    ui.label(str(root) if root else t("폴더 미지정 — 공통 저장 위치에 쌓입니다")) \
                         .classes("md4-pv-bib break-all")
             with ui.column().classes("md4-pv-empty gap-1 w-full"):
                 ui.icon("article", size="40px").classes("text-grey-4")
-                ui.label("논문을 고르면 여기에 미리보기").classes("text-sm")
-                ui.label("한 번 클릭 = 미리보기 · 두 번 클릭(또는 Enter) = 열기 · 체크박스 = 여러 편 일괄 동작") \
+                ui.label(t("논문을 고르면 여기에 미리보기")).classes("text-sm")
+                ui.label(t("한 번 클릭 = 미리보기 · 두 번 클릭(또는 Enter) = 열기 · 체크박스 = 여러 편 일괄 동작")) \
                     .classes("text-xs")
 
     @ui.refreshable
@@ -2269,9 +2273,9 @@ def build_home(state: dict) -> None:
             with ui.column().classes("md4-hside-rows md4-scroll gap-0 w-full"):
                 sidebar_rows()
             with ui.column().classes("md4-hfoot gap-0 w-full"):
-                ui.button("설정", icon="settings", color=None, on_click=lambda: open_settings()) \
+                ui.button(t("설정"), icon="settings", color=None, on_click=lambda: open_settings()) \
                     .props("flat dense no-caps").classes("w-full") \
-                    .tooltip("AI 키 · 저장 위치 · 변환·번역 기본값 · 고급")
+                    .tooltip(t("AI 키 · 저장 위치 · 변환·번역 기본값 · 고급"))
                 update_banner.version_line(state)  # v0.1.0 · 커밋 · 최신 여부
                 ws_label()
 
@@ -2289,23 +2293,23 @@ def build_home(state: dict) -> None:
                     view["sort"] = e.value
                     recent_list.refresh()
 
-                ui.input(placeholder="제목·저자·venue 검색…").on_value_change(on_search) \
+                ui.input(placeholder=t("제목·저자·venue 검색…")).on_value_change(on_search) \
                     .props("dense outlined clearable").classes("flex-grow")
-                ui.select(_SORTS, value="recent", on_change=on_sort).props("dense outlined").classes("w-32")
+                ui.select({k: t(v) for k, v in _SORTS.items()}, value="recent", on_change=on_sort).props("dense outlined").classes("w-32")
                 with ui.element("div").classes("md4-upwrap"):
-                    ui.button("올리기", icon="upload_file").props("unelevated dense no-caps color=primary") \
+                    ui.button(t("올리기"), icon="upload_file").props("unelevated dense no-caps color=primary") \
                         .classes("md4-upbtn q-px-sm")
                     # 클릭은 위 CSS가 펼쳐 놓은 진짜 <input type=file>이 그대로 받는다 (JS 개입 없음).
                     # 파일을 창 위로 끄는 동안에는 같은 업로더가 목록 열 전체로 펼쳐져 놓기를 받는다.
                     ui.upload(on_upload=handle, multiple=True, auto_upload=True) \
                         .props('accept=".pdf,.md,.markdown"').classes("md4-upload") \
-                        .tooltip("PDF·마크다운 고르기 — 창 위로 끌어다 놓아도 됩니다")
+                        .tooltip(t("PDF·마크다운 고르기 — 창 위로 끌어다 놓아도 됩니다"))
                 with ui.button(icon="more_horiz", color=None).props("flat dense round").classes("text-grey-7") \
-                        .tooltip("숨긴 논문 · 내보내기 형식 · 이 목록 저장"):
+                        .tooltip(t("숨긴 논문 · 내보내기 형식 · 이 목록 저장")):
                     more_menu()
                 pv["btn"] = ui.button(icon="view_sidebar", color=None, on_click=toggle_preview) \
                     .props("flat dense round").classes("text-primary") \
-                    .tooltip("오른쪽 미리보기 접기/펴기")
+                    .tooltip(t("오른쪽 미리보기 접기/펴기"))
             with ui.column().classes("md4-hlist md4-scroll w-full"):
                 queue_panel()  # 변환 중인 논문 — 끝나면 바로 아래 목록에 나타나므로 같은 칸에 둔다
                 recent_list()
