@@ -106,7 +106,7 @@ def test_viewer_keeps_collection_rows_out_of_paper_glossary():
     assert 'coll_view: dict = {"pid": ctrl.collection_id(), "entries": ctrl.collection_glossary()}' in src
     assert "gloss_entries.append" not in src.split("def coll_rows(", 1)[1].split("def on_glossary_refresh(", 1)[0]
     assert '"컬렉션 용어집이 우선합니다"' in src and "text-decoration:line-through" in src
-    assert 'f"용어집 검토 ({n} + 컬렉션 {n_coll})"' in src
+    assert 't("용어집 검토 ({n} + 컬렉션 {n_coll})"' in src
     assert "ui.on(agent_panel.GLOSSARY_REFRESH_EVENT, on_glossary_refresh)" in src
     body = src.split("def on_glossary_refresh(", 1)[1].split("with ui.dialog() as gloss_dialog", 1)[0]
     assert "gloss_dialog.is_deleted" in body and 'args.get("collection")' in body and "ctrl.collection_id()" in body

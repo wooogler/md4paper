@@ -4192,7 +4192,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def gloss_autosave() -> None:  # 편집 즉시 glossary.yaml에 저장 (별도 저장 버튼 없이)
         if merge_dupe_rows():
             gloss_rows.refresh()
-            ui.notify("대소문자만 다른 중복 용어를 합쳤습니다.", type="info")
+            ui.notify(t("대소문자만 다른 중복 용어를 합쳤습니다."), type="info")
         ctrl.save_glossary([GlossaryEntry(**d) for d in gloss_entries if d["term"].strip()])
 
     # 주 컬렉션 용어집 — 용어집 시트 위 구역에 읽기 전용으로만 보인다. gloss_entries(= glossary.yaml로 통째로
@@ -4226,7 +4226,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         key = term_key(term)
         if not key:
-            ui.notify("원어를 먼저 입력하세요.", type="warning")
+            ui.notify(t("원어를 먼저 입력하세요."), type="warning")
             return
         ex_open.symmetric_difference_update({key})
         refresh.refresh()
@@ -4237,7 +4237,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         on = bool(term.strip()) and term_key(term) in ex_open
         ui.button(icon="format_quote", on_click=lambda _, tv=term: example_toggle(tv, refresh)) \
             .props(f"flat dense round size=sm color={'primary' if on else 'grey-6'}") \
-            .tooltip("이 용어가 쓰인 문장 (원문·번역) — 어떻게 옮기는 게 자연스러운지 문맥으로 보기")
+            .tooltip(t("이 용어가 쓰인 문장 (원문·번역) — 어떻게 옮기는 게 자연스러운지 문맥으로 보기"))
 
     def example_block(term: str, korean: str, policy: str) -> None:
         from md4paper.translate.glossary import term_key
@@ -4248,7 +4248,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             try:
                 ex, rows = term_examples.find(ctrl.wd, term, korean, policy)
             except (OSError, ValueError) as e:
-                ui.label(f"본문을 읽지 못했습니다: {e}").classes("md4-tex-meta")
+                ui.label(t("본문을 읽지 못했습니다: {e}", e=e)).classes("md4-tex-meta")
                 return
             term_examples.render(ex, rows, goto=goto_example_row,
                                  unaligned_note=term_examples.unaligned(ctrl.wd))
@@ -4260,21 +4260,21 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         over = coll_keys()  # 컬렉션에 같은 용어가 있으면 이 논문 행은 번역에 안 쓰인다
         if coll_view["pid"]:
             n = sum(1 for d in gloss_entries if d["term"].strip())
-            ui.label(f"이 논문 용어집 ({n})").classes("text-sm font-medium q-mt-xs")
+            ui.label(t("이 논문 용어집 ({n})", n=n)).classes("text-sm font-medium q-mt-xs")
         if not gloss_entries:
-            ui.label("용어집이 비어 있습니다 — 변환 시 자동 생성됩니다. '행 추가'나 왼쪽 '용어 추가'로 채우세요.") \
+            ui.label(t("용어집이 비어 있습니다 — 변환 시 자동 생성됩니다. '행 추가'나 왼쪽 '용어 추가'로 채우세요.")) \
                 .classes("text-sm text-gray-400")
         for i, d in enumerate(gloss_entries):
             shadowed = bool(d["term"].strip()) and term_key(d["term"]) in over
             strike = ' input-style="text-decoration:line-through"' if shadowed else ""
             row = ui.row().classes("items-center gap-2 w-full")
             if shadowed:
-                row.style("opacity:.5").tooltip("컬렉션 용어집이 우선합니다")
+                row.style("opacity:.5").tooltip(t("컬렉션 용어집이 우선합니다"))
             with row:
-                ui.input(placeholder="원어", value=d["term"]).bind_value(d, "term") \
+                ui.input(placeholder=t("원어"), value=d["term"]).bind_value(d, "term") \
                     .on("blur", lambda: gloss_autosave()).props("dense outlined" + strike).classes("w-40")
                 ui.icon("arrow_forward").classes("text-gray-400")
-                ui.input(placeholder="번역어", value=d["korean"]).bind_value(d, "korean") \
+                ui.input(placeholder=t("번역어"), value=d["korean"]).bind_value(d, "korean") \
                     .on("blur", lambda: gloss_autosave()).props("dense outlined" + strike).classes("w-40")
                 ui.select(_tr(_POLICY), value=d["policy"]).bind_value(d, "policy") \
                     .on("update:model-value", lambda: gloss_autosave()).props("dense outlined").classes("w-44")
@@ -4292,7 +4292,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """번역할 섹션에서 새 용어를 뽑아 용어집에 추가 (변환에 쓰던 기본 프로바이더 사용)."""
         n_sec = len(ctrl.ticked_ids())
         if n_sec == 0:
-            ui.notify("먼저 번역할 섹션을 선택하세요.", type="warning")
+            ui.notify(t("먼저 번역할 섹션을 선택하세요."), type="warning")
             return
         try:
             prov = config.build_provider()
@@ -4313,28 +4313,28 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 added = [e for e in new if e.term.strip() and e.term.strip().lower() not in seen]
                 if added:
                     ctrl.save_glossary([*cur, *added])
-                job.message = (f"새 용어 {len(added)}개 추가됨 (자동 저장)." if added
-                               else "추가할 새 용어가 없습니다.")
+                job.message = (t("새 용어 {n}개 추가됨 (자동 저장).", n=len(added)) if added
+                               else t("추가할 새 용어가 없습니다."))
                 return len(added)
 
-            job = jobs.start(ctrl.wd.root, "terms", "용어 추출", work, title=_title)
+            job = jobs.start(ctrl.wd.root, "terms", t("용어 추출"), work, title=_title)
             if job is None:
-                ui.notify("이미 용어를 추출하는 중입니다.", type="info")
+                ui.notify(t("이미 용어를 추출하는 중입니다."), type="info")
                 return
-            ui.notify("선택 섹션에서 용어 추출 중… (AI) — 다른 탭으로 옮겨도 계속됩니다")
+            ui.notify(t("선택 섹션에서 용어 추출 중… (AI) — 다른 탭으로 옮겨도 계속됩니다"))
             attach_terms(job)
             paper_tabs.refresh()
 
         if n_sec > 12 or len(ctrl.selected_sections_text()) > 30000:  # 많으면 시간·비용 경고
             with ui.dialog() as dlg, ui.card().classes("gap-2"):
-                ui.label(f"{n_sec}개 섹션에서 용어를 추출합니다. 섹션이 많아 시간·비용이 더 들 수 있어요. 계속할까요?")
+                ui.label(t("{n_sec}개 섹션에서 용어를 추출합니다. 섹션이 많아 시간·비용이 더 들 수 있어요. 계속할까요?", n_sec=n_sec))
 
                 def _yes() -> None:
                     dlg.close()
                     run_extract()
                 with ui.row().classes("justify-end w-full gap-2"):
-                    ui.button("취소", on_click=dlg.close).props("flat")
-                    ui.button("계속", on_click=_yes).props("color=primary")
+                    ui.button(t("취소"), on_click=dlg.close).props("flat")
+                    ui.button(t("계속"), on_click=_yes).props("color=primary")
             dlg.open()
         else:
             run_extract()
@@ -4368,17 +4368,17 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             if losing:
                 names = [s.text for s in ctrl.manifest.sections if s.id in losing]
                 with ui.dialog() as dlg, ui.card().classes("gap-2").style("max-width:480px"):
-                    ui.label(f"체크를 푼 {len(losing)}개 섹션이 영어 원문으로 바뀝니다").classes("text-base font-medium")
-                    ui.label("이 섹션들은 보관된 번역이 없어, 지금 실행하면 결과 문서에서 영어로 남습니다. "
+                    ui.label(t("체크를 푼 {n}개 섹션이 영어 원문으로 바뀝니다", n=len(losing))).classes("text-base font-medium")
+                    ui.label(t("이 섹션들은 보관된 번역이 없어, 지금 실행하면 결과 문서에서 영어로 남습니다. "
                              "일부만 다시 번역하려던 것이라면 전체를 선택한 채 실행하세요 — 바뀐 섹션만 새로 "
-                             "번역되고 나머지는 지난 번역을 그대로 씁니다.").classes("text-sm text-gray-600")
+                             "번역되고 나머지는 지난 번역을 그대로 씁니다.")).classes("text-sm text-gray-600")
                     ui.label(" · ".join(n[:40] for n in names[:8]) + (" …" if len(names) > 8 else "")) \
                         .classes("text-xs text-gray-500")
                     with ui.row().classes("justify-end gap-2 w-full"):
-                        ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
-                        ui.button("영어로 두고 진행", on_click=lambda: (dlg.close(), _confirm_ko_edit())) \
+                        ui.button(t("취소"), on_click=dlg.close).props("flat dense no-caps")
+                        ui.button(t("영어로 두고 진행"), on_click=lambda: (dlg.close(), _confirm_ko_edit())) \
                             .props("outline dense no-caps color=negative")
-                        ui.button("전체 선택하고 번역", on_click=lambda: (
+                        ui.button(t("전체 선택하고 번역"), on_click=lambda: (
                             dlg.close(), ctrl.set_all_translate(True), ctrl.save(),
                             _translate_refs["picker"].refresh(), _confirm_ko_edit())) \
                             .props("unelevated dense no-caps color=primary")
@@ -4392,12 +4392,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 _start_translate()
                 return
             with ui.dialog() as dlg, ui.card().classes("gap-2"):
-                ui.label("직접 편집한 번역이 사라집니다").classes("text-base font-medium")
-                ui.label("번역을 실행하면 번역 마크다운을 새 결과로 다시 쓰기 때문에, 편집기에서 고친 "
-                         "번역문이 덮어써집니다.").classes("text-sm text-gray-600").style("max-width:420px")
+                ui.label(t("직접 편집한 번역이 사라집니다")).classes("text-base font-medium")
+                ui.label(t("번역을 실행하면 번역 마크다운을 새 결과로 다시 쓰기 때문에, 편집기에서 고친 "
+                         "번역문이 덮어써집니다.")).classes("text-sm text-gray-600").style("max-width:420px")
                 with ui.row().classes("justify-end gap-2 w-full"):
-                    ui.button("취소", on_click=dlg.close).props("flat dense no-caps")
-                    ui.button("번역 실행", on_click=lambda: (dlg.close(), _start_translate())) \
+                    ui.button(t("취소"), on_click=dlg.close).props("flat dense no-caps")
+                    ui.button(t("번역 실행"), on_click=lambda: (dlg.close(), _start_translate())) \
                         .props("unelevated dense no-caps color=negative")
             dlg.open()
 
@@ -4413,13 +4413,13 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             style = ctrl.manifest.korean_style
 
             if jobs.is_running(ctrl.wd.root, "reconvert"):
-                ui.notify("다시 변환하는 중에는 번역할 수 없습니다 — 끝난 뒤 다시 눌러 주세요.", type="info")
+                ui.notify(t("다시 변환하는 중에는 번역할 수 없습니다 — 끝난 뒤 다시 눌러 주세요."), type="info")
                 return
             # 워커 스레드에서 화면 없이 완결된다 — 탭을 옮겨 이 페이지가 사라져도 번역·저장은 끝까지 간다.
             # 홈 일괄 번역과 같은 작업 함수·같은 동시 실행 문을 쓴다(§translate_job).
             job = translate_job.start(ctrl.wd, prov, title=_title, style=style)
             if job is None:
-                ui.notify("이 논문은 이미 번역 중입니다.", type="info")
+                ui.notify(t("이 논문은 이미 번역 중입니다."), type="info")
                 return
             translate_state.update(status={}, done=0, total=0, failures={})
             failure_panel.refresh()
@@ -4440,10 +4440,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 translate_state.update(done=job.done, total=tv, status=job.detail.get("status") or {})
                 if job.running:
                     bar.value = job.fraction
-                    prog_lbl.text = (f"번역 중… {job.done}/{tv} 섹션 ({int(job.fraction * 100)}%) · 병렬 처리 "
-                                     "· 다른 탭으로 옮겨도 계속됩니다" if tv else
-                                     f"대기 중 — 다른 번역이 끝나면 시작합니다 (동시에 {translate_job.gate().limit}편까지)"
-                                     if job.detail.get("queued") else "번역 준비 중…")
+                    prog_lbl.text = (t("번역 중… {done}/{total} 섹션 ({pct}%) · 병렬 처리 · 다른 탭으로 옮겨도 계속됩니다",
+                                       done=job.done, total=tv, pct=int(job.fraction * 100)) if tv else
+                                     t("대기 중 — 다른 번역이 끝나면 시작합니다 (동시에 {limit}편까지)",
+                                       limit=translate_job.gate().limit)
+                                     if job.detail.get("queued") else t("번역 준비 중…"))
                     update_tree_status()  # 섹션 트리 아이템에 진행중/완료 아이콘 반영
                     return
                 timer.deactivate()
@@ -4470,7 +4471,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 if fresh:
                     ui.notify(job.message, type="positive")
             else:
-                prog_lbl.text = f"실패: {job.error}"
+                prog_lbl.text = t("실패: {error}", error=job.error)
                 if fresh:
                     ui.notify(job.error, type="negative")
             update_tree_status()
@@ -4492,17 +4493,17 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     "background:#fff7ed; border:1px solid #fdba74; border-radius:8px"):
                 with ui.row().classes("items-center gap-2 w-full no-wrap"):
                     ui.icon("update", color="orange-7")
-                    ui.label(f"원문이 바뀐 섹션 {len(stale)}개 — 번역이 낡았습니다") \
+                    ui.label(t("원문이 바뀐 섹션 {n}개 — 번역이 낡았습니다", n=len(stale))) \
                         .classes("text-sm font-medium text-orange-9")
                     ui.space()
-                    ui.button("바뀐 섹션 재번역", icon="refresh", on_click=do_translate) \
+                    ui.button(t("바뀐 섹션 재번역"), icon="refresh", on_click=do_translate) \
                         .props("dense no-caps color=orange").tooltip(
-                            "바뀐 섹션만 새로 번역합니다 — 나머지는 지난 번역(캐시)을 그대로 씁니다")
+                            t("바뀐 섹션만 새로 번역합니다 — 나머지는 지난 번역(캐시)을 그대로 씁니다"))
                 names = [s.text for s in ctrl.manifest.sections if s.id in stale]  # 문서 순서대로
                 ui.label(" · ".join(n[:40] for n in names[:8]) + (" …" if len(names) > 8 else "")) \
                     .classes("text-xs text-orange-800")
-                ui.label("PDF에서 다시 변환했거나 레이아웃을 고쳤거나 원문을 직접 편집한 섹션입니다. 트리에서도 "
-                         "주황 ↻ 아이콘으로 표시됩니다.").classes("text-xs text-gray-500")
+                ui.label(t("PDF에서 다시 변환했거나 레이아웃을 고쳤거나 원문을 직접 편집한 섹션입니다. 트리에서도 "
+                         "주황 ↻ 아이콘으로 표시됩니다.")).classes("text-xs text-gray-500")
 
         @ui.refreshable
         def failure_panel() -> None:
@@ -4514,18 +4515,18 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     "background:#fff7ed; border:1px solid #fdba74; border-radius:8px"):
                 with ui.row().classes("items-center gap-2 w-full no-wrap"):
                     ui.icon("warning", color="orange-7")
-                    ui.label(f"번역 실패 {len(fails)}개 섹션 — 구조 검증 실패로 영어 원문 유지") \
+                    ui.label(t("번역 실패 {n}개 섹션 — 구조 검증 실패로 영어 원문 유지", n=len(fails))) \
                         .classes("text-sm font-medium text-orange-9")
                     ui.space()
-                    ui.button("실패 섹션 재번역", icon="refresh", on_click=do_translate) \
-                        .props("dense no-caps color=orange").tooltip("실패한 섹션만 다시 번역합니다(성공분은 캐시 재사용)")
+                    ui.button(t("실패 섹션 재번역"), icon="refresh", on_click=do_translate) \
+                        .props("dense no-caps color=orange").tooltip(t("실패한 섹션만 다시 번역합니다(성공분은 캐시 재사용)"))
                 for sid, reason in fails.items():
                     txt = (label_by_id.get(sid, sid) or "")[:50]
                     ui.label(f"· {txt} — {reason}").classes("text-xs text-orange-800")
                 ui.label(
-                    "번역문이 원문의 마크다운 구조(헤더·표·링크·수식 등)를 그대로 지켜야 하는데, 두 번 시도해도 "
+                    t("번역문이 원문의 마크다운 구조(헤더·표·링크·수식 등)를 그대로 지켜야 하는데, 두 번 시도해도 "
                     "어긋나서 그 섹션은 영어를 그대로 뒀습니다. 재번역해도 계속 실패하면 표·수식이 복잡한 섹션이니 "
-                    "번역 후 뷰어에서 직접 손봐도 됩니다.").classes("text-xs text-gray-500")
+                    "번역 후 뷰어에서 직접 손봐도 됩니다.")).classes("text-xs text-gray-500")
 
         def after_collection_change() -> None:
             """컬렉션 용어집이 바뀌었다(대화상자를 닫았거나 에이전트가 썼다) — 위 구역·취소선·단추 글자·원문 바뀜."""
@@ -4555,15 +4556,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                     "background:#f4f8fd; border:1px solid #d6e6f8; border-radius:8px"):
                 with ui.row().classes("items-center w-full no-wrap gap-2"):
                     ui.icon("folder_special", color="primary", size="18px")
-                    ui.label(f"컬렉션 '{name}' 용어집 ({len(entries)}) — 이 논문 용어집보다 우선"
-                             if entries else f"컬렉션 '{name}' 용어집 — 아직 없음") \
+                    ui.label(t("컬렉션 '{name}' 용어집 ({n}) — 이 논문 용어집보다 우선", name=name, n=len(entries))
+                             if entries else t("컬렉션 '{name}' 용어집 — 아직 없음", name=name)) \
                         .classes("text-sm font-medium min-w-0")
                     ui.space()
-                    ui.button("컬렉션 용어집 열기…", icon="open_in_new", on_click=open_collection_dialog) \
+                    ui.button(t("컬렉션 용어집 열기…"), icon="open_in_new", on_click=open_collection_dialog) \
                         .props("flat dense no-caps color=primary").classes("shrink-0") \
-                        .tooltip("주 컬렉션이 이 컬렉션인 논문 모두에 적용되는 용어집 — 논문들이 어긋나게 쓴 번역어를 여기서 통일합니다")
+                        .tooltip(t("주 컬렉션이 이 컬렉션인 논문 모두에 적용되는 용어집 — 논문들이 어긋나게 쓴 번역어를 여기서 통일합니다"))
                 if not entries:
-                    ui.label("이 컬렉션 논문들의 용어집에서 어긋난 번역어를 골라 통일하면 이 논문 번역에도 적용됩니다.") \
+                    ui.label(t("이 컬렉션 논문들의 용어집에서 어긋난 번역어를 골라 통일하면 이 논문 번역에도 적용됩니다.")) \
                         .classes("text-xs text-gray-500")
                     return
                 with ui.column().classes("w-full gap-0 md4-scroll").style("max-height:28vh; overflow-y:auto"):
@@ -4571,7 +4572,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         with ui.row().classes("items-center gap-2 w-full no-wrap"):
                             ui.label(e.term).classes("text-sm w-40 shrink-0 truncate").tooltip(e.term)
                             ui.icon("arrow_forward", size="14px").classes("text-gray-400")
-                            ui.label(f"{e.korean or '(빈 칸)'} · {t(_POLICY.get(e.policy, e.policy))}") \
+                            ui.label(f"{e.korean or t('(빈 칸)')} · {t(_POLICY.get(e.policy, e.policy))}") \
                                 .classes("text-sm text-gray-700 truncate min-w-0")
                             ui.space()
                             example_button(e.term, coll_rows)
@@ -4591,17 +4592,17 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         with ui.dialog() as gloss_dialog, ui.card().classes("gap-2").style(
                 "width:760px; max-width:94vw; max-height:84vh"):
             with ui.row().classes("items-center w-full no-wrap gap-2"):
-                ui.label("용어집").classes("text-lg font-bold")
+                ui.label(t("용어집")).classes("text-lg font-bold")
                 ui.space()
-                ui.button("행 추가", icon="add", on_click=add_gloss_row).props("outline dense no-caps")
-                ui.button("선택 섹션에서 용어 추가", icon="playlist_add", on_click=add_terms_from_selected) \
-                    .props("outline dense no-caps").tooltip("번역할 섹션으로 체크한 섹션에서 새 용어를 뽑아 추가")
+                ui.button(t("행 추가"), icon="add", on_click=add_gloss_row).props("outline dense no-caps")
+                ui.button(t("선택 섹션에서 용어 추가"), icon="playlist_add", on_click=add_terms_from_selected) \
+                    .props("outline dense no-caps").tooltip(t("번역할 섹션으로 체크한 섹션에서 새 용어를 뽑아 추가"))
                 ui.button(icon="close", on_click=gloss_dialog.close).props("flat dense round")
             ui.markdown(
-                "변환할 때 **Abstract·Introduction 본문과 모든 섹션 제목**에서 핵심 용어를 자동으로 뽑아 만듭니다. "
+                t("변환할 때 **Abstract·Introduction 본문과 모든 섹션 제목**에서 핵심 용어를 자동으로 뽑아 만듭니다. "
                 "번역 전에 번역어와 처리 방식(번역 / 음역 / 원문 유지 / 첫 등장 시 병기)을 검토·수정하세요. "
                 "고친 내용은 바로 저장됩니다.\n\n"
-                "컬렉션 용어집의 항목은 여기서 못 고칩니다 — 컬렉션 용어집에서 고치면 주 컬렉션이 그 컬렉션인 논문 전체에 적용됩니다."
+                "컬렉션 용어집의 항목은 여기서 못 고칩니다 — 컬렉션 용어집에서 고치면 주 컬렉션이 그 컬렉션인 논문 전체에 적용됩니다.")
             ).classes("text-xs text-gray-600")
             with ui.column().classes("w-full gap-1 md4-scroll").style("overflow-y:auto; min-height:0"):
                 coll_rows()
@@ -4614,19 +4615,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         def gloss_open_btn() -> None:
             n = sum(1 for d in gloss_entries if d["term"].strip())
             n_coll = len(coll_view["entries"])
-            label = f"용어집 검토 ({n} + 컬렉션 {n_coll})" if n_coll else f"용어집 검토 ({n})"
+            label = t("용어집 검토 ({n} + 컬렉션 {n_coll})", n=n, n_coll=n_coll) if n_coll else t("용어집 검토 ({n})", n=n)
             ui.button(label, icon="menu_book", on_click=gloss_dialog.open) \
-                .props("outline no-caps color=primary").tooltip("번역에 쓸 용어집을 표로 검토·수정")
+                .props("outline no-caps color=primary").tooltip(t("번역에 쓸 용어집을 표로 검토·수정"))
 
         with ui.column().classes("w-full gap-2"):
             with ui.row().classes("items-center gap-2 w-full no-wrap"):
-                translate_btn = ui.button("번역 실행", icon="translate", on_click=do_translate) \
-                    .props("color=secondary no-caps").tooltip("체크한 섹션을 아래 용어집·번역 방식으로 번역합니다")
+                translate_btn = ui.button(t("번역 실행"), icon="translate", on_click=do_translate) \
+                    .props("color=secondary no-caps").tooltip(t("체크한 섹션을 아래 용어집·번역 방식으로 번역합니다"))
                 gloss_open_btn()
             model_pick = ui.select(ctrl.translate_model_options(), value=ctrl.translate_model(),
-                                   label="번역 모델").props("dense outlined options-dense").classes("w-full") \
-                .tooltip("기본은 이 논문을 지난번에 번역한 모델입니다. 다른 모델을 고르면 캐시를 쓰지 않고 "
-                         "전체를 그 모델로 다시 번역합니다(실패 섹션 재번역도 이 모델로).")
+                                   label=t("번역 모델")).props("dense outlined options-dense").classes("w-full") \
+                .tooltip(t("기본은 이 논문을 지난번에 번역한 모델입니다. 다른 모델을 고르면 캐시를 쓰지 않고 "
+                         "전체를 그 모델로 다시 번역합니다(실패 섹션 재번역도 이 모델로)."))
             bar = ui.linear_progress(value=0, show_value=False) \
                 .props("size=14px rounded color=secondary").classes("w-full")
             bar.visible = False
@@ -4674,7 +4675,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 if job.status == "done":
                     refresh_canvas()
                 if fresh:
-                    ui.notify(job.message if job.status == "done" else f"그림 번역 실패: {job.error}",
+                    ui.notify(job.message if job.status == "done" else t("그림 번역 실패: {error}", error=job.error),
                               type="positive" if job.status == "done" else "negative")
 
             timer = ui.timer(0.5, tick)
@@ -4713,7 +4714,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             # 예전엔 미리보기의 sec- 앵커로 옮겼는데, 옆이 PDF면 앵커가 없어 아무 일도 일어나지 않았다.
             js = _edit_goto_js(sid)
             if not js:
-                ui.notify("이 섹션은 지금 문서에 헤더로 남아 있지 않습니다.", type="info")
+                ui.notify(t("이 섹션은 지금 문서에 헤더로 남아 있지 않습니다."), type="info")
                 return
             await ui.run_javascript(js)
             return
@@ -4727,16 +4728,16 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if show_pdf and pg is not None:
             js += f" document.getElementById('pdfpage-{pg}')?.scrollIntoView({{behavior:'instant', block:'start'}});"
         if not js:
-            ui.notify("이 섹션의 위치 정보가 없습니다.", type="info")
+            ui.notify(t("이 섹션의 위치 정보가 없습니다."), type="info")
             return
         await ui.run_javascript(js)
 
     # ---------- 왼쪽 작업 패널 — 목차 / 구조 / 번역 / 설정 / 메모 ----------
     # 옛 '변환 탭 왼쪽 열'과 '번역 탭 왼쪽 열'이 여기로 들어왔다. 모드를 모두 지어 두고(작업 재부착·
     # refreshable 참조가 살아 있어야 한다) 보이는 것만 바꾼다. 레일의 같은 단추를 다시 누르면 접힌다.
-    _PANELS = (("toc", "목차", "toc"), ("structure", "구조", "account_tree"),
-               ("translate", "번역", "translate"), ("settings", "설정", "tune"),
-               ("notes", "메모", "edit_note"))
+    _PANELS = (("toc", N_("목차"), "toc"), ("structure", N_("구조"), "account_tree"),
+               ("translate", N_("번역"), "translate"), ("settings", N_("설정"), "tune"),
+               ("notes", N_("메모"), "edit_note"))
     root_key = str(ctrl.wd.root.resolve())
     panel_state: dict = {"mode": None, "splitter": None, "boxes": {}}
     # 패널 폭(%)은 모드마다 따로 — 목차는 한 줄짜리 제목 목록이라 좁게, 섹션 트리·설정은 넓게 시작한다.
@@ -4784,15 +4785,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             st = ctrl.save_notes(text, tab, expect=mem["stamp"] if mem is not None else notes_io.ANY)
         except notes_io.Conflict:
             notes_state["conflicts"][tab] = (text, el_id)
-            notes_set_status("다른 곳에서 바뀜 — 저장 안 함")
+            notes_set_status(t("다른 곳에서 바뀜 — 저장 안 함"))
             cb = notes_state["on_conflict"]
             if cb is not None:
                 cb(tab)
             else:
-                ui.notify(f"‘{tab}’ 메모가 다른 곳에서 바뀌어 저장하지 않았습니다.", type="warning")
+                ui.notify(t("‘{tab}’ 메모가 다른 곳에서 바뀌어 저장하지 않았습니다.", tab=tab), type="warning")
             return False
         except OSError as e:
-            notes_set_status(f"저장 실패: {e}")
+            notes_set_status(t("저장 실패: {e}", e=e))
             return False
         if mem is not None:
             mem["saved"], mem["stamp"] = text, st
@@ -4810,7 +4811,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         for tab, (text, el_id, js) in pending.items():
             ok = notes_write(tab, text, el_id, js) and ok
         if ok:
-            notes_set_status("저장됨")
+            notes_set_status(t("저장됨"))
 
     def notes_set_status(text: str) -> None:
         lbl = notes_state["status"]
@@ -4819,7 +4820,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     def notes_typed(tab: str, text: str, el_id: str | None = None) -> None:
         notes_state["pending"][tab] = (text, el_id, None)  # 친 칸의 탭에 — 칸·탭을 바꿔도 섞이지 않게
-        notes_set_status("저장 중…")
+        notes_set_status(t("저장 중…"))
         tv = notes_state["timer"]
         if tv is not None:
             tv.cancel()
@@ -4859,14 +4860,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             b = ui.element("div").classes("md4-railbtn" + (" on" if on else ""))
             with b:
                 ui.icon(icon, size="20px")
-                ui.label(label)
+                ui.label(t(label))
             b.on("click", lambda _, k=key: set_panel(k))
-            b.tooltip({"toc": "목차 — 섹션으로 이동 (원문·번역 제목)",
-                       "structure": "구조 — 헤더 레벨·섹션 트리·레이아웃 수정·다시 변환",
-                       "translate": "번역 — 번역할 섹션·용어집·실행",
-                       "settings": "설정 — 인용 표기·캡션·저자",
-                       "notes": "메모 — 논문 전체에 대한 자유 메모 (위지윅, 자동 저장)"}[key]
-                      + (" (누르면 접힘)" if on else ""))
+            b.tooltip({"toc": t("목차 — 섹션으로 이동 (원문·번역 제목)"),
+                       "structure": t("구조 — 헤더 레벨·섹션 트리·레이아웃 수정·다시 변환"),
+                       "translate": t("번역 — 번역할 섹션·용어집·실행"),
+                       "settings": t("설정 — 인용 표기·캡션·저자"),
+                       "notes": t("메모 — 논문 전체에 대한 자유 메모 (위지윅, 자동 저장)")}[key]
+                      + (t(" (누르면 접힘)") if on else ""))
 
     @ui.refreshable
     def status_chip() -> None:
@@ -4875,17 +4876,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         has_ko = bool(ctrl.ko_markdown())
         fails = len(translate_state.get("failures") or {})
         if running:
-            icon, text, cls, tip = "autorenew", "번역 중…", "md4-chip busy", "번역이 돌고 있습니다 — 진행은 번역 패널에서"
+            icon, text, cls, tip = ("autorenew", t("번역 중…"), "md4-chip busy",
+                                    t("번역이 돌고 있습니다 — 진행은 번역 패널에서"))
         elif has_ko:
             stale = len(ctrl.stale_sections())
-            text = "번역됨" + (f" · 실패 {fails}" if fails else "") + (f" · 원문 바뀜 {stale}" if stale else "")
+            text = (t("번역됨") + (t(" · 실패 {n}", n=fails) if fails else "")
+                    + (t(" · 원문 바뀜 {n}", n=stale) if stale else ""))
             icon, cls = ("warning", "md4-chip warn") if (fails or stale) else ("check_circle", "md4-chip done")
-            tip = ("구조 검증에 실패해 영어로 남은 섹션이 있습니다 — 번역 패널에서 재번역" if fails
-                   else "원문이 바뀐 섹션이 있어 번역이 낡았습니다 — 번역 패널에서 바뀐 섹션만 재번역" if stale
-                   else "번역이 있습니다 — 다시 번역하거나 섹션을 바꾸려면 번역 패널로")
+            tip = (t("구조 검증에 실패해 영어로 남은 섹션이 있습니다 — 번역 패널에서 재번역") if fails
+                   else t("원문이 바뀐 섹션이 있어 번역이 낡았습니다 — 번역 패널에서 바뀐 섹션만 재번역") if stale
+                   else t("번역이 있습니다 — 다시 번역하거나 섹션을 바꾸려면 번역 패널로"))
         else:
-            icon, text, cls, tip = "translate", "번역 안 됨 · 번역하기", "md4-chip todo", \
-                "변환은 끝났습니다. 다음은 번역 — 누르면 번역 패널이 열립니다"
+            icon, text, cls, tip = ("translate", t("번역 안 됨 · 번역하기"), "md4-chip todo",
+                                    t("변환은 끝났습니다. 다음은 번역 — 누르면 번역 패널이 열립니다"))
         chip = ui.element("div").classes(cls)
         with chip:
             ui.icon(icon, size="15px").classes("md4-spin" if running else "")
@@ -4900,7 +4903,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def convert_settings() -> None:
         """변환(원어 마크다운) 관련 설정만."""
 
-        ui.label("인용 · 참고문헌").classes("font-semibold text-sm text-primary")
+        ui.label(t("인용 · 참고문헌")).classes("font-semibold text-sm text-primary")
 
         # 표기 설정을 바꾸면 원본에서 다시 렌더 → 새 표기로 인용 재적용 (평문 [n]에서 다시 링크)
         def reapply() -> None:
@@ -4921,15 +4924,16 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
             def work(job: jobs.Job) -> dict:  # 화면 없이 완결 — 탭을 옮겨도 파싱·링크 적용은 끝까지
                 summary = ctrl.parse_references(prov)
-                job.message = (f"참고문헌 {summary.get('parsed', 0)}개 파싱 · 본문 인용 {summary.get('linked', 0)}곳 "
-                               f"링크 (≈${summary.get('cost_usd', 0):.4f})")
+                job.message = t("참고문헌 {parsed}개 파싱 · 본문 인용 {linked}곳 링크 (≈${cost:.4f})",
+                                parsed=summary.get("parsed", 0), linked=summary.get("linked", 0),
+                                cost=summary.get("cost_usd", 0))
                 return summary
 
-            job = jobs.start(ctrl.wd.root, "cite", "참고문헌 파싱", work, title=_title)
+            job = jobs.start(ctrl.wd.root, "cite", t("참고문헌 파싱"), work, title=_title)
             if job is None:
-                ui.notify("이미 참고문헌을 파싱하는 중입니다.", type="info")
+                ui.notify(t("이미 참고문헌을 파싱하는 중입니다."), type="info")
                 return
-            ui.notify("참고문헌 파싱 중… (LLM) — 다른 탭으로 옮겨도 계속됩니다")
+            ui.notify(t("참고문헌 파싱 중… (LLM) — 다른 탭으로 옮겨도 계속됩니다"))
             attach_parse(job)
             paper_tabs.refresh()
 
@@ -4958,26 +4962,26 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             if jobs.is_running(ctrl.wd.root, "cite"):
                 with ui.row().classes("items-center gap-2"):
                     ui.spinner(size="sm")
-                    ui.label("참고문헌 파싱 중…").classes("text-xs text-gray-500")
+                    ui.label(t("참고문헌 파싱 중…")).classes("text-xs text-gray-500")
                 return
             if ctrl.has_parsed_refs():
                 # 이미 파싱됨(보통 변환 때 자동) — 조용히 표시 + 재파싱만 제공
                 with ui.row().classes("items-center gap-1"):
                     ui.icon("check_circle", size="16px").classes("text-green-600")
-                    ui.label("참고문헌 파싱됨").classes("text-xs text-gray-500")
-                    ui.button("다시 파싱", icon="refresh", on_click=do_parse) \
+                    ui.label(t("참고문헌 파싱됨")).classes("text-xs text-gray-500")
+                    ui.button(t("다시 파싱"), icon="refresh", on_click=do_parse) \
                         .props("flat dense no-caps size=sm").tooltip(
-                            "표기·프롬프트를 바꾼 뒤 새로 뽑고 싶을 때만 (LLM 재호출)")
+                            t("표기·프롬프트를 바꾼 뒤 새로 뽑고 싶을 때만 (LLM 재호출)"))
             else:
-                ui.label("참고문헌이 아직 파싱되지 않았습니다 (변환 시 API 키가 없었을 수 있어요).") \
+                ui.label(t("참고문헌이 아직 파싱되지 않았습니다 (변환 시 API 키가 없었을 수 있어요).")) \
                     .classes("text-xs text-orange-600")
-                ui.button("참고문헌 파싱 (LLM)", icon="link", on_click=do_parse).props("dense outline")
+                ui.button(t("참고문헌 파싱 (LLM)"), icon="link", on_click=do_parse).props("dense outline")
 
         parse_control()
         if jobs.is_running(ctrl.wd.root, "cite"):  # 파싱 중에 떠났다 돌아왔다 → 끝나면 이 화면에 반영
             attach_parse(jobs.get(ctrl.wd.root, "cite"))
 
-        ui.label("본문 인용 표기 (조합 가능)").classes("text-sm")
+        ui.label(t("본문 인용 표기 (조합 가능)")).classes("text-sm")
         parts_state = {p: (p in m.citation_parts) for p in ("number", "authoryear", "short")}
 
         def update_parts() -> None:
@@ -4985,18 +4989,18 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ctrl.set_setting("citation_parts", chosen or ["number"])
             reapply()
 
-        for pkey, plabel in (("number", "번호  [1]"),
-                             ("authoryear", "저자·연도  (Vaswani et al. 2017)"),
-                             ("short", "약칭  (Transformer)")):
+        for pkey, plabel in (("number", t("번호  [1]")),
+                             ("authoryear", t("저자·연도  (Vaswani et al. 2017)")),
+                             ("short", t("약칭  (Transformer)"))):
             ui.checkbox(plabel, value=parts_state[pkey],
                         on_change=lambda e, k=pkey: (parts_state.__setitem__(k, e.value), update_parts())).props("dense")
-        cap("여러 개 고르면 함께 표시됩니다 — 예: 번호+약칭 → [1, Transformer]. 모두 참고문헌으로 링크.")
-        ui.switch("참고문헌에 DOI/arXiv 링크 달기", value=m.reference_links,
+        cap(t("여러 개 고르면 함께 표시됩니다 — 예: 번호+약칭 → [1, Transformer]. 모두 참고문헌으로 링크."))
+        ui.switch(t("참고문헌에 DOI/arXiv 링크 달기"), value=m.reference_links,
                   on_change=lambda e: (ctrl.set_setting("reference_links", e.value), reapply()))
-        cap("참고문헌 제목을 클릭하면 원문 논문으로 바로 이동합니다.")
+        cap(t("참고문헌 제목을 클릭하면 원문 논문으로 바로 이동합니다."))
 
         ui.separator()
-        ui.label("그림·표").classes("font-semibold text-sm text-primary")
+        ui.label(t("그림·표")).classes("font-semibold text-sm text-primary")
 
         def set_capstyle(v: str) -> None:
             def apply() -> None:
@@ -5007,7 +5011,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
             apply()
 
-        ui.label("그림·표 캡션 표기").classes("text-sm")
+        ui.label(t("그림·표 캡션 표기")).classes("text-sm")
 
         @ui.refreshable
         def capstyle_picker() -> None:
@@ -5024,11 +5028,11 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 row.on("click", lambda e, k=key: set_capstyle(k))
 
         capstyle_picker()
-        cap("캡션을 본문과 구별되게 표시합니다 (그림·표 공통).")
+        cap(t("캡션을 본문과 구별되게 표시합니다 (그림·표 공통)."))
 
         ui.separator()
-        ui.label("저자").classes("font-semibold text-sm text-primary")
-        ui.label("저자 표기 (이름은 항상 표시)").classes("text-sm")
+        ui.label(t("저자")).classes("font-semibold text-sm text-primary")
+        ui.label(t("저자 표기 (이름은 항상 표시)")).classes("text-sm")
         apar = {p: (p in m.author_parts) for p in ("email", "affiliation")}
 
         def update_author_parts() -> None:
@@ -5037,14 +5041,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             commit()  # 저장 + 재조립
             refresh_canvas()
             if not changed and not ctrl.wd.authors_json.exists():
-                ui.notify("이 논문엔 구조화된 저자 정보가 없어(옛 변환·키 없음) 표시만 저장됩니다. "
-                          "재변환하면 반영됩니다.", type="info")
+                ui.notify(t("이 논문엔 구조화된 저자 정보가 없어(옛 변환·키 없음) 표시만 저장됩니다. "
+                          "재변환하면 반영됩니다."), type="info")
 
-        for akey, alabel in (("email", "이메일"), ("affiliation", "소속")):
+        for akey, alabel in (("email", t("이메일")), ("affiliation", t("소속"))):
             ui.checkbox(alabel, value=apar[akey],
                         on_change=lambda e, k=akey: (apar.__setitem__(k, e.value), update_author_parts())) \
                 .props("dense")
-        cap("둘 다 끄면 이름만 표시됩니다. 저자 정보는 변환 시 AI가 저자별로 정리한 것입니다.")
+        cap(t("둘 다 끄면 이름만 표시됩니다. 저자 정보는 변환 시 AI가 저자별로 정리한 것입니다."))
 
     def translate_settings() -> None:
         """번역 관련 설정 — 방식은 아코디언, 번역할 섹션이 주인공."""
@@ -5054,38 +5058,38 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ctrl.save()
 
         def translate_method_panel() -> None:
-            with ui.expansion("번역 방식 (문체·범위)", icon="tune").classes("w-full").props("dense"):
+            with ui.expansion(t("번역 방식 (문체·범위)"), icon="tune").classes("w-full").props("dense"):
                 lang = ctrl.wd.lang
                 opts = langs.style_options(lang)
                 cur = langs.fit_style(lang, m.korean_style, config.resolve_style(lang))  # 다른 언어 문체가 남았으면
                 if cur not in opts:  # custom:"…" — 목록에 넣어 둬야 값이 지워지지 않는다
                     opts = {**opts, cur: cur}
-                ui.select(opts, value=cur, label=f"번역 문체 · {langs.get(lang).native}",
+                ui.select(opts, value=cur, label=t("번역 문체 · {native}", native=langs.get(lang).native),
                           on_change=lambda e: set_tsetting("korean_style", e.value)).props("dense outlined").classes("w-full")
-                cap("문장 끝맺음 말투. 논문은 보통 해라체(~한다)를 씁니다." if lang == "ko" else
-                    f"번역 언어는 {langs.get(lang).native}입니다 — 설정 › 변환·번역에서 새 논문의 언어를 바꿉니다.")
+                cap(t("문장 끝맺음 말투. 논문은 보통 해라체(~한다)를 씁니다.") if lang == "ko" else
+                    t("번역 언어는 {native}입니다 — 설정 › 변환·번역에서 새 논문의 언어를 바꿉니다.", native=langs.get(lang).native))
                 if ctrl.title_section() is not None:
-                    ui.switch("논문 제목도 번역", value=ctrl.translate_title(),
+                    ui.switch(t("논문 제목도 번역"), value=ctrl.translate_title(),
                               on_change=lambda e: (ctrl.set_translate_title(e.value), ctrl.save()))
-                    cap("문서 맨 위 논문 제목 한 줄. 끄면 영어 원제를 그대로 둡니다.")
-                ui.switch("섹션 제목도 번역", value=m.translate_headers,
+                    cap(t("문서 맨 위 논문 제목 한 줄. 끄면 영어 원제를 그대로 둡니다."))
+                ui.switch(t("섹션 제목도 번역"), value=m.translate_headers,
                           on_change=lambda e: set_tsetting("translate_headers", e.value))
-                cap("끄면 헤더(3.1 Method 등)는 영어 그대로 두고 본문만 번역합니다.")
-                ui.switch("참고문헌 목록도 번역", value=m.translate_references,
+                cap(t("끄면 헤더(3.1 Method 등)는 영어 그대로 두고 본문만 번역합니다."))
+                ui.switch(t("참고문헌 목록도 번역"), value=m.translate_references,
                           on_change=lambda e: set_tsetting("translate_references", e.value))
-                cap("보통은 끄는 게 좋습니다 — 서지 정보(저자·제목)는 영어 원문이 정확합니다.")
-                cap("Section/Figure/Table 같은 상호참조는 항상 영어로 유지됩니다.")
+                cap(t("보통은 끄는 게 좋습니다 — 서지 정보(저자·제목)는 영어 원문이 정확합니다."))
+                cap(t("Section/Figure/Table 같은 상호참조는 항상 영어로 유지됩니다."))
 
         # --- 번역할 섹션 고르기 (Tree Select) — 주 영역 ---
-        ui.label("번역할 섹션").classes("font-semibold text-sm text-primary")
-        cap("체크한 섹션만 번역합니다 (LLM 비용·시간 절약). 체크를 풀어도 이미 번역해 둔 섹션은 그대로 남고, "
-            "번역한 적 없는 섹션만 영어로 남습니다. 섹션 단위로 병렬 번역됩니다. 제목을 누르면 캔버스의 그 섹션으로 갑니다.")
+        ui.label(t("번역할 섹션")).classes("font-semibold text-sm text-primary")
+        cap(t("체크한 섹션만 번역합니다 (LLM 비용·시간 절약). 체크를 풀어도 이미 번역해 둔 섹션은 그대로 남고, "
+            "번역한 적 없는 섹션만 영어로 남습니다. 섹션 단위로 병렬 번역됩니다. 제목을 누르면 캔버스의 그 섹션으로 갑니다."))
 
         @ui.refreshable
         def section_picker() -> None:
             nodes = ctrl.section_tree()
             if not nodes:
-                ui.label("선택할 섹션이 없습니다.").classes("text-xs text-gray-400")
+                ui.label(t("선택할 섹션이 없습니다.")).classes("text-xs text-gray-400")
                 return
 
             def on_tick(e) -> None:  # noqa: ANN001 — NiceGUI 이벤트
@@ -5114,13 +5118,13 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             @ui.refreshable
             def count_label() -> None:
                 counts = len(ctrl.translatable_sections())
-                ui.label(f"{len(ctrl.ticked_ids())} / {counts} 섹션 선택됨").classes("text-xs text-gray-500")
+                ui.label(t("{n} / {counts} 섹션 선택됨", n=len(ctrl.ticked_ids()), counts=counts)).classes("text-xs text-gray-500")
             count_label()
 
         with ui.row().classes("gap-2 items-center"):
-            ui.button("전체 선택", on_click=lambda: (ctrl.set_all_translate(True), ctrl.save(),
+            ui.button(t("전체 선택"), on_click=lambda: (ctrl.set_all_translate(True), ctrl.save(),
                                                  section_picker.refresh())).props("outline dense")
-            ui.button("전체 해제", on_click=lambda: (ctrl.set_all_translate(False), ctrl.save(),
+            ui.button(t("전체 해제"), on_click=lambda: (ctrl.set_all_translate(False), ctrl.save(),
                                                  section_picker.refresh())).props("outline dense")
         _translate_refs["picker"] = section_picker  # 구조 패널에서 레벨을 바꾸면 갱신되도록 등록
         section_picker()  # 번역 중 진행 상태는 트리 아이템의 아이콘으로 직접 표시된다
@@ -5130,14 +5134,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     async def download_en() -> None:
         if not ctrl.en_markdown():
-            ui.notify("영어 마크다운이 없습니다 — 먼저 변환하세요.", type="warning")
+            ui.notify(t("영어 마크다운이 없습니다 — 먼저 변환하세요."), type="warning")
             return
         name, data = ctrl.export_zip("en", config.resolve_export_target())  # 마크다운(형식 변환) + images/ zip
         await desktop.deliver(name, data)
 
     async def download_ko() -> None:
         if not ctrl.ko_markdown():
-            ui.notify("아직 번역 결과가 없습니다.", type="warning")
+            ui.notify(t("아직 번역 결과가 없습니다."), type="warning")
             return
         name, data = ctrl.export_zip("ko", config.resolve_export_target())
         await desktop.deliver(name, data)
@@ -5148,7 +5152,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         await asyncio.sleep(0.3)  # 클라이언트의 되저장이 파일에 닿을 짬
         notes_flush()  # 메모 패널의 기다리던 자동 저장도 — 마지막 글자까지 담기게
         if not annotations.has_any(ctrl.wd):
-            ui.notify("표시해 둔 하이라이트·메모가 없습니다.", type="warning")
+            ui.notify(t("표시해 둔 하이라이트·메모가 없습니다."), type="warning")
             return
         name, data = annotations.export_bytes(ctrl.wd, m.title or "")
         await desktop.deliver(name, data, media_type="text/markdown")
@@ -5161,18 +5165,18 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         from nicegui import run as ng_run
 
         if not library.configured(library.project_of(ctrl.wd)):
-            ui.notify("저장 위치가 지정돼 있지 않습니다 — 홈의 ⚙ 설정 → '저장 위치'나 컬렉션 폴더를 정하세요.",
+            ui.notify(t("저장 위치가 지정돼 있지 않습니다 — 홈의 ⚙ 설정 → '저장 위치'나 컬렉션 폴더를 정하세요."),
                       type="warning")
             return
         try:
             saved = await ng_run.io_bound(library.export_paper, ctrl.wd)
         except OSError as ex:
-            ui.notify(f"저장 실패: {ex}", type="negative")
+            ui.notify(t("저장 실패: {ex}", ex=ex), type="negative")
             return
         if not saved:
-            ui.notify("저장할 마크다운이 없습니다.", type="warning")
+            ui.notify(t("저장할 마크다운이 없습니다."), type="warning")
             return
-        ui.notify("저장됨 · " + " · ".join(str(p) for p in saved), type="positive")
+        ui.notify(t("저장됨 · ") + " · ".join(str(p) for p in saved), type="positive")
 
     def library_button() -> None:
         """저장 위치(프로젝트 폴더 또는 공통)가 정해져 있을 때만 보이는 '폴더로 저장' 버튼."""
@@ -5181,8 +5185,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             return
         dests = " · ".join(str(d) for d in library.dirs_for(pid).values() if d)
         # 프로젝트에 속한 논문은 '어느 묶음의 폴더로 가는지'가 먼저 궁금하다 → 이름을 앞에 붙인다.
-        tip = f"컬렉션: {projects.name_of(pid)} → {dests}" if pid else f"저장 위치: {dests}"
-        ui.button("폴더로 저장", icon="drive_file_move", on_click=save_to_library) \
+        tip = (t("컬렉션: {name} → {dests}", name=projects.name_of(pid), dests=dests) if pid
+               else t("저장 위치: {dests}", dests=dests))
+        ui.button(t("폴더로 저장"), icon="drive_file_move", on_click=save_to_library) \
             .props("flat dense no-caps color=grey-8").tooltip(tip)
 
     # 내보내기 형식 드롭다운 — 캔버스 툴바의 내보내기 메뉴 안에 두되 전역 설정(config)을 그대로 쓴다.
@@ -5194,7 +5199,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             export_fmt_review.refresh()
             ui.notify(t("내보내기 형식 · {v}", v=t(_EXPORT_TARGET[e.value])), type="positive", timeout=1200)
         ui.select(_tr(_EXPORT_TARGET), value=config.resolve_export_target(), on_change=_pick) \
-            .props("dense outlined").classes("w-28").tooltip("다운로드 zip에 적용하는 형식 (전역 설정)")
+            .props("dense outlined").classes("w-28").tooltip(t("다운로드 zip에 적용하는 형식 (전역 설정)"))
 
     # --- 레이아웃 자동 수정 (구조 패널) — 깨진 헤더·수식·문단을 처음부터 끝까지 훑어 AI로 고친다 ---
     def _after_relayout() -> None:
