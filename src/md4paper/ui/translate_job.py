@@ -17,6 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from md4paper import config, library
+from md4paper.i18n import t
 from md4paper.ui import jobs
 from md4paper.workdir import WorkDir
 
@@ -67,19 +68,20 @@ def start(wd: WorkDir, provider, *, title: str = "", style: str | None = None,  
             figs = figure_translate.translate_many(wd, provider, on_progress=lambda d, t: job.progress(d, t))
             summary["figures"] = figs
         saved = library.auto_export(wd)  # 저장 위치로 자동 저장
-        msg = f"번역 완료 (≈${summary['cost_usd'] + (figs['cost_usd'] if figs else 0.0):.4f})"
+        msg = t("번역 완료 (≈${cost:.4f})", cost=summary["cost_usd"] + (figs["cost_usd"] if figs else 0.0))
         if figs and (figs["done"] or figs["failed"]):
-            msg += f" · 그림 {figs['done']}개 글자 번역" + (f"(실패 {len(figs['failed'])}개)" if figs["failed"] else "")
+            msg += t(" · 그림 {n}개 글자 번역", n=figs["done"]) + (
+                t("(실패 {n}개)", n=len(figs["failed"])) if figs["failed"] else "")
         if saved:
-            msg += f" · 저장 위치에 {len(saved)}개 파일 저장"
+            msg += t(" · 저장 위치에 {n}개 파일 저장", n=len(saved))
         if summary.get("passthrough"):
-            msg += f" · {summary['passthrough']}개 섹션은 아래 표시(구조 검증 실패)"
+            msg += t(" · {n}개 섹션은 아래 표시(구조 검증 실패)", n=summary["passthrough"])
         if summary.get("kept"):
-            msg += f" · 체크 해제 {summary['kept']}개 구간은 지난 번역 유지"
+            msg += t(" · 체크 해제 {n}개 구간은 지난 번역 유지", n=summary["kept"])
         job.message = msg
         return summary
 
-    return jobs.start(wd.root, "translate", "번역", work, title=title, gate=gate())
+    return jobs.start(wd.root, "translate", t("번역"), work, title=title, gate=gate())
 
 
 def default_model(wd: WorkDir) -> str:
@@ -139,12 +141,12 @@ def plan(roots: list[Path | str], model_for: Callable[[WorkDir], str] | None = N
         item: dict = {"root": wd.root, "title": paper_title(wd.root),
                       "manual_ko": bool(wd.load_status().get("manual_edit_ko"))}  # 다시 쓰면 고친 번역이 사라진다
         if not wd.en_md.exists():
-            out["skipped"].append({**item, "reason": "영어 원문 없음"})
+            out["skipped"].append({**item, "reason": t("영어 원문 없음")})
             continue
         try:
             manifest = manifest_io.load(wd)
         except (OSError, ValueError):
-            out["skipped"].append({**item, "reason": "구조(sections.yaml)를 읽지 못함"})
+            out["skipped"].append({**item, "reason": t("구조(sections.yaml)를 읽지 못함")})
             continue
         choice = pick(wd)
         model = choice.partition("/")[2] or choice

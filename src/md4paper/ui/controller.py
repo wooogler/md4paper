@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from md4paper import notes as notes_io
+from md4paper.i18n import t
 from md4paper.ir import Flavor, GlossaryEntry, GlossaryList, Manifest
 from md4paper.review import manifest as manifest_io
 from md4paper.workdir import WorkDir
@@ -440,7 +441,7 @@ class UIController:
 
         pdf = self.source_pdf()
         if not pdf or not Path(pdf).exists():
-            raise FileNotFoundError("원본 PDF를 찾을 수 없어 다시 변환할 수 없습니다.")
+            raise FileNotFoundError(t("원본 PDF를 찾을 수 없어 다시 변환할 수 없습니다."))
         meta = json.loads(self.wd.meta_json.read_text(encoding="utf-8"))
         old = self.manifest
         steps = 5
@@ -502,7 +503,7 @@ class UIController:
             raw = self.wd.raw_md.read_text(encoding="utf-8")
             where = formula_fix.nth_same(raw, text, rank, total)
             if where is None:
-                raise ValueError("원문(raw.md)에서 이 수식 자리를 하나로 특정하지 못했습니다.")
+                raise ValueError(t("원문(raw.md)에서 이 수식 자리를 하나로 특정하지 못했습니다."))
             self.wd.raw_md.write_text(formula_fix.replace_at(raw, where, new_text), encoding="utf-8")
 
             def patch(md: str) -> str | None:
@@ -513,7 +514,7 @@ class UIController:
         else:
             rec = next((r for r in formulas.load(self.wd) if r.get("id") == fid), None)
             if rec is None:
-                raise ValueError(f"수식 {fid}를 찾지 못했습니다.")
+                raise ValueError(t("수식 {fid}를 찾지 못했습니다.", fid=fid))
             en_old = formula_fix.locate(en_before, rec)
             en_at = formula_fix.line_position(en_before, en_old) if en_old else None
             new_text = formula_fix.apply(self.wd, fid, latex, kind, page=page, rect=rect)["new"]
@@ -922,7 +923,7 @@ class UIController:
         import zipfile
 
         if not (self.wd.en_md if which == "en" else self.wd.ko_md).exists():
-            raise FileNotFoundError("마크다운이 없습니다 — 먼저 변환/번역하세요.")
+            raise FileNotFoundError(t("마크다운이 없습니다 — 먼저 변환/번역하세요."))
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             top = _zip_add_paper(z, self.wd, which, target)
@@ -1076,4 +1077,4 @@ def bulk_zip(roots, which: str = "en", target: str = "universal") -> tuple[str, 
         for root in roots:
             if _zip_add_paper(z, WorkDir(Path(root)), which, target):
                 n += 1
-    return f"md4paper-{n}편-{which}.zip", buf.getvalue()
+    return t("md4paper-{n}편-{which}.zip", n=n, which=which), buf.getvalue()

@@ -26,6 +26,8 @@ import re
 import time
 from pathlib import Path
 
+from md4paper import i18n
+from md4paper.i18n import t
 from md4paper.ui import mdrender, sentpair
 from md4paper.workdir import WorkDir, paper_title
 
@@ -259,16 +261,16 @@ def _paper_html(p: dict) -> str:
         f'<li class="l{min(max(lvl, 1), 4)}"><a href="#{rid}">{_esc(text)}</a></li>' for lvl, text, rid in p["toc"])
     notes = []
     if not p["has_ko"]:
-        notes.append("번역이 없는 논문이라 원문만 보입니다.")
+        notes.append(t("번역이 없는 논문이라 원문만 보입니다."))
     elif not p["aligned"]:
-        notes.append("원문과 번역의 섹션 수가 달라 문단 대조·문장 짝을 쓸 수 없습니다.")
+        notes.append(t("원문과 번역의 섹션 수가 달라 문단 대조·문장 짝을 쓸 수 없습니다."))
     note = "".join(f'<p class="note">{n}</p>' for n in notes)
     return (
         f'<article class="{cls}" id="{p["id"]}" data-key="{_esc(p["key"])}">'
         f'<header class="ph"><p class="ph-meta">{meta}</p>{note}'
-        f'<details class="toc"><summary>목차</summary><ol>{toc}</ol></details></header>'
+        f'<details class="toc"><summary>{t("목차")}</summary><ol>{toc}</ol></details></header>'
         f'{p["body"]}'
-        f'<p class="end"><a href="#lib">↑ 논문 목록</a></p>'
+        f'<p class="end"><a href="#lib">↑ {t("논문 목록")}</a></p>'
         f'</article>'
     )
 
@@ -278,12 +280,12 @@ def _lib_html(papers: list[dict]) -> str:
     for p in papers:
         meta = " · ".join(_esc(x) for x in (p["authors"], p["year"], p["venue"]) if x)
         sub = f'<span class="li-en">{_esc(p["title"])}</span>' if p["title_ko"] else ""
-        badge = "번역" if p["has_ko"] else "원문만"
+        badge = t("번역") if p["has_ko"] else t("원문만")
         items.append(
             f'<li><a href="#{p["id"]}" data-open="{p["id"]}">'
             f'<span class="li-title">{_esc(p["title_ko"] or p["title"])}</span>{sub}'
             f'<span class="li-meta">{meta}<span class="badge">{badge}</span></span></a></li>')
-    return f'<nav id="lib"><h1>논문 {len(papers)}편</h1><ol>{"".join(items)}</ol></nav>'
+    return f'<nav id="lib"><h1>{t("논문 {n}편", n=len(papers))}</h1><ol>{"".join(items)}</ol></nav>'
 
 
 def build(roots: list[Path]) -> str:
@@ -294,24 +296,25 @@ def build(roots: list[Path]) -> str:
     payload = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     stamp = time.strftime("%Y-%m-%d %H:%M")
     return (
-        "<!doctype html><html lang=\"ko\"><head><meta charset=\"utf-8\">"
+        f"<!doctype html><html lang=\"{i18n.ui_lang()}\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1, viewport-fit=cover\">"
         "<meta name=\"color-scheme\" content=\"light dark\">"
-        f"<title>md4paper · 논문 {len(papers)}편</title><style>{_CSS}</style></head><body>"
+        f"<title>md4paper · {t('논문 {n}편', n=len(papers))}</title><style>{_CSS}</style>"
+        f"{i18n.head_html()}</head><body>"
         # 라디오는 본문(main)·상단 바보다 **앞의 형제**여야 `:checked ~` 선택자가 닿는다
         "<input type=\"radio\" name=\"mode\" id=\"m-ko\" class=\"mode\" checked>"
         "<input type=\"radio\" name=\"mode\" id=\"m-en\" class=\"mode\">"
         "<input type=\"radio\" name=\"mode\" id=\"m-both\" class=\"mode\">"
         "<header class=\"top\">"
-        "<button class=\"only-js back\" id=\"back\" aria-label=\"논문 목록\">☰</button>"
+        f"<button class=\"only-js back\" id=\"back\" aria-label=\"{t('논문 목록')}\">☰</button>"
         "<span class=\"top-title\" id=\"top-title\">md4paper</span>"
-        "<span class=\"seg\"><label for=\"m-ko\">번역</label><label for=\"m-en\">원문</label>"
-        "<label for=\"m-both\">대조</label></span>"
-        "<button class=\"only-js fs\" id=\"fs-dn\" aria-label=\"글자 작게\">가−</button>"
-        "<button class=\"only-js fs\" id=\"fs-up\" aria-label=\"글자 크게\">가+</button>"
+        f"<span class=\"seg\"><label for=\"m-ko\">{t('번역')}</label><label for=\"m-en\">{t('원문')}</label>"
+        f"<label for=\"m-both\">{t('대조')}</label></span>"
+        f"<button class=\"only-js fs\" id=\"fs-dn\" aria-label=\"{t('글자 작게')}\">{t('가')}−</button>"
+        f"<button class=\"only-js fs\" id=\"fs-up\" aria-label=\"{t('글자 크게')}\">{t('가')}+</button>"
         "</header>"
         f"<main>{_lib_html(papers)}{''.join(_paper_html(p) for p in papers)}"
-        f"<p class=\"stamp\">md4paper에서 {stamp}에 만듦</p></main>"
+        f"<p class=\"stamp\">{t('md4paper에서 {stamp}에 만듦', stamp=stamp)}</p></main>"
         "<div id=\"sheet\" role=\"dialog\" aria-live=\"polite\"><div class=\"sh-grip\"></div>"
         "<div class=\"sh-label\"></div><div class=\"sh-text\"></div><div class=\"sh-acts\"></div></div>"
         f"<script>var DATA = {payload};\n{_JS}</script>"
@@ -320,7 +323,7 @@ def build(roots: list[Path]) -> str:
 
 
 def file_name(n: int) -> str:
-    return f"md4paper-mobile-{n}편-{time.strftime('%Y%m%d')}.html"
+    return t("md4paper-mobile-{n}편-{date}.html", n=n, date=time.strftime("%Y%m%d"))
 
 
 _CSS = """
@@ -533,7 +536,7 @@ _JS = "(function(){\n" + sentpair.JS + r"""
     shLabel.textContent = label; shText.innerHTML = ''; shActs.innerHTML = '';
     nodes.forEach(function(n){ shText.appendChild(n); });
     acts.forEach(function(a){ shActs.appendChild(a); });
-    var close = doc.createElement('button'); close.textContent = '닫기'; close.onclick = function(){ clearSent(); closeSheet(); };
+    var close = doc.createElement('button'); close.textContent = md4T('닫기'); close.onclick = function(){ clearSent(); closeSheet(); };
     shActs.appendChild(close);
     sheet.scrollTop = 0; sheet.classList.add('open');
   }
@@ -571,18 +574,18 @@ _JS = "(function(){\n" + sentpair.JS + r"""
     return doc.getElementById('m-both').checked || row.classList.contains('peek');
   }
   function peekButton(row){
-    return button(row.classList.contains('peek') ? '문단 대조 닫기' : '이 문단 대조해서 보기', function(){
+    return button(row.classList.contains('peek') ? md4T('문단 대조 닫기') : md4T('이 문단 대조해서 보기'), function(){
       row.classList.toggle('peek'); clearSent(); closeSheet();
     });
   }
   function onSentence(e, cell){
     var row = cell.parentElement, side = cell.classList.contains('ko') ? 'ko' : 'en';
     if (!row.querySelector('.cell.en') || !row.querySelector('.cell.ko')){ clearSent(); closeSheet(); return; }  // 짝이 될 쪽이 없는 행
-    var other = side === 'ko' ? 'en' : 'ko', label = other === 'en' ? '원문' : '번역';
+    var other = side === 'ko' ? 'en' : 'ko', label = other === 'en' ? md4T('원문') : md4T('번역');
     var pr = prepare(row);
     if (!pr){
       if (bothVisible(row)) return;
-      openSheet(label, [para('이 문단은 문장 짝을 맞추지 못했어요. 문단째로 대조해 보세요.', 'more')], [peekButton(row)]);
+      openSheet(label, [para(md4T('이 문단은 문장 짝을 맞추지 못했어요. 문단째로 대조해 보세요.'), 'more')], [peekButton(row)]);
       return;
     }
     // 방금 감쌌으면 e.target은 감싸기 전 노드다 — 손가락 아래를 다시 본다
@@ -595,7 +598,7 @@ _JS = "(function(){\n" + sentpair.JS + r"""
     [].forEach.call(row.querySelectorAll('.sent[data-pi="' + pi + '"]'), function(s){ s.classList.add('on'); });
     if (bothVisible(row)){ tapped = null; closeSheet(); return; }   // 양쪽이 다 보이면 짝 표시로 충분
     var txt = sentText(pr, other, +pi);
-    openSheet(label, [para(txt || '(짝이 되는 문장이 없어요 — 번역에서 합쳐지거나 빠진 문장)', txt ? '' : 'more')],
+    openSheet(label, [para(txt || md4T('(짝이 되는 문장이 없어요 — 번역에서 합쳐지거나 빠진 문장)'), txt ? '' : 'more')],
               [peekButton(row)]);
     tapped = key;
   }
@@ -626,12 +629,12 @@ _JS = "(function(){\n" + sentpair.JS + r"""
       var acts = [];
       if (m[2] === 'ref' && tip && tip.url){
         var go = doc.createElement('a'); go.href = tip.url; go.target = '_blank'; go.rel = 'noopener';
-        go.textContent = '논문 링크 열기'; acts.push(go);
+        go.textContent = md4T('논문 링크 열기'); acts.push(go);
       }
-      acts.push(button(m[2] === 'ref' ? '참고문헌 목록에서 보기' : '각주로 이동', function(){
+      acts.push(button(m[2] === 'ref' ? md4T('참고문헌 목록에서 보기') : md4T('각주로 이동'), function(){
         closeSheet(); var t = visibleTarget(id); if (t) t.scrollIntoView({block: 'start'});
       }));
-      openSheet((m[2] === 'ref' ? '참고문헌 ' : '각주 ') + m[3], [para(text || '(서지 정보를 찾지 못했어요)')], acts);
+      openSheet((m[2] === 'ref' ? md4T('참고문헌 {n}', {n: m[3]}) : md4T('각주 {n}', {n: m[3]})), [para(text || md4T('(서지 정보를 찾지 못했어요)'))], acts);
       return;
     }
     if (id === 'lib'){ showLib(true); return; }
