@@ -16,6 +16,15 @@ from pathlib import Path
 # 단계 순서 — 앞 단계가 바뀌면 뒤 단계 완료 표시가 무효화된다.
 STAGES = ("extract", "formulas", "structure", "assemble", "cite", "translate")
 
+# status.json의 `lang` 읽기 캐시 — WorkDir.ko_md 등 경로마다 status.json을 다시 파싱하지 않게.
+# 키: status.json 경로 → ((mtime_ns, size), lang | None). save_status가 os.replace로 갈아끼우므로 mtime이 바뀐다.
+_LANG_CACHE: dict[Path, tuple[tuple[int, int], str | None]] = {}
+
+
+def _lang_name(stem: str, lang: str, ext: str) -> str:
+    """언어별 파일 이름 — 한국어는 언어 코드 없는 옛 이름(`cache.json`), 다른 언어는 `cache.ja.json`."""
+    return f"{stem}.{ext}" if lang == "ko" else f"{stem}.{lang}.{ext}"
+
 
 def hash_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()[:16]
@@ -125,8 +134,9 @@ class WorkDir:
 
     @property
     def figures_ko_json(self) -> Path:
-        """그림 속 글자 번역 기록 {extract 그림 파일명: {원본 digest, 줄 상자·영어·한국어}} (§figure_translate)."""
-        return self.extract / "figures-ko.json"
+        """그림 속 글자 번역 기록 {extract 그림 파일명: {원본 digest, 줄 상자·영어·번역}} (§figure_translate).
+        번역 언어마다 따로 — 한국어는 옛 이름 figures-ko.json."""
+        return self.extract / f"figures-{self.lang}.json"
 
     @property
     def figure_backup(self) -> Path:
@@ -152,7 +162,9 @@ class WorkDir:
 
     @property
     def ko_md(self) -> Path:
-        return self.out / "paper.ko.md"
+        """번역 마크다운 — 이 논문의 번역 언어로 (`paper.<lang>.md`; 한국어는 옛 이름 그대로 paper.ko.md).
+        이름의 ko는 '번역 쪽'이라는 뜻으로 남겼다."""
+        return self.out / f"paper.{self.lang}.md"
 
     @property
     def out_images(self) -> Path:
@@ -176,11 +188,64 @@ class WorkDir:
 
     @property
     def glossary_yaml(self) -> Path:
-        return self.translate / "glossary.yaml"
+        """논문 용어집 — 번역어가 언어마다 다르니 언어별 (한국어는 옛 이름 glossary.yaml)."""
+        return self.translate / _lang_name("glossary", self.lang, "yaml")
 
     @property
     def cache_json(self) -> Path:
-        return self.translate / "cache.json"
+        """번역 캐시 — 언어별 (한국어는 옛 이름 cache.json)."""
+        return self.translate / _lang_name("cache", self.lang, "json")
+
+    # --- 번역 언어 ---
+    @property
+    def lang(self) -> str:
+        """이 논문의 번역 언어 — 논문은 번역을 한 언어로만 둔다.
+
+        status.json `lang`(번역·용어집을 만들 때 적는다) > 옛 한국어 산출물(paper.ko.md·glossary.yaml·
+        cache.json)이 있으면 ko > 전역 설정(`config.resolve_target_lang`). 옛 산출물을 보는 이유: `lang`을
+        적기 전의 논문은 사용자가 전역 언어를 바꿔도 한국어 번역을 그대로 보여야 한다.
+        """
+        got = self._status_lang()
+        if got:
+            return got
+        if any(p.exists() for p in (self.out / "paper.ko.md", self.translate / "glossary.yaml",
+                                    self.translate / "cache.json")):
+            return "ko"
+        from md4paper import config  # config는 가볍지만 workdir가 먼저 import되는 곳이 많다
+
+        return config.resolve_target_lang()
+
+    def _status_lang(self) -> str | None:
+        path = self.status_json
+        try:
+            st = path.stat()
+        except OSError:
+            return None
+        stamp = (st.st_mtime_ns, st.st_size)
+        hit = _LANG_CACHE.get(path)
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8")).get("lang")
+        except (OSError, ValueError, AttributeError):
+            raw = None
+        from md4paper import langs
+
+        lang = langs.normalize(raw) if langs.is_valid(raw) else None
+        _LANG_CACHE[path] = (stamp, lang)
+        return lang
+
+    def set_lang(self, lang: str) -> None:
+        """번역 언어를 status.json에 적는다 (이미 같으면 쓰지 않는다). 언어를 바꾸면 경로가 그 언어 것으로
+        바뀐다 — 옛 언어 파일은 지우지 않고 두며, 다시 그 언어로 번역하면 캐시를 쓴다."""
+        from md4paper import langs
+
+        lang = langs.normalize(lang)
+        status = self.load_status()
+        if status.get("lang") == lang:
+            return
+        status["lang"] = lang
+        self.save_status(status)
 
     @property
     def status_json(self) -> Path:
@@ -620,7 +685,7 @@ def recent_workdirs(workspace: Path, limit: int = 20, include_hidden: bool = Fal
             "authors": authors,
             "year": year,
             "venue": venue,
-            "has_ko": (md4 / "out" / "paper.ko.md").exists(),
+            "has_ko": WorkDir(md4).ko_md.exists(),  # 번역(이 논문의 언어)이 있는지
             "opened": opened,  # 리뷰 화면을 한 번이라도 연 적 있는지 (미열람 표시용)
             "hidden": hidden,  # 사용자가 목록에서 감춘 논문 (파일은 그대로)
             "pinned": bool(pinned_at),  # 사용자가 위에 고정한 논문

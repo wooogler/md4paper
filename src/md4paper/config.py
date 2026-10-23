@@ -76,6 +76,34 @@ def resolve_korean_style() -> str:
     return cfg.get("translate", {}).get("korean_style", DEFAULT_KOREAN_STYLE)
 
 
+def resolve_target_lang() -> str:
+    """번역 대상 언어 — 사용자의 모국어 (config [translate].target_lang > ko). 형식이 틀린 값이면 ko.
+
+    새 논문이 이 언어로 번역된다. 이미 번역(또는 용어집)이 있는 논문은 자기 언어를 지킨다(`WorkDir.lang`).
+    """
+    from md4paper import langs
+
+    raw = load_config().get("translate", {}).get("target_lang")
+    try:
+        return langs.normalize(raw) if raw else langs.DEFAULT
+    except (ValueError, AttributeError):
+        return langs.DEFAULT
+
+
+def style_key(lang: str) -> str:
+    """config [translate]에서 그 언어의 기본 문체 키 — 한국어는 옛 키 korean_style, 다른 언어는 `<코드>_style`."""
+    return "korean_style" if lang == "ko" else f"{lang}_style"
+
+
+def resolve_style(lang: str | None = None) -> str:
+    """새 논문의 번역 문체 기본값 (config [translate].<style_key> > 그 언어의 기본 문체)."""
+    from md4paper import langs
+
+    lang = lang or resolve_target_lang()
+    got = load_config().get("translate", {}).get(style_key(lang))
+    return str(got) if got else langs.get(lang).default_style
+
+
 def _as_bool(val, default: bool) -> bool:  # noqa: ANN001
     if val is None:
         return default

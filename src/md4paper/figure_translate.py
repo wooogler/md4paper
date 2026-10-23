@@ -65,6 +65,13 @@ class FigureTranslateError(ValueError):
 # --- 이름·기록 ---------------------------------------------------------------
 
 
+def _require_ko(wd: WorkDir) -> None:
+    """그림 속 글자 번역은 아직 한국어만 — 프롬프트·글꼴(`find_font`)·`.ko.png` 이름이 한국어 전제다.
+    다른 언어 논문에서 부르면 한국어를 그려 넣게 되므로 막는다."""
+    if wd.lang != "ko":
+        raise FigureTranslateError(f"그림 속 글자 번역은 아직 한국어만 지원합니다 (이 논문의 번역 언어: {wd.lang}).")
+
+
 def ko_name(out_name: str) -> str:
     """`figure-3.png` → `figure-3.ko.png` (번역 그림은 원본 형식과 상관없이 PNG)."""
     return os.path.splitext(out_name)[0] + KO_SUFFIX
@@ -563,6 +570,7 @@ def translate(wd: WorkDir, out_name: str, provider, *, ocr=None, link: bool = Tr
     """
     from md4paper.llm.base import Usage, cost_usd
 
+    _require_ko(wd)
     font = find_font()
     out_name = original_name(wd, out_name)
     src = _source(wd, out_name)
@@ -677,6 +685,7 @@ def translate_many(wd: WorkDir, provider, names: list[str] | None = None,  # noq
 
     반환 {done(번역 그림 만든 수), empty(번역할 글자 없음), failed{이름: 까닭}, cost_usd}.
     """
+    _require_ko(wd)
     names = todo(wd) if names is None else names
     out = {"done": 0, "empty": 0, "failed": {}, "cost_usd": 0.0, "total": len(names)}
     for i, n in enumerate(names):

@@ -207,7 +207,7 @@ def build(raw_md: str, wd: WorkDir, flavor: Flavor = Flavor.STANDARD, provider=N
         reference_links=config.resolve_reference_links(),
         runin_headings=config.resolve_runin_mode(),
         caption_style=config.resolve_caption_style(),
-        korean_style=config.resolve_korean_style(),
+        korean_style=config.resolve_style(),  # 새 논문은 사용자 번역 언어(target_lang)의 기본 문체
         translate_headers=config.resolve_translate_headers(),
         translate_references=config.resolve_translate_references(),
         author_parts=config.resolve_author_parts(),

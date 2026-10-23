@@ -82,7 +82,8 @@ class Manifest(BaseModel):
     caption_style: Literal["bold-italic", "blockquote", "italic"] = "bold-italic"
     # 번호형 run-in 헤더(4.1.3 제목. 본문…)를 본문에서 감지해 처리: off | header(승격) | italic
     runin_headings: Literal["off", "header", "italic"] = "off"
-    korean_style: str = "해라체"  # 해라체 | 합니다체 | 해요체 | custom:"..."
+    # 번역 문체 — 이름은 옛것이고 값은 논문 번역 언어(WorkDir.lang)의 문체(langs.py 프리셋 | custom:"...")
+    korean_style: str = "해라체"  # 한국어: 해라체 | 합니다체 | 해요체
     translate_headers: bool = True  # 섹션 제목도 번역 (False면 헤더는 영어 유지)
     translate_references: bool = False  # 참고문헌 섹션 번역 (기본 False — 영어 원문 유지)
     # 저자 블록에 표시할 요소(이름은 항상): email(이메일) · affiliation(소속). 재조립 시 즉시 반영.
@@ -235,7 +236,7 @@ class StoredPaperMeta(PaperMeta):
 
 class GlossaryEntry(BaseModel):
     term: str
-    korean: str
+    korean: str  # 번역어 — 이름은 옛것이고 값은 논문 번역 언어(WorkDir.lang)로 쓴 말
     policy: Literal["translate", "transliterate", "keep", "병기-first-use"] = "translate"
 
 
