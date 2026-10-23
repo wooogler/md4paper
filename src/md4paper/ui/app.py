@@ -2690,39 +2690,27 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             picker.refresh()
 
     def commit() -> None:
-        """구조/설정 변경을 자동 저장 + 재조립 (별도 저장 버튼 없이 항상 최신)."""
-        ctrl.save_and_reassemble()
+        """구조/설정 변경을 자동 저장 + 재조립 (별도 저장 버튼 없이 항상 최신).
+
+        직접 고친 en.md가 있으면 재조립이 그 편집을 살려 새 구조에 합친다(§assemble/merge) — 예전엔 레벨
+        하나만 바꿔도 편집이 통째로 사라져 변경 앞에 확인 창을 걸었다. 이제 묻지 않고 합친 결과만 알린다."""
+        edit_flush()  # 기다리던 편집부터 파일에 — 늦게 저장되면 합친 결과를 옛 글로 덮는다
+        r = ctrl.save_and_reassemble()
         library.auto_export(ctrl.wd)  # 저장 위치를 지정했으면 그 폴더의 사본도 최신으로
+        if r["kept"] or r["dropped"]:
+            _notify_merge(r)
 
-    def guard_manual_edit(then, cancelled=None) -> None:  # noqa: ANN001
-        """재조립으로 수동 편집이 사라지기 **전에** 물어본다.
-
-        재조립(save_and_reassemble)은 raw.md + sections.yaml로 en.md를 다시 만들고 manual_edit
-        플래그까지 조용히 지운다 — 편집 내용도, 그것을 알려 주던 주황 배지도 함께 사라져 흔적이 안 남는다.
-        분할 뷰는 섹션 트리와 에디터를 상시 동시에 보여 주므로 이 사고가 한 번의 오조작으로 일어난다.
-        변이가 먼저 일어나면 되돌리기 어려우니 반드시 변이 **앞**에 건다.
-        """
-        if not ctrl.has_manual_edit():
-            then()
-            return
-
-        with ui.dialog() as dlg, ui.card().classes("gap-2"):
-            ui.label("직접 편집한 마크다운이 사라집니다").classes("text-base font-medium")
-            ui.label("섹션 구조를 바꾸면 원문에서 문서를 다시 만들기 때문에, 편집기에서 고친 내용이 "
-                     "그 결과로 덮어써집니다.").classes("text-sm text-gray-600").style("max-width:420px")
-            with ui.row().classes("justify-end gap-2 w-full"):
-                def cancel() -> None:
-                    dlg.close()
-                    if cancelled is not None:
-                        cancelled()
-
-                def proceed() -> None:
-                    dlg.close()
-                    then()
-
-                ui.button("취소", on_click=cancel).props("flat dense no-caps")
-                ui.button("다시 만들기", on_click=proceed).props("unelevated dense no-caps color=negative")
-        dlg.open()
+    def _notify_merge(r: dict) -> None:
+        parts = ["직접 고친 내용을 그대로 두고 다시 만들었습니다."]
+        if r["conflicts"]:
+            parts.append(f"이번 변경과 같은 자리를 고친 {r['conflicts']}곳은 고친 내용을 남겼습니다"
+                         " — 그 자리엔 새 구조가 반영되지 않았을 수 있어요.")
+        if r["dropped"]:
+            parts.append(f"삭제·합침으로 없어진 구간에 있던 편집 {r['dropped']}곳도 함께 빠졌습니다.")
+        if r["backup"]:
+            parts.append(f"고치기 전 글은 logs/{r['backup'].name}에 남겼습니다.")
+        ui.notify(" ".join(parts), type="warning" if (r["conflicts"] or r["dropped"]) else "positive",
+                  multi_line=len(parts) > 1, timeout=8000 if len(parts) > 1 else 4000)
 
     def change_level(sid: str, value) -> None:  # noqa: ANN001
         """레벨 변경 → 자동 저장 + 즉시 프리뷰·트리에 반영."""
@@ -2732,9 +2720,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             section_list.refresh()
             _refresh_translate_tree()
             refresh_canvas()  # 그리드·목차(편집 중이면 에디터도) 새로 만들어진 en.md로
-
-        # 취소하면 드롭다운이 새 값을 보인 채로 남으므로 트리를 다시 그려 원래 값으로 되돌린다.
-        guard_manual_edit(apply, cancelled=section_list.refresh)
+        apply()
 
     @ui.refreshable
     def section_list() -> None:
@@ -2805,7 +2791,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 refresh_canvas()
                 ui.notify(f"{name} {n}개 → {_LEVEL_LABEL.get(value, value)}", type="positive")
 
-            guard_manual_edit(apply, cancelled=batch_level_panel.refresh)
+            apply()
 
         def change_in_group(sid: str, value) -> None:  # noqa: ANN001
             """그룹 내 개별 섹션 레벨 변경 → 프리뷰·섹션 트리·번역 트리 연동 (아코디언은 유지)."""
@@ -2816,7 +2802,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 _refresh_translate_tree()
                 refresh_canvas()
 
-            guard_manual_edit(apply, cancelled=batch_level_panel.refresh)
+            apply()
 
         for g in groups:
             name = _GROUP_NAME.get((g["scheme"], g["depth"]), f"{g['scheme']} {g['depth']}단계")
@@ -3078,7 +3064,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 .tooltip("끄면 프리뷰는 입력을 멈춰 자동 저장될 때만 갱신됩니다 (긴 문서에서 가볍게)")
         if ctrl.has_manual_edit():
             ui.badge("원문 수동 편집됨", color="orange").props("outline").tooltip(
-                "재조립하면 이 편집은 사라집니다 (섹션 트리에서 다시 만들어지므로)")
+                "섹션 레벨·표기 설정을 바꿔도 이 편집은 새 구조에 합쳐져 남습니다. "
+                "'되돌리기'·레이아웃 수정·다시 변환은 원문에서 새로 만들므로 편집이 사라집니다")
         if ctrl.has_manual_edit_ko():
             ui.badge("번역 수동 편집됨", color="orange").props("outline").tooltip(
                 "번역을 다시 실행하면 이 편집은 사라집니다 (번역 결과로 덮어쓰므로)")
@@ -3163,7 +3150,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
         def revert() -> None:
             edit_state["pending"] = None  # 되돌리면 기다리던 편집은 버린다
-            ctrl.save_and_reassemble()
+            ctrl.save_and_reassemble(keep_edits=False)
             canvas.refresh()   # 에디터 내용까지 파일에서 다시 읽어야 한다
             edit_toggle.refresh()
             ui.notify("섹션 트리 기준으로 다시 만들었습니다.", type="info")
@@ -4060,7 +4047,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             _confirm_ko_edit()
 
         def _confirm_ko_edit() -> None:
-            # 번역문을 직접 고쳐 둔 게 있으면 덮어쓰기 전에 묻는다 (원문 재조립의 guard_manual_edit와 같은 이유)
+            # 번역문을 직접 고쳐 둔 게 있으면 덮어쓰기 전에 묻는다 (번역은 원문 재조립처럼 합칠 공통 조상이 없어 덮어쓴다)
             if not ctrl.has_manual_edit_ko():
                 _start_translate()
                 return
@@ -4562,7 +4549,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 commit()  # 자동 저장 + rerender (raw→평문→새 표기 링크)
                 refresh_canvas()
 
-            guard_manual_edit(apply)
+            apply()
 
         # 참고문헌은 변환 시 API 키가 있으면 자동 파싱된다. 이 버튼은 (1) 키가 없어 자동
         # 파싱이 건너뛰어졌을 때의 수동 실행, (2) 표기·프롬프트를 바꾼 뒤 다시 뽑기용 폴백이다.
@@ -4659,7 +4646,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 capstyle_picker.refresh()
                 refresh_canvas()
 
-            guard_manual_edit(apply, cancelled=capstyle_picker.refresh)
+            apply()
 
         ui.label("그림·표 캡션 표기").classes("text-sm")
 

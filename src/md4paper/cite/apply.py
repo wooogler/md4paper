@@ -43,6 +43,20 @@ def ref_urls(wd: WorkDir) -> dict[str, str]:
     return {r.label: r.url() for r in load_cached_refs(wd) if r.url()}
 
 
+def linked_lines(lines: list[str], manifest, section_map: list[dict], refs: list, parts: list[str],  # noqa: ANN001
+                 reference_links: bool = True) -> tuple[list[str], link.LinkStats] | None:
+    """apply_links의 파일 없는 몸통 — 줄 목록에 인용 링크 + 참고문헌 목록을 입힌다. 참고문헌 섹션이 없으면 None.
+
+    재조립 전 문서(편집을 살려 합칠 때의 base)를 메모리에서 다시 만들 때도 쓴다(§assemble/merge)."""
+    region = find_references_region(manifest, section_map, len(lines))
+    if region is None:
+        return None
+    start, end = region
+    rewritten, stats = link.rewrite_lines(lines, refs, parts, skip_range=range(start + 1, end))
+    rendered = render.render_reference_list(refs, reference_links)
+    return rewritten[: start + 1] + [""] + rendered + [""] + rewritten[end:], stats
+
+
 def apply_links(wd: WorkDir, refs: list, parts: list[str], reference_links: bool = True) -> dict:
     """이미 파싱된 참고문헌으로 본문 인용 링크 + 참고문헌 목록을 다시 적용 (결정론적·무료).
 
@@ -53,14 +67,10 @@ def apply_links(wd: WorkDir, refs: list, parts: list[str], reference_links: bool
     manifest = manifest_io.load(wd)
     section_map = json.loads(wd.sections_map.read_text(encoding="utf-8")).get("sections", [])
     lines = wd.en_md.read_text(encoding="utf-8").splitlines()
-    region = find_references_region(manifest, section_map, len(lines))
-    if region is None:
+    done = linked_lines(lines, manifest, section_map, refs, parts, reference_links)
+    if done is None:
         return {"linked": 0, "skipped": True}
-    start, end = region
-
-    rewritten, stats = link.rewrite_lines(lines, refs, parts, skip_range=range(start + 1, end))
-    rendered = render.render_reference_list(refs, reference_links)
-    new_lines = rewritten[: start + 1] + [""] + rendered + [""] + rewritten[end:]
+    new_lines, stats = done
     wd.en_md.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
     wd.cite.mkdir(parents=True, exist_ok=True)

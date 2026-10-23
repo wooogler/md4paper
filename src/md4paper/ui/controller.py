@@ -7,6 +7,7 @@ CLI와 같은 아티팩트를 읽고 쓴다(별도 데이터 모델 없음).
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from md4paper import notes as notes_io
@@ -99,6 +100,8 @@ class UIController:
     def __init__(self, wd: WorkDir) -> None:
         self.wd = wd
         self.manifest: Manifest = manifest_io.load(wd)
+        # raw.md를 먼저 바꾸는 변경이 떠 둔 '바꾸기 전 조립본' — 다음 save_and_reassemble이 편집을 합칠 때 쓴다
+        self._edit_base: str | None = None
         # load가 옛 매니페스트를 고쳐 썼으면(앞부분 라벨 → 기울임 등) en.md도 맞춘다 — 손으로 고친 en.md는 그대로.
         # yaml이 바뀌었는지가 아니라 'en.md에 아직 남은 헤더가 매니페스트에선 헤더가 아닌지'로 본다:
         # 고친 yaml만 저장되고 재조립 없이 끝난 논문(다른 경로의 load)도 잡도록.
@@ -273,6 +276,11 @@ class UIController:
         raw = self.wd.raw_md.read_text(encoding="utf-8")
         old_block = _render_authors_detail(entries, old_parts)
         if old_block and old_block in raw:
+            if self.has_manual_edit() and self._edit_base is None:
+                # raw.md가 바뀐 뒤에는 '바꾸기 전 조립본'을 다시 만들 수 없다 → 지금 떠 둔다
+                from md4paper import pipeline
+
+                self._edit_base = pipeline.assembled_markdown(self.wd, manifest_io.load(self.wd))
             new_block = _render_authors_detail(entries, new_parts)
             at = raw.index(old_block)
             new_raw = raw.replace(old_block, new_block, 1)
@@ -527,13 +535,59 @@ class UIController:
         manifest_io.save(self.manifest, self.wd)
         return prefs.sync(self.manifest.sections)
 
-    def save_and_reassemble(self) -> None:
-        """sections.yaml 저장 후 en.md 재조립 (프리뷰 갱신). 수동 편집은 덮어써진다."""
-        from md4paper import pipeline
+    def save_and_reassemble(self, keep_edits: bool = True) -> dict:
+        """sections.yaml 저장 후 en.md 재조립 (프리뷰 갱신). 직접 고친 en.md가 있으면 그 편집을 살려 합친다.
 
+        재조립은 raw.md + sections.yaml로 en.md를 처음부터 다시 쓰는데 고친 내용은 en.md에만 있어서, 헤더
+        레벨 하나만 바꿔도 편집이 통째로 사라졌다. 그래서 바꾸기 전 구조로 조립했을 문서(base)·고친 문서·
+        새 조립본을 3-way로 합친다(§assemble/merge). base는 디스크의 sections.yaml(저장 전이라 아직 바꾸기 전
+        구조)로 메모리에서 다시 만든다 — 스냅샷을 따로 두면 en.md를 쓰는 길(인용 재적용·수식 반영 …)마다
+        챙겨야 한다. raw.md를 먼저 바꾸는 변경(set_author_parts)은 바꾸기 직전에 base를 떠 둔다.
+
+        keep_edits=False면 예전처럼 덮어쓴다('되돌리기'). 합친 결과에 사용자 편집과 겹친 곳이 있으면
+        고친 원본을 logs/에 한 벌 남긴다. 반환: {"kept", "conflicts", "dropped", "backup"}.
+        """
+        from md4paper import pipeline
+        from md4paper.assemble import merge
+
+        base, self._edit_base = self._edit_base, None
+        mine = self.en_markdown() if keep_edits and self.has_manual_edit() else None
+        if mine is not None and base is None:
+            base = pipeline.assembled_markdown(self.wd, manifest_io.load(self.wd))
         self.save()
         pipeline.run_assemble(self.wd, force=True)
-        self.clear_manual_edit()
+        if mine is None:
+            self.clear_manual_edit()
+            return {"kept": False, "conflicts": 0, "dropped": 0, "backup": None}
+        theirs = self.en_markdown()
+        res = merge.merge3(base, mine, theirs)
+        backup = None
+        if res.conflicts or res.dropped:
+            self.wd.logs.mkdir(parents=True, exist_ok=True)
+            backup = self.wd.logs / f"en-edit-{time.strftime('%Y%m%d-%H%M%S')}.md"
+            backup.write_text(mine, encoding="utf-8")
+        self._write_atomic(self.wd.en_md, res.text)
+        self._follow_merged_lines(theirs, res.text)
+        if res.text == theirs:  # 남은 편집이 없다(구조가 다 지웠거나 원래 같았다)
+            self.clear_manual_edit()
+        return {"kept": res.text != theirs, "conflicts": res.conflicts, "dropped": res.dropped,
+                "backup": backup}
+
+    def _follow_merged_lines(self, assembled: str, merged: str) -> None:
+        """sections.map.json의 out_line은 새 조립본 기준이다 — 편집을 합쳐 줄이 밀렸으면 함께 민다."""
+        from md4paper.assemble import merge
+
+        smap = self.section_map()
+        if not smap or assembled == merged:
+            return
+        old, new = assembled.splitlines(), merged.splitlines()
+        where = merge.line_map(old, new)
+        for e in smap:
+            n = e.get("out_line")
+            if isinstance(n, int) and 0 <= n < len(where):
+                e["out_line"] = where[n]
+        self.wd.sections_map.write_text(
+            json.dumps({"sections": smap}, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def rerender(self) -> None:
         """메모리 manifest로 en.md만 다시 렌더 (yaml 저장·학습 없이 — 라이브 프리뷰용).

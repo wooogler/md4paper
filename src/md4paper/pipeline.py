@@ -168,6 +168,23 @@ def run_assemble(wd: WorkDir, force: bool = False) -> None:
     wd.mark_done("assemble", h)
 
 
+def assembled_markdown(wd: WorkDir, manifest) -> str:  # noqa: ANN001 — Manifest
+    """run_assemble이 이 manifest로 쓸 en.md 내용을 파일을 건드리지 않고 메모리에서 만든다.
+
+    재조립 때 직접 고친 en.md를 살려 합치려면(§assemble/merge) '바꾸기 전 구조로 조립했을 문서'가
+    공통 조상으로 필요하다 — 디스크의 옛 sections.yaml로 이것을 부르면 그 문서가 나온다."""
+    from md4paper.cite.apply import linked_lines, load_cached_refs
+
+    text, section_map, _ = render.render_markdown(wd.raw_md.read_text(encoding="utf-8"), manifest)
+    refs = load_cached_refs(wd)
+    if refs:
+        done = linked_lines(text.splitlines(), manifest, section_map, refs,
+                            manifest.citation_parts, manifest.reference_links)
+        if done is not None:
+            return "\n".join(done[0]) + "\n"
+    return text
+
+
 def run_cite(wd, provider, parts=None, reference_links=None, force: bool = False):
     """Stage 5: References 파싱 + 본문 인용 링크 + 참고문헌 재렌더. 요약 dict 반환.
 
