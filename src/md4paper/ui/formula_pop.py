@@ -169,20 +169,20 @@ CSS = """
 """
 
 HTML = """
-<div id="md4-fx-pop" role="dialog" aria-label="수식 원본 대조"></div>
-<div id="md4-fx-crop" role="dialog" aria-label="수식 영역 지정">
+<div id="md4-fx-pop" role="dialog" aria-label="⦃수식 원본 대조⦄"></div>
+<div id="md4-fx-crop" role="dialog" aria-label="⦃수식 영역 지정⦄">
   <div class="fxc-panel">
     <div class="fxc-bar">
-      <button data-c="prev" title="이전 쪽">‹</button><span class="fxc-pg"></span>
-      <button data-c="next" title="다음 쪽">›</button>
-      <button data-c="zout" title="축소">−</button><button data-c="zin" title="확대">+</button>
+      <button data-c="prev" title="⦃이전 쪽⦄">‹</button><span class="fxc-pg"></span>
+      <button data-c="next" title="⦃다음 쪽⦄">›</button>
+      <button data-c="zout" title="⦃축소⦄">−</button><button data-c="zin" title="⦃확대⦄">+</button>
       <span class="fxc-hint"></span>
       <span class="fxc-gap"></span>
       <button data-c="extra" style="display:none"></button>
-      <button data-c="cancel">취소</button>
-      <button class="fx-primary" data-c="ok" disabled>이 영역으로 다시 생성</button>
+      <button data-c="cancel">⦃취소⦄</button>
+      <button class="fx-primary" data-c="ok" disabled>⦃이 영역으로 다시 생성⦄</button>
     </div>
-    <div class="fxc-scroll"><div class="fxc-page"><img alt="PDF 쪽" draggable="false"/>
+    <div class="fxc-scroll"><div class="fxc-page"><img alt="⦃PDF 쪽⦄" draggable="false"/>
       <div class="fxc-sel"></div></div></div>
   </div>
 </div>
@@ -249,33 +249,33 @@ HTML = """
   function render(msg){
     if (!cur) return;
     var d = cur.info, h = '', page = cur.region ? cur.region.page : d.page;
-    h += '<div class="fx-head"><b>' + (d.inline ? '인라인 수식' : '수식') + '</b><span>'
-      + (page ? 'p.' + esc(page) : '') + (d.number ? ' · 식 (' + esc(d.number) + ')' : '')
-      + '</span><button class="fx-x" data-act="close" title="닫기">×</button></div>';
+    h += '<div class="fx-head"><b>' + (d.inline ? md4T('인라인 수식') : md4T('수식')) + '</b><span>'
+      + (page ? 'p.' + esc(page) : '') + (d.number ? ' · ' + md4T('식 ({n})', {n: esc(d.number)}) : '')
+      + '</span><button class="fx-x" data-act="close" title="' + md4T('닫기') + '">×</button></div>';
     var src = cand && cand.crop ? cand.crop : (cur.region ? '' : d.img);
-    h += '<div class="fx-lbl">원본 PDF' + (cur.region ? ' — 지정한 영역' : '') + '</div><div class="fx-src">'
-      + (src ? '<img src="' + esc(src) + '" alt="원본 수식"/>'
-             : '<div class="fx-empty">' + (cur.region ? '다시 생성하면 지정한 영역이 여기 보입니다.'
-                 : '잘라 둔 원본 그림이 없습니다 — <b>영역 지정</b>으로 PDF에서 이 수식을 골라 주세요.')
+    h += '<div class="fx-lbl">' + (cur.region ? md4T('원본 PDF — 지정한 영역') : md4T('원본 PDF')) + '</div><div class="fx-src">'
+      + (src ? '<img src="' + esc(src) + '" alt="' + md4T('원본 수식') + '"/>'
+             : '<div class="fx-empty">' + (cur.region ? md4T('다시 생성하면 지정한 영역이 여기 보입니다.')
+                 : md4T('잘라 둔 원본 그림이 없습니다 — 영역 지정으로 PDF에서 이 수식을 골라 주세요.'))
                + '</div>')
       + '</div>';
-    h += '<div class="fx-lbl">지금 LaTeX</div><pre>'
-      + (d.latex ? esc(d.latex) : '(읽기 실패 — 그림으로 남아 있음)') + '</pre>';
+    h += '<div class="fx-lbl">' + md4T('지금 LaTeX') + '</div><pre>'
+      + (d.latex ? esc(d.latex) : md4T('(읽기 실패 — 그림으로 남아 있음)')) + '</pre>';
     if (cand && cand.html){
-      h += '<div class="fx-lbl">다시 생성한 결과</div><div class="fx-new md-preview">' + cand.html + '</div>';
+      h += '<div class="fx-lbl">' + md4T('다시 생성한 결과') + '</div><div class="fx-new md-preview">' + cand.html + '</div>';
       h += '<pre style="margin-top:4px">' + esc(cand.latex) + '</pre>';
     }
     if (msg) h += '<div class="' + (msg.err ? 'fx-err' : 'fx-note') + '">' + esc(msg.text) + '</div>';
     var canRegen = !cur.busy && (d.img || cur.region);
-    h += '<div class="fx-btns"><button data-act="crop"' + (cur.busy ? ' disabled' : '') + '>영역 지정</button>'
+    h += '<div class="fx-btns"><button data-act="crop"' + (cur.busy ? ' disabled' : '') + '>' + md4T('영역 지정') + '</button>'
       + '<span class="fxc-gap"></span>';
     if (cand && cand.html){
-      h += '<button data-act="cancel">취소</button>'
-        + '<button data-act="regen"' + (canRegen ? '' : ' disabled') + '>다시 생성</button>'
-        + '<button class="fx-primary" data-act="apply">적용</button>';
+      h += '<button data-act="cancel">' + md4T('취소') + '</button>'
+        + '<button data-act="regen"' + (canRegen ? '' : ' disabled') + '>' + md4T('다시 생성') + '</button>'
+        + '<button class="fx-primary" data-act="apply">' + md4T('적용') + '</button>';
     } else {
       h += '<button class="fx-primary" data-act="regen"' + (canRegen ? '' : ' disabled') + '>'
-        + (cur.busy ? '생성 중…' : '다시 생성') + '</button>';
+        + (cur.busy ? md4T('생성 중…') : md4T('다시 생성')) + '</button>';
     }
     h += '</div>';
     pop.innerHTML = h;
@@ -299,7 +299,7 @@ HTML = """
   function regen(){
     if (!cur || cur.busy) return;
     var me = cur; me.busy = true; cand = null;
-    render({text: (me.region ? '지정한 영역을' : '원본 그림을') + ' LLM에 다시 읽히는 중…'});
+    render({text: me.region ? md4T('지정한 영역을 LLM에 다시 읽히는 중…') : md4T('원본 그림을 LLM에 다시 읽히는 중…')});
     fetch('/formula/' + me.tok + '/' + encodeURIComponent(me.id) + '/regen', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(me.region ? {page: me.region.page, rect: me.region.rect} : {})})
@@ -307,10 +307,10 @@ HTML = """
       .then(function(res){
         if (cur !== me) return;
         me.busy = false;
-        if (res.error){ render({err: true, text: '다시 생성하지 못했습니다: ' + res.error}); return; }
-        cand = res; render({text: '원본과 비교해 보고 맞으면 적용하세요.'});
+        if (res.error){ render({err: true, text: md4T('다시 생성하지 못했습니다: {e}', {e: res.error})}); return; }
+        cand = res; render({text: md4T('원본과 비교해 보고 맞으면 적용하세요.')});
       })
-      .catch(function(){ if (cur === me){ me.busy = false; render({err: true, text: '서버에 닿지 못했습니다.'}); } });
+      .catch(function(){ if (cur === me){ me.busy = false; render({err: true, text: md4T('서버에 닿지 못했습니다.')}); } });
   }
 
   // --- 영역 지정 — PDF 쪽 위에 드래그로 사각형. 좌표는 쪽 크기(pt, 좌상단 원점)로 서버에 넘긴다 ---
@@ -349,7 +349,7 @@ HTML = """
   function openCropWith(c, page, rect){
     ctx = c; cs = null;
     crop.querySelector('.fxc-hint').textContent = c.hint || '';
-    cok.textContent = c.ok || '이 영역으로';
+    cok.textContent = c.ok || md4T('이 영역으로');
     cextra.style.display = c.extra ? '' : 'none';
     cextra.textContent = c.extra ? c.extra.label : '';
     crop.classList.add('open');
@@ -360,8 +360,8 @@ HTML = """
     if (!cur) return;
     var d = cur.info, r = cur.region, me = cur;
     var p = r ? r.page : (d.page || cur.rowPage || 1);
-    openCropWith({tok: cur.tok, pages: d.pages, hint: '드래그해 수식을 넉넉히 감싸세요',
-                  ok: '이 영역으로 다시 생성',
+    openCropWith({tok: cur.tok, pages: d.pages, hint: md4T('드래그해 수식을 넉넉히 감싸세요'),
+                  ok: md4T('이 영역으로 다시 생성'),
                   onOk: function(page, rect){
                     if (cur !== me) return;
                     cur.region = {page: page, rect: rect};
@@ -416,7 +416,7 @@ HTML = """
     else if (act === 'regen') regen();
     else if (act === 'crop') openCrop();
     else if (act === 'apply' && cand && typeof emitEvent === 'function'){
-      b.disabled = true; b.textContent = '적용 중…';
+      b.disabled = true; b.textContent = md4T('적용 중…');
       var args = {id: cur.id, latex: cand.latex, kind: cand.kind};
       if (cur.region){ args.page = cur.region.page; args.rect = cur.region.rect; }
       if (cur.info.inline) args.expect = cur.info.latex;   // 그사이 문서가 바뀌었으면 서버가 물린다

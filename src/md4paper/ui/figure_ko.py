@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from md4paper.i18n import t
+
 CSS = """
 #md-img-zoom .mdz-bar button[data-act="figko"] { display: none; font-size: 13px; font-weight: 700; }
 #md-img-zoom.can-figko .mdz-bar button[data-act="figko"] { display: flex; }
@@ -106,7 +108,7 @@ def register_routes(fastapi_app, wd_for: Callable[[str], object]) -> None:  # no
         cur = _wd(token, name)
         ok = ft.remove(cur, name)
         _saved(cur)
-        return {"ok": ok, **({} if ok else {"error": "지울 번역이 없습니다."})}
+        return {"ok": ok, **({} if ok else {"error": t("지울 번역이 없습니다.")})}
 
 
 HTML = """
@@ -164,7 +166,7 @@ HTML = """
       if (res && res.ok && res.ko) show(res.ko, true);
       changed(res, 'run');
       return load(c);
-    }, function(){ busy = false; changed({ok: false, error: '서버에 닿지 못했습니다.'}, 'run'); })
+    }, function(){ busy = false; changed({ok: false, error: md4T('서버에 닿지 못했습니다.')}, 'run'); })
       .then(function(){ if (menu.classList.contains('open')) render(); });
   }
   function removeKo(){
@@ -176,27 +178,27 @@ HTML = """
   }
   function render(){
     var i = cur && cur.info;
-    if (!i){ menu.innerHTML = '<div class="note">이 그림의 정보를 읽는 중…</div>'; return; }
+    if (!i){ menu.innerHTML = '<div class="note">' + md4T('이 그림의 정보를 읽는 중…') + '</div>'; return; }
     var h = [];
-    if (busy) h.push('<button disabled>글자 번역 중… (수 초~수십 초)</button>');
+    if (busy) h.push('<button disabled>' + md4T('글자 번역 중… (수 초~수십 초)') + '</button>');
     if (!busy && i.has)
-      h.push('<button data-k="toggle">' + (isKo(cur.view) ? '원본 그림 보기' : '번역 그림 보기') + '</button>');
+      h.push('<button data-k="toggle">' + (isKo(cur.view) ? md4T('원본 그림 보기') : md4T('번역 그림 보기')) + '</button>');
     if (!busy){
       var again = i.record && !i.stale;
-      h.push('<button data-k="run">' + (again ? '다시 번역' : '그림 글자 번역') +
+      h.push('<button data-k="run">' + (again ? md4T('다시 번역') : md4T('그림 글자 번역')) +
              ' <span class="sub">≈ ' + esc(i.est_usd < 0.0001 ? '< $0.0001' : '$' + i.est_usd.toFixed(4)) +
              ' · ' + esc(i.next_model || '') + '</span></button>');
     }
-    if (!busy && i.record && !i.stale && (i.lines || []).length) h.push('<button data-k="edit">번역 고치기…</button>');
-    if (!busy && i.record) h.push('<button data-k="remove">번역 지우기</button>');
-    if (i.stale) h.push('<div class="note">원본 그림이 바뀌어(영역 다시 지정·되돌리기) 번역 그림을 뺐습니다 — 다시 번역하세요.</div>');
-    else if (i.record && !i.translated) h.push('<div class="note">번역할 글자를 찾지 못했습니다' +
-        (i.kind === 'screenshot' ? ' (스크린샷의 화면 글자는 그대로 둡니다)' : '') + '.</div>');
-    else if (i.has) h.push('<div class="note">줄 ' + i.translated + '개 번역 · ' + esc(i.model || '') +
-        (i.edited ? ' · 직접 고침' : '') + (i.kind === 'screenshot' ? ' · 스크린샷: 화면 글자는 그대로' : '') +
-        (i.has_ko_md ? '' : ' · 번역(ko.md)이 생기면 번역 열에 이 그림이 들어갑니다') + '</div>');
-    else h.push('<div class="note">축 라벨·범례·상자 글자를 번역 언어로 바꾼 그림을 만듭니다. 그림의 선·막대·숫자는 ' +
-        '건드리지 않습니다 — AI는 글자의 번역만 정하고, 그림은 원본에서 그 글자 자리만 고쳐 그립니다.</div>');
+    if (!busy && i.record && !i.stale && (i.lines || []).length) h.push('<button data-k="edit">' + md4T('번역 고치기…') + '</button>');
+    if (!busy && i.record) h.push('<button data-k="remove">' + md4T('번역 지우기') + '</button>');
+    if (i.stale) h.push('<div class="note">' + md4T('원본 그림이 바뀌어(영역 다시 지정·되돌리기) 번역 그림을 뺐습니다 — 다시 번역하세요.') + '</div>');
+    else if (i.record && !i.translated) h.push('<div class="note">' + (i.kind === 'screenshot'
+        ? md4T('번역할 글자를 찾지 못했습니다 (스크린샷의 화면 글자는 그대로 둡니다).')
+        : md4T('번역할 글자를 찾지 못했습니다.')) + '</div>');
+    else if (i.has) h.push('<div class="note">' + md4T('줄 {n}개 번역', {n: i.translated}) + ' · ' + esc(i.model || '') +
+        (i.edited ? md4T(' · 직접 고침') : '') + (i.kind === 'screenshot' ? md4T(' · 스크린샷: 화면 글자는 그대로') : '') +
+        (i.has_ko_md ? '' : md4T(' · 번역이 생기면 번역 열에 이 그림이 들어갑니다')) + '</div>');
+    else h.push('<div class="note">' + md4T('축 라벨·범례·상자 글자를 번역 언어로 바꾼 그림을 만듭니다. 그림의 선·막대·숫자는 건드리지 않습니다 — AI는 글자의 번역만 정하고, 그림은 원본에서 그 글자 자리만 고쳐 그립니다.') + '</div>');
     menu.innerHTML = h.join('');
   }
   window.__md4FigKoMenu = function(path){
@@ -225,13 +227,12 @@ HTML = """
     var rows = (i.lines || []).filter(function(x){
       return x.action === 'translate' || (x.action === 'keep' && !x.ui && /[A-Za-z]{3,}/.test(x.en));
     }).sort(function(a, b){ return (a.action === 'translate' ? 0 : 1) - (b.action === 'translate' ? 0 : 1); });
-    ed.innerHTML = '<div class="hd">번역 고치기<div class="sub">비워 두면 그 줄은 원문 그대로 둡니다. ' +
-      'AI를 다시 부르지 않고 그림만 다시 그립니다.</div></div><div class="rows">' +
+    ed.innerHTML = '<div class="hd">' + md4T('번역 고치기') + '<div class="sub">' + md4T('비워 두면 그 줄은 원문 그대로 둡니다. AI를 다시 부르지 않고 그림만 다시 그립니다.') + '</div></div><div class="rows">' +
       rows.map(function(x){
         return '<div class="row"><div class="en">' + esc(x.en) + '</div><input data-id="' + x.id + '" value="' +
-          esc(x.action === 'translate' ? x.ko : '') + '" placeholder="(원문 그대로)"></div>';
-      }).join('') + '</div><div class="ft"><button data-e="cancel">취소</button>' +
-      '<button class="pri" data-e="save">다시 그리기</button></div>';
+          esc(x.action === 'translate' ? x.ko : '') + '" placeholder="' + md4T('(원문 그대로)') + '"></div>';
+      }).join('') + '</div><div class="ft"><button data-e="cancel">' + md4T('취소') + '</button>' +
+      '<button class="pri" data-e="save">' + md4T('다시 그리기') + '</button></div>';
     ed.classList.add('open');
   }
   ed.addEventListener('click', function(ev){

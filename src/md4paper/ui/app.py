@@ -2960,7 +2960,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_body_html(i18n.html(_ANNO_HTML))  # 드래그 → 하이라이트 · 메모 + 문장 짝 호버
     spa.add_css(formula_pop.CSS)  # 수식 클릭 → 원본 크롭 대조 · 다시 생성
     spa.add_body_html(f"<script>{formula_pop.init_js(tok)}</script>")
-    spa.add_body_html(formula_pop.HTML)
+    spa.add_body_html(i18n.html(formula_pop.HTML))
     spa.add_css(figure_crop.CSS)  # 확대 뷰어 ✂ → 그림 영역 다시 지정 (위 영역 지정 화면을 같이 쓴다)
     spa.add_body_html(figure_crop.HTML)
     spa.add_css(figure_ko.CSS)  # 확대 뷰어 '가' → 그림 속 글자 번역 (번역 그림 보기·만들기·고치기)
