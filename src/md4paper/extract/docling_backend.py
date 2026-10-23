@@ -1227,13 +1227,17 @@ def _place_captions(
     if not captions:
         return md
 
-    def norm(s: str) -> str:
-        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", s)).strip()
-
     from collections import defaultdict
+
+    from md4paper.structure.captions import caption_match_key as norm
 
     lines = md.split("\n")
     img_re = re.compile(r"^\s*!\[[^\]]*\]\((.+?)\)\s*$")
+    # 캡션 원문(caption_text)은 날글자지만 md 줄은 손질을 거쳤다 — Docling 이스케이프(&amp; &lt; \_),
+    # 띄어쓰기 복원, 수식 변환. 그래서 글자·숫자만으로 대조하고, 옮겨 붙일 때는 md 줄 그대로를 쓴다
+    # (날글자를 붙이면 '*'·'_'가 강조 기호로 읽히고 복원한 띄어쓰기도 잃는다). 예전엔 태그·공백만 지우고
+    # 대조해 이런 캡션은 원위치가 안 지워져 그림 앞뒤로 두 번 찍혔다.
+    md_form = {norm(ln): ln for ln in lines if ln.strip() and not img_re.match(ln)}
     page_imgs: dict[int, list[int]] = defaultdict(list)  # 페이지 → [이미지 줄 인덱스(문서순)]
     for idx, ln in enumerate(lines):
         m = img_re.match(ln)
@@ -1255,12 +1259,12 @@ def _place_captions(
             continue  # 페이지에 이미지 없음 → 못 붙임 (원위치 유지)
         for k, text in enumerate(caps):  # k번째 캡션 → k번째 이미지(초과분은 마지막에)
             target = imgs[min(k, len(imgs) - 1)]
-            inject.setdefault(target, []).append(text)
+            inject.setdefault(target, []).append(md_form.get(norm(text), text))
             placed.add(norm(text))
 
     out: list[str] = []
     for idx, ln in enumerate(lines):
-        if norm(ln) in placed and not img_re.match(ln):
+        if ln.strip() and norm(ln) in placed and not img_re.match(ln):
             continue  # 원위치의 캡션 텍스트 제거 (이미지 뒤로 이동)
         out.append(ln)
         for cap in inject.get(idx, []):

@@ -164,3 +164,37 @@ def test_subfigure_scan_stops_at_body_not_caption():
              "Figure 9: unrelated caption far below."]
     fig = captions.find_pairs(lines)[0]
     assert fig.label is None  # 본문에서 멈춰 먼 캡션을 가져오지 않음
+
+
+# --- 그림 앞뒤로 두 번 찍힌 캡션 (옛 추출) ---
+
+def test_drop_duplicate_captions_removes_the_one_before_the_image():
+    raw = ("Body.\n\nFig. 3. The hot\\_degree metric ($N=16$).\n\n![Image](img-06.png)\n\n"
+           "Fig. 3. The hot_degree metric (N = 16).\n\nNext.\n")
+    out, drops = captions.drop_duplicate_captions(raw)
+    assert out == "Body.\n\n![Image](img-06.png)\n\nFig. 3. The hot_degree metric (N = 16).\n\nNext.\n"
+    assert drops == [(2, 2, "img-06.png")]
+    assert captions.drop_duplicate_captions(out)[1] == []  # 두 번 돌려도 그대로
+
+
+def test_drop_duplicate_captions_keeps_body_text_and_other_captions():
+    keep = [
+        # 그림 바로 앞의 본문 참조 — 번호 뒤 '.'/':'가 없어 캡션이 아니다
+        "Figure 5 shows the rankings.\n\n![Figure 5](images/figure-5.png)\n> **Figure 5:** Rankings.\n",
+        # 앞뒤 번호가 다르다 (앞 그림의 캡션)
+        "> **Figure 4:** Earlier.\n\n![Figure 5](images/figure-5.png)\n> **Figure 5:** Rankings.\n",
+        # 글이 다른 같은 번호 — 그냥 두기
+        "> **Figure 5:** A different text.\n\n![Figure 5](images/figure-5.png)\n> **Figure 5:** Rankings.\n",
+        # 앞 캡션이 여러 줄 문단의 끝 — 자리를 믿을 수 없다
+        "Some line\n> **Figure 5:** Rankings.\n\n![Figure 5](images/figure-5.png)\n> **Figure 5:** Rankings.\n",
+    ]
+    for md in keep:
+        assert captions.drop_duplicate_captions(md) == (md, [])
+
+
+def test_drop_duplicate_captions_translation_by_image():
+    ko = ("> **Figure 5:** 조건별 순위($N=16$).\n\n![Figure 5](images/figure-5.ko.png)\n"
+          "> **Figure 5:** 조건별 최종 순위(N = 16).\n")
+    out, drops = captions.drop_duplicate_captions(ko, same_text=False, images={"figure-5.png"})
+    assert out == "![Figure 5](images/figure-5.ko.png)\n> **Figure 5:** 조건별 최종 순위(N = 16).\n"
+    assert captions.drop_duplicate_captions(ko, same_text=False, images=set())[1] == []

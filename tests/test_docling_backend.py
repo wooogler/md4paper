@@ -272,6 +272,24 @@ def test_place_captions_injects_orphan_caption_by_page():
     assert lines[i + 2] == "Figure 2: Prompts for LLMs"
 
 
+def test_place_captions_moves_escaped_respaced_caption_once():
+    # md 줄은 손질을 거친 글자(Docling 이스케이프 &amp;·\_, 띄어쓰기 복원), 캡션 원문은 날글자다 —
+    # 대조가 어긋나 원위치가 안 지워지면 그림 앞뒤로 두 번 찍혔다(AdaLens 'hot\_degree', ParallelPilot '&amp;').
+    from md4paper.extract.docling_backend import _place_captions
+
+    md = ("Fig. 3. The hot\\_degree of Plan &amp; Isolate.\n\n![Image](img-01.png)\n\n"
+          "Fig. 4. Questionnaire with open type action.\n\n![Image](img-02.png)\n")
+    captions = [("Fig. 3. The hot_degree of Plan & Isolate.", 1),
+                ("Fig. 4. Questionnairewithopentypeaction.", 2)]
+    out = _place_captions(md, captions, {"img-01.png": 1, "img-02.png": 2}).split("\n")
+    assert [ln for ln in out if ln.startswith("Fig.")] == [
+        "Fig. 3. The hot\\_degree of Plan &amp; Isolate.",  # md 줄 그대로 — 날글자의 '_'는 강조로 읽힐 수 있다
+        "Fig. 4. Questionnaire with open type action.",  # 복원한 띄어쓰기도 그대로
+    ]
+    assert out[out.index("![Image](img-01.png)") + 2].startswith("Fig. 3.")
+    assert out[out.index("![Image](img-02.png)") + 2].startswith("Fig. 4.")
+
+
 def test_place_captions_leaves_caption_when_page_has_no_image():
     # 페이지에 이미지가 없으면 못 붙임 → 원문 그대로 (건드리지 않음)
     from md4paper.extract.docling_backend import _place_captions

@@ -942,3 +942,61 @@ def test_demote_ko_headings_skips_when_counts_differ():
     assert demote_ko_headings(ko, en, []) is None  # 바뀐 게 없음
     assert demote_ko_headings("# 초록\n\n# CCS 개념: · HCI\n", "# Abstract\n\n# CCS Concepts: · HCI\n",
                               ["CCS Concepts: · HCI"]) == "# 초록\n\n*CCS 개념:* · HCI\n"
+
+
+def _dup_caption_paper(tmp_path):
+    from md4paper.assemble import render
+    from md4paper.review import manifest as manifest_io
+    from md4paper.structure import build
+
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.ensure()
+    (wd.extract_images).mkdir(parents=True, exist_ok=True)
+    (wd.extract_images / "img-01.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    # 옛 추출: 캡션이 그림 앞(이스케이프된 md 줄)과 뒤(날글자)에 두 번
+    raw = ("# A Paper\n\n# 1 Intro\n\nBody one.\n\nFig. 1. The hot\\_degree view.\n\n![Image](img-01.png)\n\n"
+           "Fig. 1. The hot_degree view.\n\n# 2 Method\n\nBody two.\n")
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    m = build.build(raw, wd)
+    manifest_io.save(m, wd)
+    render.assemble(raw, m, wd)
+    return wd
+
+
+def test_opening_paper_drops_duplicate_captions(tmp_path):
+    """옛 논문을 열면 그림 앞의 중복 캡션이 raw·en·ko에서 함께 빠진다 — 다시 변환 없이, 번역 정렬 유지."""
+    from md4paper.structure import captions
+
+    wd = _dup_caption_paper(tmp_path)
+    en = wd.en_md.read_text(encoding="utf-8")
+    assert captions.drop_duplicate_captions(en)[1]  # 조립본에도 두 번
+    img = next(ln for ln in en.splitlines() if ln.startswith("!["))
+    cap = next(ln for ln in en.splitlines() if "Figure 1:" in ln and not ln.startswith("!["))
+    ko = f"# 논문\n\n# 1 서론\n\n본문 하나.\n\n{cap}\n\n{img}\n{cap.replace('view', '보기')}\n\n# 2 방법\n\n본문 둘.\n"
+    wd.ko_md.write_text(ko, encoding="utf-8")
+
+    UIController(wd)
+    for text in (wd.raw_md.read_text(encoding="utf-8"), wd.en_md.read_text(encoding="utf-8")):
+        assert captions.drop_duplicate_captions(text)[1] == []
+        assert text.count("hot") == 1 and "Body two." in text
+    ko = wd.ko_md.read_text(encoding="utf-8")
+    assert ko.count("Figure 1") == 2 and ko.index("![") < ko.index("보기")  # 그림 alt + 뒤 캡션만
+    assert "# 2 Method" in wd.en_md.read_text(encoding="utf-8")  # 라인 앵커가 밀려 헤더 자리 그대로
+    from md4paper.ui.app import align_rows  # noqa: PLC0415 — nicegui 필요
+
+    assert align_rows(wd.en_md.read_text(encoding="utf-8"), ko) is not None
+
+
+def test_opening_paper_drops_duplicate_captions_keeps_manual_edits(tmp_path):
+    wd = _dup_caption_paper(tmp_path)
+    c = UIController(wd)  # 먼저 한 번 열어 정리 — 이제 아무것도 안 해야 한다
+    assert c._drop_duplicate_captions() == 0
+
+    wd2 = _dup_caption_paper(tmp_path / "b")
+    c2 = UIController.__new__(UIController)  # 열기 전에 직접 고친 en.md를 만든다
+    c2.wd = wd2
+    en = wd2.en_md.read_text(encoding="utf-8").replace("Body two.", "Body two, edited.")
+    c2.save_en_markdown(en)
+    UIController(wd2)
+    out = wd2.en_md.read_text(encoding="utf-8")
+    assert "Body two, edited." in out and out.count("hot") == 1

@@ -24,6 +24,84 @@ def _strip_html(line: str) -> str:
     return _HTML_RE.sub("", line).strip()
 
 
+_MD_ESCAPE_RE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|<>~&$])")
+
+
+def caption_key(line: str) -> str:
+    """캡션 글자 대조용 키 — 태그·HTML 엔티티(&amp;)·마크다운 이스케이프(\\_)·공백 차이를 지운다.
+
+    같은 캡션이 날글자(Docling caption_text)와 마크다운 줄(이스케이프됨)로 두 번 나올 때 같은 글로 보려고.
+    """
+    import html
+
+    s = html.unescape(_HTML_RE.sub("", line))
+    return re.sub(r"\s+", " ", _MD_ESCAPE_RE.sub(r"\1", s)).strip()
+
+
+def caption_match_key(line: str) -> str:
+    """글자·숫자만 남긴 대조 키 — 띄어쓰기 복원(한쪽만 'Questionnairewith…')이나 수식 변환
+    ('N = 16' ↔ '$N=16$')처럼 본문 줄만 거친 손질이 있어도 같은 캡션을 같은 키로 본다."""
+    return re.sub(r"[\W_]+", "", caption_key(line)).casefold()
+
+
+# 렌더된 캡션 줄 — '> **Figure 3:** …'(조립본)·'Fig. 3. …'(raw.md)·'그림 3:'. 번호 뒤 '.'/':'까지 봐야
+# 'Figure 3 shows …' 같은 본문(그림 바로 앞에 흔하다)을 캡션으로 오인하지 않는다.
+_CAPTION_NUM_RE = re.compile(
+    r"^(?:>\s*)?(?:\*\*|__)?\s*(?:Figure|Fig\.?|Table|Tab\.?|그림|표)\s*(\d+)(?:\*\*|__)?\s*[.:]",
+    re.IGNORECASE)
+
+
+def _caption_num(line: str) -> str | None:
+    m = _CAPTION_NUM_RE.match(_strip_html(line))
+    return m.group(1) if m else None
+
+
+def _same_caption(a: str, b: str) -> bool:
+    """두 캡션이 같은 글인가 — 한쪽만 수식으로 바뀐('N = 16' → '$N=16$') 정도의 차이는 같다고 본다."""
+    from difflib import SequenceMatcher
+
+    ka, kb = (caption_match_key(s)[:400] for s in (a, b))
+    return bool(ka) and SequenceMatcher(None, ka, kb, autojunk=False).ratio() >= 0.9
+
+
+def _image_name(line: str) -> str | None:
+    m = _IMAGE_RE.match(line.strip())
+    if not m:
+        return None
+    return os.path.basename(m.group(1)).replace(".ko.png", ".png")
+
+
+def drop_duplicate_captions(md: str, *, same_text: bool = True,
+                            images: set[str] | None = None) -> tuple[str, list[tuple[int, int, str]]]:
+    """그림 앞뒤로 두 번 찍힌 캡션 중 **앞의 것**을 지운다. 반환: (새 글, [(지운 첫 줄, 지운 줄 수, 그림 이름)]).
+
+    추출이 캡션을 그림 뒤로 옮기며 원위치를 못 지운 옛 논문용(§docling_backend._place_captions).
+    '캡션 줄 · (빈 줄) · 그림 · (빈 줄) · 같은 번호의 캡션 줄'일 때만 앞 줄을 지운다 — 짝지은 캡션은 그림
+    뒤의 것이라 앞 줄은 떠돌이다. same_text면 두 캡션 글이 (거의) 같아야 한다(raw·en — 앞 것만 수식
+    변환을 거쳐 조금 다를 수 있다). 번역본은 두 캡션을 따로 옮겨 글이 다르므로 same_text=False에
+    images(원문에서 지운 그림)로 자리를 좁힌다.
+    """
+    lines = md.split("\n")
+    drops: list[tuple[int, int, str]] = []
+    for i, ln in enumerate(lines):
+        name = _image_name(ln)
+        if name is None or (images is not None and name not in images):
+            continue
+        j = i + 1 + (i + 1 < len(lines) and not lines[i + 1].strip())  # 그림 뒤 (빈 줄 하나까지)
+        k = i - 1 - (i >= 1 and not lines[i - 1].strip())  # 그림 앞
+        if not (0 <= k < i and j < len(lines)) or (k > 0 and lines[k - 1].strip()):
+            continue  # 앞 캡션이 한 줄 문단이 아니면(여러 줄 문단의 끝 등) 건드리지 않는다
+        n_before, n_after = _caption_num(lines[k]), _caption_num(lines[j])
+        if n_before is None or n_before != n_after:
+            continue
+        if same_text and not _same_caption(lines[k], lines[j]):
+            continue
+        drops.append((k, i - k, name))  # 캡션 줄 + 그림 앞 빈 줄
+    for k, n, _name in reversed(drops):
+        del lines[k:k + n]
+    return "\n".join(lines), drops
+
+
 # 서브피규어 라벨 줄: "(a) …", "- (a) …", "a) …" (한 소문자)
 _SUBCAP_RE = re.compile(r"^\s*(?:[-*+]\s+)?\(?[a-z]\)(?:\s|$)")
 

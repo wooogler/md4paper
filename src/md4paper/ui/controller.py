@@ -160,6 +160,42 @@ class UIController:
                 patched = demote_ko_headings(ko, en_before, dropped)
                 if patched is not None:
                     self._write_atomic(wd.ko_md, patched)
+        self._drop_duplicate_captions()
+
+    def _drop_duplicate_captions(self) -> int:
+        """옛 추출이 그림 앞뒤로 두 번 남긴 캡션을 다시 변환 없이 지운다(열 때 한 번, 없으면 아무것도 안 함).
+
+        raw.md에서 앞 캡션을 지우고 라인 앵커를 민 뒤 재조립한다 — 직접 고친 en.md는 편집을 합친다.
+        번역본은 같은 그림 앞의 캡션 문단을 함께 지운다. 안 지우면 원문·번역 문단 수가 어긋나 나란히 보기
+        정렬이 밀린다. 번역 캐시는 그대로(재번역 없음). 반환: 지운 캡션 수.
+        """
+        from md4paper import pipeline
+        from md4paper.structure import captions
+
+        wd = self.wd
+        if not wd.raw_md.exists():
+            return 0
+        raw = wd.raw_md.read_text(encoding="utf-8")
+        new_raw, drops = captions.drop_duplicate_captions(raw)
+        if not drops:
+            return 0
+        if self.has_manual_edit() and self._edit_base is None:
+            # raw.md가 바뀐 뒤에는 '바꾸기 전 조립본'을 다시 만들 수 없다 → 지금 떠 둔다
+            self._edit_base = pipeline.assembled_markdown(wd, manifest_io.load(wd))
+        en_before = self.en_markdown()
+        self._write_atomic(wd.raw_md, new_raw)
+        for k, n, _name in reversed(drops):  # 아래부터 — 위쪽 지우기의 기준 줄이 안 밀린다
+            self._shift_line_anchors(k, -n, new_raw)
+        self.save_and_reassemble()
+        ko = self.ko_markdown()
+        if ko:
+            # 원문에서 실제로 앞 캡션이 사라진 그림만 — 조립본에 없던 중복(raw에만 있던 것)은 번역에도 없다
+            _, en_drops = captions.drop_duplicate_captions(en_before)
+            gone = {name for _k, _n, name in en_drops}
+            patched, ko_drops = captions.drop_duplicate_captions(ko, same_text=False, images=gone)
+            if ko_drops:
+                self._write_atomic(wd.ko_md, patched)
+        return len(drops)
 
     # --- 섹션 편집 ---
     def section(self, sid: str):
