@@ -2777,14 +2777,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             _notify_merge(r)
 
     def _notify_merge(r: dict) -> None:
-        parts = ["직접 고친 내용을 그대로 두고 다시 만들었습니다."]
+        parts = [t("직접 고친 내용을 그대로 두고 다시 만들었습니다.")]
         if r["conflicts"]:
-            parts.append(f"이번 변경과 같은 자리를 고친 {r['conflicts']}곳은 고친 내용을 남겼습니다"
-                         " — 그 자리엔 새 구조가 반영되지 않았을 수 있어요.")
+            parts.append(t("이번 변경과 같은 자리를 고친 {n}곳은 고친 내용을 남겼습니다"
+                           " — 그 자리엔 새 구조가 반영되지 않았을 수 있어요.", n=r["conflicts"]))
         if r["dropped"]:
-            parts.append(f"삭제·합침으로 없어진 구간에 있던 편집 {r['dropped']}곳도 함께 빠졌습니다.")
+            parts.append(t("삭제·합침으로 없어진 구간에 있던 편집 {n}곳도 함께 빠졌습니다.", n=r["dropped"]))
         if r["backup"]:
-            parts.append(f"고치기 전 글은 logs/{r['backup'].name}에 남겼습니다.")
+            parts.append(t("고치기 전 글은 logs/{name}에 남겼습니다.", name=r["backup"].name))
         ui.notify(" ".join(parts), type="warning" if (r["conflicts"] or r["dropped"]) else "positive",
                   multi_line=len(parts) > 1, timeout=8000 if len(parts) > 1 else 4000)
 
@@ -2819,30 +2819,30 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         lbl.classes("cursor-pointer").on("click", lambda _, sid=sec.id: goto_md(sid))
                     tip = (f"p.{sec.page}\n" if sec.page else "") + (sec.context or "")
                     if isinstance(sec.level, int):
-                        tip = "클릭하면 마크다운의 이 섹션으로 이동\n" + tip
+                        tip = t("클릭하면 마크다운의 이 섹션으로 이동") + "\n" + tip
                     if tip.strip():
                         lbl.tooltip(tip.strip())
                     # 배지 — 항상 보임 (제목/run-in/기억됨/확인)
                     if sec.is_title:
-                        ui.badge("제목", color="purple").props("outline")
+                        ui.badge(t("제목"), color="purple").props("outline")
                     if sec.runin:
                         ui.badge("run-in", color="blue-4").props("outline")
                     if sec.auto_level is not None and sec.level != sec.auto_level:
-                        ui.badge("기억됨", color="green").props("outline").tooltip(
+                        ui.badge(t("기억됨"), color="green").props("outline").tooltip(
                             t("자동값 {auto} → 사용자 선택 {level} (이름으로 기억)",
                               auto=t(_LEVEL_LABEL.get(sec.auto_level, str(sec.auto_level))),
                               level=t(_LEVEL_LABEL.get(sec.level, str(sec.level)))))
                     if sec.needs_review:
-                        ui.badge("확인", color="orange").props("outline")
+                        ui.badge(t("확인"), color="orange").props("outline")
                     # 섹션 라벨을 클릭하면 마크다운 그 위치로 이동(나란히 보기면 PDF도 따라옴).
                     # 별도 PDF 이동 버튼은 두지 않는다.
 
     _GROUP_NAME = {
-        ("title", 0): "제목",
-        ("dotted-arabic", 1): "숫자 1단계", ("dotted-arabic", 2): "숫자 2단계",
-        ("dotted-arabic", 3): "숫자 3단계", ("dotted-arabic", 4): "숫자 4단계",
-        ("roman", 1): "로마 숫자", ("letter", 1): "문자", ("letter", 2): "문자 2단계",
-        ("unnumbered", 1): "무번호", ("none", 1): "번호 없음", ("run-in", 0): "run-in 헤더",
+        ("title", 0): N_("제목"),
+        ("dotted-arabic", 1): N_("숫자 1단계"), ("dotted-arabic", 2): N_("숫자 2단계"),
+        ("dotted-arabic", 3): N_("숫자 3단계"), ("dotted-arabic", 4): N_("숫자 4단계"),
+        ("roman", 1): N_("로마 숫자"), ("letter", 1): N_("문자"), ("letter", 2): N_("문자 2단계"),
+        ("unnumbered", 1): N_("무번호"), ("none", 1): N_("번호 없음"), ("run-in", 0): N_("run-in 헤더"),
     }
 
     @ui.refreshable
@@ -2850,9 +2850,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """같은 모양의 헤더를 묶어 한 번에 조정 — 선택지는 섹션 트리와 동일."""
         groups = ctrl.level_groups()
         if not groups:
-            ui.label("조정할 헤더가 없습니다.").classes("text-xs text-gray-400")
+            ui.label(t("조정할 헤더가 없습니다.")).classes("text-xs text-gray-400")
             return
-        ui.label("같은 모양의 헤더를 한 번에 바꿉니다. 펼치면 그룹의 각 섹션을 개별 조정할 수 있어요.") \
+        ui.label(t("같은 모양의 헤더를 한 번에 바꿉니다. 펼치면 그룹의 각 섹션을 개별 조정할 수 있어요.")) \
             .classes("text-xs text-gray-500")
 
         def apply_group(key: str, name: str, value) -> None:  # noqa: ANN001
@@ -2882,7 +2882,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             apply()
 
         for g in groups:
-            name = _GROUP_NAME.get((g["scheme"], g["depth"]), f"{g['scheme']} {g['depth']}단계")
+            gk = (g["scheme"], g["depth"])
+            name = t(_GROUP_NAME[gk]) if gk in _GROUP_NAME else t("{scheme} {depth}단계", scheme=g["scheme"], depth=g["depth"])
             opts = _level_opts(g["scheme"] == "run-in")
             group_secs = [s for s in m.sections if ctrl.group_key(s) == (g["scheme"], g["depth"])]
             # 일괄 선택은 접힌 상태에서도 쓰도록 아코디언 헤더 옆(왼쪽)에 둔다. 펼치면 개별 섹션.
@@ -2890,7 +2891,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.select(
                     opts, value=g["current"],
                     on_change=lambda e, k=g["key"], nm=name: apply_group(k, nm, e.value),
-                ).props("dense outlined").classes("w-28 shrink-0 md4-lvl").tooltip("이 그룹 전체를 한 번에")
+                ).props("dense outlined").classes("w-28 shrink-0 md4-lvl").tooltip(t("이 그룹 전체를 한 번에"))
                 with ui.expansion(f"{name} ×{g['count']}").classes("flex-grow md4-batch-exp").props("dense"):
                     for s in group_secs:  # 개별 섹션 + 헤더 레벨 선택 (섹션 트리·마크다운과 연동)
                         with ui.row().classes("items-center gap-2 w-full no-wrap"):
@@ -2901,7 +2902,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                             lbl = ui.label(s.text).classes("text-sm section-title").style("max-width:300px")
                             if isinstance(s.level, int):  # 클릭 시 마크다운의 해당 섹션으로 이동
                                 lbl.classes("cursor-pointer").on("click", lambda _, sid=s.id: goto_md(sid)) \
-                                    .tooltip("클릭하면 마크다운의 이 섹션으로 이동")
+                                    .tooltip(t("클릭하면 마크다운의 이 섹션으로 이동"))
 
     spa.add_css(i18n.html(_PREVIEW_CSS))
     spa.add_css(live_preview.CSS)  # 편집기 라이브 프리뷰(기호 숨기기·헤더·그림·표·수식)
@@ -2935,7 +2936,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     async def save_zoomed(e) -> None:  # noqa: ANN001
         f = zoomed_file(e)
         if f is None:
-            ui.notify("그림 파일을 찾지 못했습니다.", type="warning")
+            ui.notify(t("그림 파일을 찾지 못했습니다."), type="warning")
             return
         media = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}.get(
             f.suffix.lower(), "application/octet-stream")
@@ -2949,7 +2950,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         if f is not None and await run.io_bound(desktop.copy_image, f):
             await ui.run_javascript("window.__mdImgCopied && window.__mdImgCopied()")
         else:
-            ui.notify("그림을 클립보드에 넣지 못했습니다 — 저장 버튼으로 받아 주세요.", type="warning")
+            ui.notify(t("그림을 클립보드에 넣지 못했습니다 — 저장 버튼으로 받아 주세요."), type="warning")
 
     ui.on("md4-img-save", save_zoomed)
     ui.on("md4-img-copy", copy_zoomed)
@@ -3053,10 +3054,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     async def on_figure_recropped(e) -> None:  # noqa: ANN001 — 그림 파일은 이미 바뀌었다(서버 라우트)
         a = e.args or {}
         if not a.get("ok"):
-            ui.notify(f"그림을 바꾸지 못했습니다: {a.get('error', '')}", type="warning")
+            ui.notify(t("그림을 바꾸지 못했습니다: {v}", v=a.get('error', '')), type="warning")
             return
         await refresh_canvas_keeping_place()  # 표시 폭 힌트(#mdw=)를 새 그림 크기로 — 읽던 자리는 그대로
-        ui.notify("원래 그림으로 되돌렸습니다" if a.get("what") == "restore" else "그림을 고른 영역으로 바꿨습니다",
+        ui.notify(t("원래 그림으로 되돌렸습니다") if a.get("what") == "restore" else t("그림을 고른 영역으로 바꿨습니다"),
                   type="positive")
 
     ui.on("md4-fig-recropped", on_figure_recropped)
@@ -3064,19 +3065,19 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     async def on_figure_ko_changed(e) -> None:  # noqa: ANN001 — 번역 그림·ko.md는 이미 바뀌었다(서버 라우트)
         a = e.args or {}
         if not a.get("ok"):
-            ui.notify(f"그림 글자를 번역하지 못했습니다: {a.get('error', '')}", type="warning")
+            ui.notify(t("그림 글자를 번역하지 못했습니다: {v}", v=a.get('error', '')), type="warning")
             return
         await refresh_canvas_keeping_place()  # 번역 열의 그림 참조(.ko.png)가 바뀌었다
         what = a.get("what")
         if what == "remove":
-            ui.notify("번역 그림을 지웠습니다 — 번역 열은 원본 그림으로", type="positive")
+            ui.notify(t("번역 그림을 지웠습니다 — 번역 열은 원본 그림으로"), type="positive")
         elif what == "edit":
-            ui.notify("고친 번역으로 그림을 다시 그렸습니다", type="positive")
+            ui.notify(t("고친 번역으로 그림을 다시 그렸습니다"), type="positive")
         elif a.get("translated"):
-            ui.notify(f"그림 글자 {a['translated']}줄을 번역했습니다 (≈${float(a.get('cost_usd') or 0):.4f})",
+            ui.notify(t("그림 글자 {translated}줄을 번역했습니다 (≈${v:.4f})", translated=a['translated'], v=float(a.get('cost_usd') or 0)),
                       type="positive")
         else:
-            ui.notify("이 그림에서 번역할 글자를 찾지 못했습니다", type="info")
+            ui.notify(t("이 그림에서 번역할 글자를 찾지 못했습니다"), type="info")
 
     ui.on("md4-figko-changed", on_figure_ko_changed)
 
@@ -3089,15 +3090,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                      str(a.get("latex", "")), str(a.get("kind", "")),
                                      a.get("page"), a.get("rect"), a.get("expect"))
         except ValueError as err:
-            ui.notify(f"수식을 반영하지 못했습니다: {err}", type="warning")
+            ui.notify(t("수식을 반영하지 못했습니다: {err}", err=err), type="warning")
             await ui.run_javascript("window.__md4FxClose && window.__md4FxClose()")
             return
         await run.io_bound(library.auto_export, ctrl.wd)
         ui.run_javascript("window.__md4FxClose && window.__md4FxClose()")
         await refresh_canvas_keeping_place()
-        msg = "수식을 바꿨습니다"
+        msg = t("수식을 바꿨습니다")
         if ctrl.ko_markdown():
-            msg += " · 번역문도 같은 자리를 바꿨습니다" if res["ko"] else " · 번역은 다시 번역해야 반영됩니다"
+            msg += t(" · 번역문도 같은 자리를 바꿨습니다") if res["ko"] else t(" · 번역은 다시 번역해야 반영됩니다")
         ui.notify(msg, type="positive")
 
     ui.on("md4-fx-apply", on_formula_apply)
@@ -3154,9 +3155,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             else:
                 ctrl.save_ko_markdown(text)
         except OSError as ex:
-            _edit_status(f"저장 실패: {ex}")
+            _edit_status(t("저장 실패: {ex}", ex=ex))
             return
-        _edit_status("자동 저장됨")
+        _edit_status(t("자동 저장됨"))
         if not edit_state["live"] and edit_state["on"]:
             preview_pane.refresh()   # 실시간 반영을 꺼 뒀으면 저장할 때 프리뷰를 맞춘다
         if lang == "en":
@@ -3258,30 +3259,30 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     def edit_toggle() -> None:
         """툴바의 마크다운 편집 스위치 — 켜면 대상(원문/번역) 선택·실시간 반영 스위치가 따라 나온다."""
         has_ko = bool(ctrl.ko_markdown())
-        ui.switch("마크다운 편집", value=edit_state["on"],
+        ui.switch(t("마크다운 편집"), value=edit_state["on"],
                   on_change=lambda e: toggle_edit(e.value)).props("dense") \
-            .tooltip("켜면 편집기 옆에 원본 PDF(또는 미리보기)가 서고, 편집기를 스크롤하면 따라옵니다")
+            .tooltip(t("켜면 편집기 옆에 원본 PDF(또는 미리보기)가 서고, 편집기를 스크롤하면 따라옵니다"))
         if edit_state["on"]:
             if has_ko:
-                ui.toggle({"en": "원문", "ko": "번역"}, value=edit_state["lang"],
+                ui.toggle({"en": t("원문"), "ko": t("번역")}, value=edit_state["lang"],
                           on_change=lambda e: toggle_edit(True, e.value)) \
                     .props("dense no-caps unelevated toggle-color=primary color=grey-3 text-color=grey-8") \
-                    .classes("conv-viewtoggle").tooltip("어느 쪽 마크다운을 고칠지")
-            ui.switch("서식 보기", value=edit_state["lp"],
+                    .classes("conv-viewtoggle").tooltip(t("어느 쪽 마크다운을 고칠지"))
+            ui.switch(t("서식 보기"), value=edit_state["lp"],
                       on_change=lambda e: set_live_preview(e.value)).props("dense") \
-                .tooltip("켜면 편집기가 문서처럼 보입니다 — #·** 같은 기호와 링크 주소는 커서가 있는 줄에서만 보이고, "
-                         "그림·표·수식은 그 자리에 그려집니다. 끄면 마크다운 원문 그대로")
+                .tooltip(t("켜면 편집기가 문서처럼 보입니다 — #·** 같은 기호와 링크 주소는 커서가 있는 줄에서만 보이고, "
+                         "그림·표·수식은 그 자리에 그려집니다. 끄면 마크다운 원문 그대로"))
             if edit_side() == "preview":  # 옆이 PDF면 갱신할 미리보기가 없다
-                ui.switch("실시간 반영", value=edit_state["live"],
+                ui.switch(t("실시간 반영"), value=edit_state["live"],
                           on_change=lambda e: edit_state.update(live=e.value)).props("dense") \
-                    .tooltip("끄면 프리뷰는 입력을 멈춰 자동 저장될 때만 갱신됩니다 (긴 문서에서 가볍게)")
+                    .tooltip(t("끄면 프리뷰는 입력을 멈춰 자동 저장될 때만 갱신됩니다 (긴 문서에서 가볍게)"))
         if ctrl.has_manual_edit():
-            ui.badge("원문 수동 편집됨", color="orange").props("outline").tooltip(
-                "섹션 레벨·표기 설정을 바꿔도 이 편집은 새 구조에 합쳐져 남습니다. "
-                "'되돌리기'·레이아웃 수정·다시 변환은 원문에서 새로 만들므로 편집이 사라집니다")
+            ui.badge(t("원문 수동 편집됨"), color="orange").props("outline").tooltip(
+                t("섹션 레벨·표기 설정을 바꿔도 이 편집은 새 구조에 합쳐져 남습니다. "
+                "'되돌리기'·레이아웃 수정·다시 변환은 원문에서 새로 만들므로 편집이 사라집니다"))
         if ctrl.has_manual_edit_ko():
-            ui.badge("번역 수동 편집됨", color="orange").props("outline").tooltip(
-                "번역을 다시 실행하면 이 편집은 사라집니다 (번역 결과로 덮어쓰므로)")
+            ui.badge(t("번역 수동 편집됨"), color="orange").props("outline").tooltip(
+                t("번역을 다시 실행하면 이 편집은 사라집니다 (번역 결과로 덮어쓰므로)"))
 
     @ui.refreshable
     def preview_pane() -> None:
@@ -3293,8 +3294,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             html = "".join(h for _, h in blocks)
         else:
             edit_state["blocks"] = []
-            html = ("<p><em>paper.en.md 없음 — convert를 먼저 실행하세요.</em></p>"
-                    if edit_state["lang"] == "en" else "<p><em>아직 번역 안 됨 — 번역 패널에서 실행하세요.</em></p>")
+            html = ("<p><em>" + escape(t("paper.en.md 없음 — convert를 먼저 실행하세요.")) + "</em></p>"
+                    if edit_state["lang"] == "en"
+                    else "<p><em>" + escape(t("아직 번역 안 됨 — 번역 패널에서 실행하세요.")) + "</em></p>")
         ui.html(html, sanitize=True).classes("md-preview")
 
     def live_update(text: str) -> None:
@@ -3349,7 +3351,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 live_update(e.value)
             # 자동 저장 — 타자가 0.8초 멈추면 파일에 (메모 패널과 같은 모아 쓰기)
             edit_state["pending"] = (edit_state["lang"], e.value)
-            _edit_status("저장 중…")
+            _edit_status(t("저장 중…"))
             tv = edit_state.get("timer")
             if tv is not None:
                 tv.cancel()
@@ -3368,15 +3370,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ctrl.save_and_reassemble(keep_edits=False)
             canvas.refresh()   # 에디터 내용까지 파일에서 다시 읽어야 한다
             edit_toggle.refresh()
-            ui.notify("섹션 트리 기준으로 다시 만들었습니다.", type="info")
+            ui.notify(t("섹션 트리 기준으로 다시 만들었습니다."), type="info")
 
         with ui.row().classes("gap-2 items-center shrink-0 q-pt-xs"):
             edit_state["status"] = ui.label(
-                "자동 저장 — 입력을 멈추면 저장됩니다" if is_en else
-                "자동 저장 — 번역을 다시 실행하면 덮어써지고, 헤더 수를 바꾸면 원문과 나란히 정렬되지 않을 수 있어요"
+                t("자동 저장 — 입력을 멈추면 저장됩니다") if is_en else
+                t("자동 저장 — 번역을 다시 실행하면 덮어써지고, 헤더 수를 바꾸면 원문과 나란히 정렬되지 않을 수 있어요")
             ).classes("text-xs text-gray-500")
             if is_en:  # 번역문에는 '원본'이 없다 — 되돌리려면 번역을 다시 실행한다
-                ui.button("되돌리기(원본 다시 렌더)", icon="restore", on_click=revert).props("outline dense")
+                ui.button(t("되돌리기(원본 다시 렌더)"), icon="restore", on_click=revert).props("outline dense")
 
     # 캔버스 표시 상태 — 원문/번역/PDF 패널 토글 + 텍스트↔PDF 분할 비율 + PDF 스크롤 싱크 + 편집 분할 비율
     # en/ko/pdf는 마지막으로 쓰던 구성으로 연다(전역 — load_panels)
@@ -3494,16 +3496,16 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             ko_text = ko_head[1] if ko_head and _head_key(ko_head[1]) != _head_key(head[1]) else None
             entries.append((head[0], head[1], ko_text, k))
         with ui.row().classes("items-center w-full no-wrap gap-2"):
-            ui.label("목차").classes("md4-panel-title")
+            ui.label(t("목차")).classes("md4-panel-title")
             ui.space()
             if has_ko_titles:
                 # 작은 글자 셋만 — 목차의 주인공은 항목이지 이 스위치가 아니다(테두리·배경 없이, 고른 것만 파랗게)
                 ui.toggle(_toc_lang_options(ctrl.wd.lang), value=mode, on_change=lambda e: set_toc_lang(e.value)) \
                     .props("flat dense no-caps toggle-color=primary") \
-                    .classes("md4-toclang").tooltip("목차 제목을 어느 언어로 보일지")
+                    .classes("md4-toclang").tooltip(t("목차 제목을 어느 언어로 보일지"))
         with ui.element("div").classes("vtoc"):
             if not entries:
-                ui.label("섹션 없음").classes("text-xs text-gray-400 px-2")
+                ui.label(t("섹션 없음")).classes("text-xs text-gray-400 px-2")
             for level, text, ko_text, k in entries:
                 if mode == "ko":
                     first, second = (ko_text or text), None
@@ -3603,7 +3605,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
 
     def _body_handles() -> None:
         """한 패널 본문의 좌우 폭 핸들 — .vbodywrap(상대 위치 상자) 안, 스크롤 상자 옆에 둔다."""
-        tip = "끌어서 본문 폭 조절 · 더블클릭하면 기본(820px)으로"
+        tip = t("끌어서 본문 폭 조절 · 더블클릭하면 기본(820px)으로")
         ui.element("div").classes("vbody-handle").props('data-side=left').tooltip(tip)
         ui.element("div").classes("vbody-handle").props('data-side=right').tooltip(tip)
 
@@ -3827,7 +3829,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         sizes = ctrl.pdf_page_sizes()
         with ui.element("div").classes("vpdf").style("--md4-maxw:900px" if own_width else ""):
             if not sizes:
-                ui.label("원본 PDF를 찾을 수 없습니다.").classes("text-sm text-gray-500")
+                ui.label(t("원본 PDF를 찾을 수 없습니다.")).classes("text-sm text-gray-500")
                 return
             # width/height를 적어 두면 그림이 뜨기 전에도 쪽마다 제 높이를 차지한다. 없으면 lazy 그림이
             # 모두 높이 0으로 시작해, 'PDF 열기 → 보던 쪽으로 이동'이 엉뚱한 곳(첫 쪽 근처)에 떨어진다.
@@ -3844,7 +3846,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """읽기 모드 캔버스 — 원문·번역·PDF를 토글/리사이즈해 보고, 원문|번역은 섹션·문단 단위로 정렬."""
         info = layout_rows()
         if not info["en"]:
-            ui.label("영어 마크다운이 없습니다 — 먼저 변환하세요.").classes("text-sm text-gray-500")
+            ui.label(t("영어 마크다운이 없습니다 — 먼저 변환하세요.")).classes("text-sm text-gray-500")
             return
         _md = ["fenced-code-blocks", "tables", "latex"]
         rows, aligned, row_page0 = info["rows"], info["aligned"], info["row_page0"]
@@ -4060,14 +4062,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 "dense no-caps " + ("unelevated color=primary" if active else "outline color=grey-7"))
             if not enabled:
                 b.disable()
-                b.tooltip(("번역" if key == "ko" else "PDF 원본") + " 없음")
+                b.tooltip(t("번역 없음") if key == "ko" else t("PDF 원본 없음"))
             elif key == "pdf" and edit_state["on"]:
-                b.tooltip("편집기 오른쪽 칸 — 켜면 원본 PDF, 끄면 렌더된 미리보기")
+                b.tooltip(t("편집기 오른쪽 칸 — 켜면 원본 PDF, 끄면 렌더된 미리보기"))
 
         show_pdf = (edit_side() == "pdf" if edit_state["on"] else viewer_state["pdf"]) and has_pdf
         with ui.row().classes("items-center gap-2 w-full no-wrap md4-canvasbar"):
-            chip("원문", "en")
-            chip("번역", "ko", has_ko)
+            chip(t("원문"), "en")
+            chip(t("번역"), "ko", has_ko)
             chip("PDF", "pdf", has_pdf)
             ui.separator().props("vertical").classes("h-6")
             edit_toggle()
@@ -4075,37 +4077,38 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 ui.button(icon="sync" if viewer_state["sync"] else "sync_disabled",
                           on_click=lambda: _vtoggle("sync")).props(
                     "flat dense round " + ("color=primary" if viewer_state["sync"] else "color=grey-6")) \
-                    .tooltip("스크롤 시 PDF 페이지 따라오기 " + ("(켜짐)" if viewer_state["sync"] else "(꺼짐)"))
+                    .tooltip(t("스크롤 시 PDF 페이지 따라오기 (켜짐)") if viewer_state["sync"] else t("스크롤 시 PDF 페이지 따라오기 (꺼짐)"))
             if has_ko and viewer_state["en"] != viewer_state["ko"]:  # 한 언어만 볼 때 — 문장 짝 툴팁 (클릭)
                 ui.button(icon="translate", on_click=lambda: _vtoggle("stip")).props(
                     "flat dense round " + ("color=primary" if viewer_state["stip"] else "color=grey-6")) \
-                    .tooltip("문장을 클릭하면 " + ("번역" if viewer_state["en"] else "원문")
-                             + " 문장 보기 " + ("(켜짐)" if viewer_state["stip"] else "(꺼짐)"))
+                    .tooltip(t("문장을 클릭하면 {side} 문장 보기 ({state})",
+                               side=t("번역") if viewer_state["en"] else t("원문"),
+                               state=t("켜짐") if viewer_state["stip"] else t("꺼짐")))
             ui.button(icon="sticky_note_2", on_click=lambda: ui.run_javascript(
                 "window.__mdAnnoTogglePanel && window.__mdAnnoTogglePanel()")) \
                 .props("flat dense round color=grey-7").classes("md4-anno-btn") \
-                .tooltip("하이라이트 · 메모 목록 — 드래그하면 그 자리에, 문장을 더블클릭하면 원문·번역 양쪽에")
+                .tooltip(t("하이라이트 · 메모 목록 — 드래그하면 그 자리에, 문장을 더블클릭하면 원문·번역 양쪽에"))
             ui.button(icon="forum", on_click=lambda: ui.run_javascript(
                 "window.__md4Agent && window.__md4Agent.toggle()")).props(
-                "flat dense round color=grey-7").tooltip("에이전트 — 이 논문·라이브러리에 묻고, 근거 문단으로 이동")
+                "flat dense round color=grey-7").tooltip(t("에이전트 — 이 논문·라이브러리에 묻고, 근거 문단으로 이동"))
             ui.space()
             library_button()
             if ctrl.source_pdf():  # 내보내기와 같은 '이 논문 파일을 바깥으로' 묶음 — 앱 안 PDF 칸은 왼쪽 토글
-                ui.button("원본 PDF", icon="picture_as_pdf", on_click=open_pdf_app) \
+                ui.button(t("원본 PDF"), icon="picture_as_pdf", on_click=open_pdf_app) \
                     .props("flat dense no-caps color=primary") \
-                    .tooltip("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서")
+                    .tooltip(t("PDF 뷰어로 열기 — 원본 PDF를 미리보기 등 기본 앱에서"))
             # 내보내기는 메뉴 하나로 — 세 단추가 툴바 폭을 먹던 것을 접는다. 형식 선택도 같은 메뉴 안에.
-            with ui.button("내보내기", icon="download").props("flat dense no-caps color=primary"):
+            with ui.button(t("내보내기"), icon="download").props("flat dense no-caps color=primary"):
                 with ui.menu().props("anchor='bottom right' self='top right'").classes("md4-exportmenu"):
-                    ui.menu_item("영어 마크다운 (zip)", on_click=download_en)
-                    item_ko = ui.menu_item(f"번역 마크다운 · {langs.get(ctrl.wd.lang).native} (zip)",
+                    ui.menu_item(t("영어 마크다운 (zip)"), on_click=download_en)
+                    item_ko = ui.menu_item(t("번역 마크다운 · {native} (zip)", native=langs.get(ctrl.wd.lang).native),
                                            on_click=download_ko)
                     if not has_ko:
                         item_ko.disable()
-                    ui.menu_item("하이라이트·메모 (md)", on_click=download_notes)
+                    ui.menu_item(t("하이라이트·메모 (md)"), on_click=download_notes)
                     ui.separator()
                     with ui.row().classes("items-center gap-2 q-px-md q-py-xs no-wrap"):
-                        ui.label("형식").classes("text-xs text-gray-500")
+                        ui.label(t("형식")).classes("text-xs text-gray-500")
                         export_fmt_review()
 
     # 번역 진행(섹션별) — 워커 스레드가 콜백으로 쓰고, UI 타이머가 폴링해 트리 아이콘을 갱신

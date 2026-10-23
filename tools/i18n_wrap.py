@@ -234,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
         for s, e, new, n in clean:
             print(f"{n.lineno}: {new[:120]}")
     else:
-        if clean and "from md4paper.i18n import t" not in out:
+        if clean and not re.search(r"^from md4paper\.i18n import .*\bt\b", out, flags=re.M):
             m = re.search(r"^from md4paper(\.\S+)? import .*$", out, flags=re.M)
             at = m.start() if m else 0
             out = out[:at] + "from md4paper.i18n import t\n" + out[at:]
