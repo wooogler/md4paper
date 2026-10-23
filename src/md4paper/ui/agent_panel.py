@@ -176,10 +176,22 @@ body.ag-standalone .ag-list, body.ag-standalone .ag-foot {
   overflow-wrap: break-word; }
 .ag-a { font-size: 12.5px; line-height: 1.68; overflow-wrap: break-word; }
 .ag-a p, .ag-a ul, .ag-a ol, .ag-a blockquote { margin: 0 0 7px; }
+/* 앱의 Tailwind 리셋이 목록 기호와 제목 굵기를 지운다 — 답 안에서는 되살린다 */
 .ag-a ul, .ag-a ol { padding-left: 19px; }
+.ag-a ul { list-style: disc; }
+.ag-a ol { list-style: decimal; }
+.ag-a ul ul { list-style: circle; }
+.ag-a li { margin: 1px 0; }
+.ag-a li > p { margin: 0; }
+.ag-a li::marker { color: #9a968e; }
 .ag-a code { background: #f4f3f0; border-radius: 4px; padding: 0 3px; font-size: 11.5px; }
 .ag-a pre { background: #f4f3f0; border-radius: 8px; padding: 7px 9px; overflow-x: auto; }
-.ag-a h1, .ag-a h2, .ag-a h3 { font-size: 13px; margin: 2px 0 5px; }
+.ag-a h1, .ag-a h2, .ag-a h3, .ag-a h4 { font-weight: 700; line-height: 1.4; margin: 12px 0 5px; }
+.ag-a h1, .ag-a h2 { font-size: 14px; }
+.ag-a h3, .ag-a h4 { font-size: 13px; }
+.ag-a > :first-child { margin-top: 0; }
+.ag-a blockquote { border-left: 3px solid #e0ded9; padding-left: 9px; color: #6b6862; }
+.ag-a hr { border: none; border-top: 1px solid #ecebe8; margin: 10px 0; }
 .ag-live { white-space: pre-wrap; }      /* 흐르는 동안은 날것 — done에서 렌더된 HTML로 바뀐다 */
 .ag-turn + .ag-turn { margin-top: 10px; }
 .ag-turn.ag-user + .ag-turn.ag-user, .ag-turn.ag-bot + .ag-turn.ag-user { border-top: 1px solid #f0efec;
@@ -317,6 +329,8 @@ a.chat-cite-note:hover { background: #f7cf60; }
   body.ag-open.ag-overlay #md4-agent { box-shadow: -12px 0 36px rgba(0,0,0,.6); }
   .ag-head, .ag-foot { border-color: #2c2c2c; }
   .ag-model, .ag-a code, .ag-a pre, .ag-tool { background: #2c2c2c; color: #b8b8b8; }
+  .ag-a blockquote { border-left-color: #3a3a3a; color: #9a9a9a; }
+  .ag-a hr { border-top-color: #333; }
   .ag-tool b { color: #d0d0d0; }
   .ag-model:hover { background: #3a3a3a; }
   .ag-btn:hover, .ag-sess:hover, .ag-mi:hover { background: #2c2c2c; }

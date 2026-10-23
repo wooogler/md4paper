@@ -626,3 +626,12 @@ def test_standalone_page_drops_unknown_paper_and_bad_session(monkeypatch, tmp_pa
     assert titles and titles[0].startswith(agent_panel.WINDOW_TITLE + " — A")
     assert any(b.startswith("<script>") and "__md4AgentInit" in b for b in body)
     assert body.index(flags) < next(i for i, b in enumerate(body) if "__md4AgentInit" in b)
+
+
+def test_answer_markdown_restores_list_markers_and_heading_weight():
+    """앱의 Tailwind 리셋(list-style:none, h* font-weight:inherit)을 답 안에서 되살린다 —
+    없으면 섹션 제목이 본문처럼, 목록이 기호 없는 들여쓴 문단처럼 보인다."""
+    css = agent_panel.CSS
+    assert ".ag-a ul { list-style: disc; }" in css
+    assert ".ag-a ol { list-style: decimal; }" in css
+    assert re.search(r"\.ag-a h1, \.ag-a h2, \.ag-a h3[^{]*\{[^}]*font-weight: 700", css)
