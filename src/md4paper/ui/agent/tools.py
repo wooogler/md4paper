@@ -630,7 +630,7 @@ async def write_note(ctx: RunContext[Deps], name: str, text: str, token: str | N
     if isinstance(got, str):
         return got
     tok, wd = got
-    want = notes.clean_name(name) or notes.DEFAULT_NAME
+    want = notes.clean_name(name) or notes.default_name()
 
     def work() -> tuple[str, str, bool]:
         created = want not in notes.tab_names(wd)
