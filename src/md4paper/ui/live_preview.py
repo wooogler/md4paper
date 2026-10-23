@@ -55,14 +55,17 @@ CSS = """
 .cm-editor.md4lp .cm-gutters { display: none; }
 .cm-editor.md4lp .cm-scroller { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo',
   'Noto Sans KR', sans-serif; font-size: 16px; line-height: 1.7; }
-.cm-editor.md4lp .cm-content { padding: 14px 22px 64px; }
+/* 읽기 모드 본문과 같은 폭·같은 자리 — 정렬 그리드의 셀처럼 본문 최대 폭(--md4-maxw, 캔버스 열에 걸린 것)으로
+   묶어 가운데 두고 좌우 여백도 셀과 같게(22px). 편집으로 바꿔도 글줄이 같은 곳에서 꺾인다. */
+.cm-editor.md4lp .cm-content { box-sizing: border-box; width: 100%; max-width: var(--md4-maxw, 820px);
+  margin: 0 auto; padding: 1px 22px 64px; }
 .cm-editor.md4lp .cm-line { color: #37352f; }
 /* 문법 강조 색은 지운다 — 문서처럼 보이게. 아래 md4lp-* 꾸밈이 구체도로 이긴다 */
 .cm-editor.md4lp .cm-content span { color: inherit; text-decoration: none; font-family: inherit; }
 .cm-editor.md4lp .cm-activeLine { background: rgba(35, 131, 226, .05); }
 .cm-editor.md4lp .md4lp-h { font-weight: 700; line-height: 1.3; padding-top: .7em; padding-bottom: .15em; }
-.cm-editor.md4lp .md4lp-h1 { font-size: 1.75em; }
-.cm-editor.md4lp .md4lp-h2 { font-size: 1.4em; }
+.cm-editor.md4lp .md4lp-h1 { font-size: 1.9em; }   /* 읽기 모드(.md-preview h1~h4)와 같은 크기 */
+.cm-editor.md4lp .md4lp-h2 { font-size: 1.5em; }
 .cm-editor.md4lp .md4lp-h3 { font-size: 1.2em; }
 .cm-editor.md4lp .md4lp-h4 { font-size: 1.08em; }
 .cm-editor.md4lp .md4lp-h5, .cm-editor.md4lp .md4lp-h6 { font-size: 1em; color: #5f5e5b; }

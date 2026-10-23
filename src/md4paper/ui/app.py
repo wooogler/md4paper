@@ -2965,6 +2965,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
       for (var i = 0; i < cells.length; i++){
         var r = cells[i].getBoundingClientRect();
         if (r.bottom > top + 1) return {row: cells[i].getAttribute('data-row'), off: r.top - top,
+                                         f: r.height > 0 ? Math.min(1, Math.max(0, (top - r.top) / r.height)) : 0,
                                          ratio: g.scrollTop / Math.max(1, g.scrollHeight - g.clientHeight)};
       }
       return {row: null, off: 0, ratio: g.scrollTop / Math.max(1, g.scrollHeight - g.clientHeight)};
@@ -2982,7 +2983,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                                function(x){ return !x.dataset.md4old; })[0];
         var c = g && p.row !== null ? g.querySelector('.sbs-cell[data-row="' + p.row + '"]') : null;
         if (g && c){
-          var d = c.getBoundingClientRect().top - g.getBoundingClientRect().top - p.off;
+          // f(행 안의 비율)가 있으면 그것으로 — 편집기에서 돌아올 때는 픽셀 차가 아니라 행 안 비율만 안다
+          var cr = c.getBoundingClientRect(), off = p.f != null ? -p.f * cr.height : p.off;
+          var d = cr.top - g.getBoundingClientRect().top - off;
           if (Math.abs(d) > 1){ g.scrollTop += d; g.dispatchEvent(new Event('scroll')); }
         } else if (g && p.row === null){
           g.scrollTop = p.ratio * (g.scrollHeight - g.clientHeight);
@@ -2990,6 +2993,38 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         setTimeout(step, ++n < 8 ? 60 : 250);   // 처음엔 촘촘히, 그다음엔 그림이 실리는 동안 띄엄띄엄
       })();
     })(%s)
+    """
+
+    # 편집기 맨 위 줄 — {line(0-based), f(그 줄 블록 안 비율)}. 문단이 한 줄이라 f가 문단 안 위치다.
+    _EDITOR_PLACE_JS = """
+    (function(id){
+      var h = (typeof getElement === 'function') ? getElement(id) : null, v = h && h.editor;
+      if (!v) return null;
+      var y = v.scrollDOM.getBoundingClientRect().top - v.documentTop, b = v.lineBlockAtHeight(y);
+      return {line: v.state.doc.lineAt(b.from).number - 1,
+              f: b.height > 0 ? Math.min(1, Math.max(0, (y - b.top) / b.height)) : 0};
+    })(%d)
+    """
+    # 편집기를 그 줄(+줄 블록 안 비율)이 맨 위에 오게. 서식 보기가 붙어 줄 높이가 바뀐 뒤에 맞추고(그 전에 맞추면
+    # 그림·표 위젯이 들어서며 밀린다), CM이 아직 그리지 않은 곳의 높이는 추정이라 몇 번 더 재서 맞춘다.
+    _EDITOR_GOTO_JS = """
+    (function(id, line, f){
+      var tries = 0, t0 = Date.now(), stop = false;
+      ['wheel', 'touchmove', 'keydown', 'mousedown'].forEach(function(ev){
+        window.addEventListener(ev, function(){ stop = true; }, {once: true, capture: true}); });
+      (function go(){
+        var h = (typeof getElement === 'function') ? getElement(id) : null, v = h && h.editor;
+        if (!v || (!h.__md4lp && Date.now() - t0 < 1500)){ if (++tries < 100) setTimeout(go, 50); return; }
+        var d = v.state.doc, pos = d.line(Math.min(d.lines, line + 1)).from, n = 0;
+        (function fix(){
+          if (stop || !v.dom.isConnected) return;
+          var b = v.lineBlockAt(pos), sc = v.scrollDOM;
+          var dy = (v.documentTop + b.top + f * b.height) - sc.getBoundingClientRect().top;
+          if (Math.abs(dy) > 1){ sc.scrollTop += dy; sc.dispatchEvent(new Event('scroll')); }
+          if (++n < 10) setTimeout(fix, n < 5 ? 60 : 200);
+        })();
+      })();
+    })(%d, %d, %s)
     """
 
     async def refresh_canvas_keeping_place() -> None:
@@ -3140,15 +3175,71 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         page_by_id = ctrl.section_pages()
         return anchored_markdown(served_markdown(md, tok, ctrl.wd.out_images), ctrl.section_map(), page_by_id, jump=True)
 
-    def toggle_edit(on: bool, lang: str | None = None) -> None:
+    async def toggle_edit(on: bool, lang: str | None = None) -> None:
         """직접 편집 켜기/끄기(+대상 언어). 편집 중 화면은 편집기 | (PDF 또는 미리보기) 두 칸이다 —
-        3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다. 읽기 모드의 패널 구성은 건드리지 않는다."""
+        3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다. 읽기 모드의 패널 구성은 건드리지 않는다.
+
+        보던 자리를 지킨다 — 바꾸기 전에 화면 맨 위의 정렬 행과 그 행 안의 비율을 재 두고(읽기 모드: 그리드,
+        편집 모드: 편집기의 줄을 행으로 바꿔), 새 화면이 붙으면 같은 행의 같은 비율로 옮긴다(row_lines)."""
         edit_flush()  # 끄거나 대상을 바꾸기 전에 기다리던 편집부터 저장
+        place = None
+        try:
+            if edit_state["on"] and edit_state.get("editor") is not None:
+                at = await ui.run_javascript(_EDITOR_PLACE_JS % edit_state["editor"].id, timeout=2.0)
+                if isinstance(at, dict):
+                    place = _line_to_place(int(at["line"]), float(at["f"]), edit_state["lang"])
+            elif not edit_state["on"]:
+                at = await ui.run_javascript(_KEEP_JS, timeout=2.0)
+                if isinstance(at, dict) and at.get("row") is not None:
+                    place = (int(at["row"]), float(at.get("f") or 0))
+        except Exception:  # noqa: BLE001 — 못 재면 자리 없이 바꾼다
+            place = None
         if lang is not None:
             edit_state["lang"] = lang
         edit_state["on"] = on
+        viewer_state["_place"] = place
         viewer_toolbar.refresh()
         canvas.refresh()
+
+    def row_lines(lang: str) -> list[tuple[int, int]]:
+        """정렬 행 → 그 언어 마크다운에서 행이 차지하는 (첫 줄, 줄 수). 0-based.
+
+        화면용 글(이미지 주소 바꾸기·수식 표식)은 줄을 더하거나 빼지 않아서 여기서 센 줄이 편집기의 줄과 같다.
+        행의 첫 줄을 앞에서부터 차례로 찾는다. 번역은 원문과 정렬됐을 때만(행이 번역 블록을 가질 때만)."""
+        info = layout_rows()
+        text = info.get(lang) or ""
+        if not text or (lang == "ko" and not info["aligned"]):
+            return []
+        lines = text.splitlines()
+        out: list[tuple[int, int]] = []
+        cur = 0
+        for en_b, ko_b, _h in info["rows"]:
+            b = (en_b if lang == "en" else ko_b) or ""
+            first = next((x for x in b.split("\n") if x.strip()), None)
+            if first is not None:
+                hit = next((j for j in range(cur, len(lines)) if lines[j] == first), None)
+                if hit is not None:
+                    cur = hit
+            out.append((cur, max(1, len(b.strip("\n").split("\n")))))
+        return out
+
+    def _place_to_line(place: tuple[int, float], lang: str) -> tuple[int, float] | None:
+        """(행, 행 안 비율) → (편집기 줄, 줄 블록 안 비율). 문단 하나가 한 줄이라 대개 그 줄 안의 비율이 된다."""
+        rl = row_lines(lang)
+        k, f = place
+        if not (0 <= k < len(rl)):
+            return None
+        start, n = rl[k]
+        x = start + min(max(f, 0.0), 0.999) * n
+        return int(x), x - int(x)
+
+    def _line_to_place(line: int, frac: float, lang: str) -> tuple[int, float] | None:
+        rl = row_lines(lang)
+        if not rl:
+            return None
+        k = max((i for i, (st, _n) in enumerate(rl) if st <= line), default=0)
+        start, n = rl[k]
+        return k, min(1.0, max(0.0, (line + frac - start) / n))
 
     @ui.refreshable
     def edit_toggle() -> None:
@@ -3824,6 +3915,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             else:
                 text_area(solo=True)
         ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")  # 하이라이트 다시 얹기
+        place = viewer_state.pop("_place", None)  # 편집기에서 보던 자리 → 그리드의 같은 행·같은 비율
+        if place and (show_en or show_ko):
+            ui.run_javascript(_RESTORE_JS % json.dumps({"row": str(place[0]), "f": place[1], "off": 0, "ratio": 0}))
         # 토글 전 캡처해 둔 텍스트 스크롤 위치 복원 + (PDF 있으면) 그 위치로 PDF 정렬
         r = viewer_state.pop("_restore", None)
         if (show_en or show_ko) and r:
@@ -3836,12 +3930,14 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         """편집 모드 캔버스 — 편집기 | 원본 PDF(기본) 또는 프리뷰. 프리뷰는 `.conv-md`를 유지해
         읽던 자리·인용 툴팁·그림 확대 계약을 그대로 쓴다."""
         side = edit_side()
+        # 옆이 PDF면 읽기 모드의 '원문 | PDF' 나눔 비율을 같이 쓴다 — 편집으로 바꿔도 본문 칸이 같은 자리·같은 폭
+        split_key = "split" if side == "pdf" else "edsplit"
         with ui.element("div").classes("vshell"), ui.element("div").classes("vmain"):
-            with ui.splitter(value=viewer_state["edsplit"]).classes("w-full").style("height:100%") as ed_sp:
-                ed_sp.on_value_change(lambda e: viewer_state.update(edsplit=e.value))
+            with ui.splitter(value=viewer_state[split_key]).classes("w-full").style("height:100%") as ed_sp:
+                ed_sp.on_value_change(lambda e: viewer_state.update({split_key: e.value}))
                 with ed_sp.before:
                     with ui.column().classes("conv-ed").style(
-                            "height:100%; min-width:0; gap:4px; padding:0 8px 0 0; flex-wrap:nowrap"):
+                            "height:100%; min-width:0; gap:4px; padding:0; flex-wrap:nowrap"):
                         editor_pane()
                 with ed_sp.after:
                     if side == "pdf":
@@ -3853,6 +3949,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         editor = edit_state.get("editor")
         if editor is None:
             return
+        place = viewer_state.pop("_place", None)  # 읽기 모드에서 보던 자리 → 편집기의 같은 자리
+        at = _place_to_line(place, edit_state["lang"]) if place else None
+        if at:
+            ui.run_javascript(_EDITOR_GOTO_JS % (editor.id, at[0], at[1]))
         if side == "preview":  # 에디터 ↔ 프리뷰 양방향 스크롤 싱크
             ui.timer(0.35, lambda e=editor: ui.run_javascript(_md_sync_js(e.id, ".conv-md")), once=True)
         elif viewer_state["sync"]:  # 에디터 스크롤 → PDF 쪽 따라오기 (툴바 싱크 단추로 끈다)
