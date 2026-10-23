@@ -3063,6 +3063,20 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                         "pending": None, "timer": None, "status": None,  # pending: (lang, 글) 자동 저장 대기
                         "lp": _live_preview_on()}  # lp: 서식 보기(라이브 프리뷰) — 전역 설정에 기억
 
+    def edit_side() -> str:
+        """편집 중 오른쪽 칸 — "pdf"(원본 PDF, 기본) 또는 "preview"(렌더 미리보기). PDF가 없으면 미리보기.
+        편집기가 '서식 보기'로 이미 문서처럼 보이니, 옆에는 렌더 결과보다 원본과 대조할 PDF가 더 쓸모 있다."""
+        if ctrl.pdf_page_count() <= 0:
+            return "preview"
+        v = config.load_config().get("ui", {}).get("edit_side", "pdf")
+        return v if v in ("pdf", "preview") else "pdf"
+
+    def set_edit_side(side: str) -> None:
+        edit_flush()
+        config.set_section_value("ui", "edit_side", side)
+        viewer_toolbar.refresh()
+        canvas.refresh()
+
     def set_live_preview(on: bool) -> None:
         edit_state["lp"] = bool(on)
         config.set_section_value("ui", "md_live_preview", bool(on))
@@ -3123,17 +3137,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         return anchored_markdown(served_markdown(md, tok, ctrl.wd.out_images), ctrl.section_map(), page_by_id, jump=True)
 
     def toggle_edit(on: bool, lang: str | None = None) -> None:
-        """직접 편집 켜기/끄기(+대상 언어). 켜는 동안 PDF는 접는다 — 동시 표시 패널 ≤ 2
-        (3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다). 끄면 접었던 PDF를 되살린다."""
+        """직접 편집 켜기/끄기(+대상 언어). 편집 중 화면은 편집기 | (PDF 또는 미리보기) 두 칸이다 —
+        3분할은 기본 창(1280)에서 260/227/162px라 읽을 수 없다. 읽기 모드의 패널 구성은 건드리지 않는다."""
         edit_flush()  # 끄거나 대상을 바꾸기 전에 기다리던 편집부터 저장
         if lang is not None:
             edit_state["lang"] = lang
         edit_state["on"] = on
-        if on and viewer_state["pdf"]:
-            viewer_state["pdf"] = False
-            viewer_state["pdf_folded"] = True
-        elif not on and viewer_state.pop("pdf_folded", False):
-            viewer_state["pdf"] = True
         viewer_toolbar.refresh()
         canvas.refresh()
 
@@ -3143,7 +3152,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         has_ko = bool(ctrl.ko_markdown())
         ui.switch("마크다운 편집", value=edit_state["on"],
                   on_change=lambda e: toggle_edit(e.value)).props("dense") \
-            .tooltip("켜면 편집기와 프리뷰가 나란히 서고, 스크롤이 서로 따라옵니다")
+            .tooltip("켜면 편집기 옆에 원본 PDF(또는 미리보기)가 서고, 편집기를 스크롤하면 따라옵니다")
         if edit_state["on"]:
             if has_ko:
                 ui.toggle({"en": "원문", "ko": "번역"}, value=edit_state["lang"],
@@ -3154,9 +3163,10 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                       on_change=lambda e: set_live_preview(e.value)).props("dense") \
                 .tooltip("켜면 편집기가 문서처럼 보입니다 — #·** 같은 기호와 링크 주소는 커서가 있는 줄에서만 보이고, "
                          "그림·표·수식은 그 자리에 그려집니다. 끄면 마크다운 원문 그대로")
-            ui.switch("실시간 반영", value=edit_state["live"],
-                      on_change=lambda e: edit_state.update(live=e.value)).props("dense") \
-                .tooltip("끄면 프리뷰는 입력을 멈춰 자동 저장될 때만 갱신됩니다 (긴 문서에서 가볍게)")
+            if edit_side() == "preview":  # 옆이 PDF면 갱신할 미리보기가 없다
+                ui.switch("실시간 반영", value=edit_state["live"],
+                          on_change=lambda e: edit_state.update(live=e.value)).props("dense") \
+                    .tooltip("끄면 프리뷰는 입력을 멈춰 자동 저장될 때만 갱신됩니다 (긴 문서에서 가볍게)")
         if ctrl.has_manual_edit():
             ui.badge("원문 수동 편집됨", color="orange").props("outline").tooltip(
                 "섹션 레벨·표기 설정을 바꿔도 이 편집은 새 구조에 합쳐져 남습니다. "
@@ -3227,7 +3237,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         is_en = edit_state["lang"] == "en"
 
         def on_type(e) -> None:  # noqa: ANN001 — NiceGUI 값 변경 이벤트
-            if edit_state["live"]:
+            if edit_state["live"] and edit_side() == "preview":  # 옆이 PDF면 갱신할 미리보기가 없다
                 live_update(e.value)
             # 자동 저장 — 타자가 0.8초 멈추면 파일에 (메모 패널과 같은 모아 쓰기)
             edit_state["pending"] = (edit_state["lang"], e.value)
@@ -3620,6 +3630,65 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         })(%d, '%s');
         """ % (cm_id, pv_sel)
 
+    def _ed_pdf_sync_js(cm_id: int, pages: list) -> str:
+        """편집기 스크롤 → 원본 PDF 쪽 따라오기 (한 방향 — 읽기 모드 _pdf_sync_js와 같다).
+
+        편집기 문서의 헤더 줄(코드펜스 밖 `#`)을 순서대로 세어 pages[k](그 헤더의 쪽)와 짝짓고, 헤더 사이에서는
+        줄 비율로 다음 헤더의 쪽까지 보간해 PDF를 쪽 안의 위치까지 옮긴다. 헤더 목록은 문서가 바뀔 때만 다시 센다.
+        상단 줄은 _md_sync_js처럼 CM 높이맵(lineBlockAtHeight)에서 읽는다 — 가상 스크롤에 영향받지 않는다."""
+        return """
+        (function(cmId, pages){
+          var tries = 0;
+          (function bind(){
+            var host = (typeof getElement === 'function') ? getElement(cmId) : null;
+            var ed = host && host.editor, pv = document.querySelector('.vpdf');
+            if (!ed || !pv || !document.getElementById('pdfpage-0')){ if (++tries < 80) setTimeout(bind, 50); return; }
+            if (ed.__md4pdfsync) return;
+            ed.__md4pdfsync = 1;
+            var sc = ed.scrollDOM, heads = null, headsDoc = null, tick = false, known = [];
+            for (var i = 0, last = 0; i < pages.length; i++){ if (pages[i] != null) last = pages[i]; known.push(last); }
+            function headLines(){
+              if (headsDoc === ed.state.doc) return heads;
+              var d = ed.state.doc, out = [], fence = false;
+              for (var n = 1; n <= d.lines; n++){
+                var t = d.line(n).text;
+                if (/^\s*(```|~~~)/.test(t)){ fence = !fence; continue; }
+                if (!fence && /^#{1,6}\s/.test(t)) out.push(n - 1);
+              }
+              heads = out; headsDoc = d;
+              return out;
+            }
+            function topLine(){
+              var h = sc.getBoundingClientRect().top - ed.documentTop;
+              var b = ed.lineBlockAtHeight(h), d = ed.state.doc;
+              var first = d.lineAt(b.from).number - 1, last = d.lineAt(b.to).number - 1;
+              var f = b.height > 0 ? Math.min(1, Math.max(0, (h - b.top) / b.height)) : 0;
+              return first + f * (last - first + 1);
+            }
+            function pageAt(line){
+              var hs = headLines(), k = -1;
+              for (var i = 0; i < hs.length && i < known.length; i++){ if (hs[i] <= line) k = i; else break; }
+              if (k < 0) return 0;
+              var p = known[k], nx = k + 1;
+              if (nx < hs.length && nx < known.length && known[nx] > p){  // 다음 헤더까지 줄 비율로 쪽 보간
+                var span = hs[nx] - hs[k];
+                if (span > 0) p += Math.min(1, (line - hs[k]) / span) * (known[nx] - p);
+              }
+              return p;
+            }
+            function sync(){
+              tick = false;
+              var pf = pageAt(topLine()), n = Math.floor(pf), img = document.getElementById('pdfpage-' + n);
+              if (!img) return;
+              var r = img.getBoundingClientRect();
+              pv.scrollTop += (r.top - pv.getBoundingClientRect().top) + (pf - n) * r.height;
+            }
+            sc.addEventListener('scroll', function(){ if (!tick){ tick = true; setTimeout(sync, 30); } }, {passive: true});
+            setTimeout(sync, 200);
+          })();
+        })(%d, %s);
+        """ % (cm_id, json.dumps(pages))
+
     def _pdf_pane() -> None:
         sizes = ctrl.pdf_page_sizes()
         with ui.element("div").classes("vpdf"):
@@ -3733,8 +3802,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 "e.dispatchEvent(new Event('scroll'));})()"), once=True)
 
     def edit_view() -> None:
-        """편집 모드 캔버스 — 편집기 | 프리뷰 (PDF는 접혀 있다). 프리뷰는 `.conv-md`를 유지해
-        PDF 싱크·읽던 자리·인용 툴팁·그림 확대 계약을 그대로 쓴다."""
+        """편집 모드 캔버스 — 편집기 | 원본 PDF(기본) 또는 프리뷰. 프리뷰는 `.conv-md`를 유지해
+        읽던 자리·인용 툴팁·그림 확대 계약을 그대로 쓴다."""
+        side = edit_side()
         with ui.element("div").classes("vshell"), ui.element("div").classes("vmain"):
             with ui.splitter(value=viewer_state["edsplit"]).classes("w-full").style("height:100%") as ed_sp:
                 ed_sp.on_value_change(lambda e: viewer_state.update(edsplit=e.value))
@@ -3743,13 +3813,27 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                             "height:100%; min-width:0; gap:4px; padding:0 8px 0 0; flex-wrap:nowrap"):
                         editor_pane()
                 with ed_sp.after:
-                    with ui.element("div").classes("conv-md md-scroll-en").style(
-                            "height:100%; min-width:0; overflow-y:auto; overscroll-behavior:contain; padding:0 12px"):
-                        preview_pane()
-        # 에디터 ↔ 프리뷰 양방향 스크롤 싱크
+                    if side == "pdf":
+                        _pdf_pane()
+                    else:
+                        with ui.element("div").classes("conv-md md-scroll-en").style(
+                                "height:100%; min-width:0; overflow-y:auto; overscroll-behavior:contain; padding:0 12px"):
+                            preview_pane()
         editor = edit_state.get("editor")
-        if editor is not None:
+        if editor is None:
+            return
+        if side == "preview":  # 에디터 ↔ 프리뷰 양방향 스크롤 싱크
             ui.timer(0.35, lambda e=editor: ui.run_javascript(_md_sync_js(e.id, ".conv-md")), once=True)
+        elif viewer_state["sync"]:  # 에디터 스크롤 → PDF 쪽 따라오기 (툴바 싱크 단추로 끈다)
+            pages = edit_pdf_pages()
+            if any(p is not None for p in pages):
+                ui.run_javascript(_ed_pdf_sync_js(editor.id, pages))
+
+    def edit_pdf_pages() -> list[int | None]:
+        """편집 중인 문서의 헤더(문서 순서) → PDF 쪽(0-based). 편집기는 헤더 줄을 순서대로 세어 짝짓는다 —
+        직접 편집으로 줄 번호가 밀려도 헤더 순서는 그대로라서. 번역문도 원문과 헤더 순서가 같다(align_rows와 같은 가정)."""
+        info = layout_rows()
+        return [info["page_by_id"][e["id"]] - 1 if info["page_by_id"].get(e["id"]) else None for e in info["smap"]]
 
     @ui.refreshable
     def canvas() -> None:
@@ -3767,9 +3851,9 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             if not (nxt["en"] or (nxt["ko"] and has_ko) or (nxt["pdf"] and has_pdf)):
                 return  # 마지막 패널을 끄려는 클릭 → 무시
         if key == "pdf" and edit_state["on"]:
-            # 편집 중엔 동시 표시 ≤ 2 — PDF를 켜려면 편집을 끈다(접어 둔 표시도 지운다)
-            edit_state["on"] = False
-            viewer_state.pop("pdf_folded", None)
+            # 편집 중엔 오른쪽 칸을 PDF ↔ 미리보기로 바꾼다 (읽기 모드의 PDF 켜짐 여부와 따로 기억)
+            set_edit_side("preview" if edit_side() == "pdf" else "pdf")
+            return
         # 재렌더 전 텍스트 스크롤 위치(비율)를 캡처 → 재렌더 후 복원(+PDF 정렬). PDF 열기가 위치를 잃지 않게.
         ratio = await ui.run_javascript(
             "(function(){var e=document.querySelector('.sbs-grid')||document.querySelector('.vpane');"
@@ -3778,7 +3862,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         viewer_state["_restore"] = ratio
         if key in ("en", "ko", "pdf"):
             # 편집 때문에 잠시 접어 둔 PDF는 '쓰던 패널'로 친다 — 편집을 끄면 되살아나는 자리다
-            save_panels({**viewer_state, "pdf": viewer_state["pdf"] or viewer_state.get("pdf_folded", False)})
+            save_panels(viewer_state)
         viewer_toolbar.refresh()
         canvas.refresh()
         if key in ("en", "ko"):
@@ -3818,22 +3902,20 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
         has_pdf = ctrl.pdf_page_count() > 0
 
         def chip(label: str, key: str, enabled: bool = True) -> None:
-            active = viewer_state[key] and enabled
+            active = (edit_side() == "pdf" if key == "pdf" and edit_state["on"] else viewer_state[key]) and enabled
             b = ui.button(label, on_click=lambda k=key: _vtoggle(k)).props(
                 "dense no-caps " + ("unelevated color=primary" if active else "outline color=grey-7"))
             if not enabled:
                 b.disable()
                 b.tooltip(("번역" if key == "ko" else "PDF 원본") + " 없음")
+            elif key == "pdf" and edit_state["on"]:
+                b.tooltip("편집기 오른쪽 칸 — 켜면 원본 PDF, 끄면 렌더된 미리보기")
 
-        show_pdf = viewer_state["pdf"] and has_pdf
+        show_pdf = (edit_side() == "pdf" if edit_state["on"] else viewer_state["pdf"]) and has_pdf
         with ui.row().classes("items-center gap-2 w-full no-wrap md4-canvasbar"):
             chip("원문", "en")
             chip("번역", "ko", has_ko)
             chip("PDF", "pdf", has_pdf)
-            if viewer_state.get("pdf_folded"):  # 편집을 켜느라 접은 PDF — 어디 갔는지 알려 주고 되돌릴 길을 둔다
-                ui.badge("PDF 접힘", color="grey-6").props("outline").classes("cursor-pointer") \
-                    .tooltip("편집 중에는 두 패널만 보여 줍니다 — 눌러서 편집을 끄고 PDF로 돌아가기") \
-                    .on("click", lambda: toggle_edit(False))
             ui.separator().props("vertical").classes("h-6")
             edit_toggle()
             if show_pdf:  # PDF 켜졌을 때만 — 텍스트 스크롤에 PDF 페이지 따라오기
