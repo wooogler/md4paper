@@ -39,6 +39,16 @@
   프로젝트 것(공통 폴더면 전역) — 볼트마다 노트 앱이 다를 수 있다.
 - 편수는 논문이 속한 프로젝트마다 한 번씩 센다. 미분류 = (없는 id를 거른 뒤) 소속 목록이 빈 논문.
 
+프로젝트 안에 **하위 프로젝트**를 둘 수 있다(Zotero의 하위 컬렉션) — 각 항목의 `parent`(없으면
+맨 위). 규칙:
+
+- 상위 프로젝트를 고르면 하위 프로젝트의 논문까지 함께 보이고, 편수도 하위를 합친 고유 편수다.
+  논문은 실제로 넣은 프로젝트에만 소속된다(상위에 저절로 들어가지 않는다).
+- 폴더와 프로젝트 설정은 **가장 가까운 조상의 것을 물려받는다** — 'SCALE / 리뷰'가 따로 정하지
+  않으면 SCALE 폴더에 쌓이고 SCALE의 이름 규칙을 쓴다. 따로 정하면 그 값이 이긴다.
+- 프로젝트를 지우면 하위 프로젝트는 지운 것의 상위로 한 칸 올라간다(같이 지워지지 않는다).
+- 깨진 `parent`(없는 id·자기 자신·순환)는 맨 위로 읽는다 — 파일을 손으로 고쳐도 목록이 사라지지 않게.
+
 프로젝트를 지울 때 작업 폴더를 넘기면(`delete(pid, workspace)`) 논문들에서 그 id를 뗀다. 안
 넘기면 논문 쪽 문자열은 남지만, 없는 id는 어디서나 걸러 읽는다(유령 구역이 생기지 않게).
 """
@@ -86,14 +96,16 @@ def setting(pid: str | None, key: str):  # noqa: ANN201
     """이 프로젝트가 **따로 정해 둔** 값. 안 정했으면 None → 호출측이 전역 설정을 쓴다.
 
     '안 정함'과 '거짓으로 정함'을 구별해야 하므로 없으면 None을 준다 (False와 다르다).
+    자기가 안 정했으면 가장 가까운 상위 프로젝트가 정한 값을 물려받는다.
     """
     if key not in SETTINGS:
         raise ValueError(f"컬렉션 설정이 아닙니다: {key} ({', '.join(SETTINGS)})")
-    p = get(pid or "")
-    if not p:
-        return None
-    value = (p.get("settings") or {}).get(key)
-    return None if value is None else value
+    projs = all_projects()
+    for p in _chain(pid or "", projs):
+        value = (p.get("settings") or {}).get(key)
+        if value is not None:
+            return value
+    return None
 
 
 def set_setting(pid: str, key: str, value) -> bool:  # noqa: ANN001
@@ -222,15 +234,17 @@ def clean_name(name: str) -> str:
     return " ".join(str(name or "").split())[:_MAX_NAME]
 
 
-def create(name: str, root: str | None = None) -> dict:
-    """프로젝트 만들기. 이름이 비면 '프로젝트 N'으로 붙여 준다. 반환: 만든 프로젝트."""
+def create(name: str, root: str | None = None, parent: str | None = None) -> dict:
+    """프로젝트 만들기. 이름이 비면 '컬렉션 N'으로 붙여 준다. `parent`면 그 아래에. 반환: 만든 프로젝트."""
     data = load()
     label = clean_name(name) or f"컬렉션 {len(data['projects']) + 1}"
+    known = {p["id"] for p in data["projects"]}
     proj = {
-        "id": _new_id({p["id"] for p in data["projects"]}),
+        "id": _new_id(known),
         "name": label,
         "created_at": time.time(),
         "root": str(root).strip() if root else "",
+        "parent": parent if parent in known else "",
     }
     data["projects"].append(proj)
     _save(data)
@@ -269,9 +283,14 @@ def delete(pid: str, workspace: Path | None = None) -> bool:
             if pid in row["projects"]:
                 remove_from_project(row["root"], pid)
     data = load()
-    rest = [p for p in data["projects"] if p["id"] != pid]
-    if len(rest) == len(data["projects"]):
+    gone = next((p for p in data["projects"] if p["id"] == pid), None)
+    if gone is None:
         return False
+    up = parent_of(pid, data["projects"])
+    rest = [p for p in data["projects"] if p["id"] != pid]
+    for p in rest:  # 하위 프로젝트는 같이 지우지 않고 한 칸 위로 올린다
+        if p.get("parent") == pid:
+            p["parent"] = up
     data["projects"] = rest
     if data["active"] == pid:
         data["active"] = ALL
@@ -305,13 +324,151 @@ def dir_for(pid: str, which: str) -> Path | None:
     """이 프로젝트에서 그 종류가 갈 폴더 (폴더 미지정이면 None — 폴백은 library.dir_for)."""
     if which not in KINDS:
         raise ValueError(f"알 수 없는 종류: {which} (en|ko|pdf)")
-    root = root_of(pid)
+    root = folder_of(pid)
     return None if root is None else layout(root)[which]
 
 
 def has_dirs(pid: str) -> bool:
-    """이 프로젝트가 자기 폴더를 갖고 있는지."""
-    return root_of(pid) is not None
+    """이 프로젝트의 사본이 갈 폴더가 있는지 (자기 폴더 또는 물려받은 상위 폴더)."""
+    return folder_of(pid) is not None
+
+
+def folder_of(pid: str) -> Path | None:
+    """실제로 쓰는 폴더 — 자기 폴더, 없으면 가장 가까운 상위 프로젝트의 폴더. 아무도 없으면 None."""
+    for p in _chain(pid, all_projects()):
+        raw = str(p.get("root") or "").strip()
+        if raw:
+            return Path(raw).expanduser()
+    return None
+
+
+def inherited_from(pid: str) -> dict | None:
+    """폴더를 물려받았다면 그 상위 프로젝트 (자기 폴더가 있거나 아무 데서도 못 받으면 None)."""
+    chain = _chain(pid, all_projects())
+    if not chain or str(chain[0].get("root") or "").strip():
+        return None
+    return next((p for p in chain[1:] if str(p.get("root") or "").strip()), None)
+
+
+# --- 하위 프로젝트(트리) -------------------------------------------------------
+# 함수마다 projs(all_projects() 결과)를 받을 수 있다 — 홈이 사이드바를 그릴 때 한 번 읽은 목록으로
+# 행마다 파일을 다시 읽지 않게.
+
+
+def _parents(projs: list[dict]) -> dict[str, str]:
+    """{id: 쓸 수 있는 parent} — 없는 id·자기 자신·순환은 ''(맨 위)로 끊는다."""
+    known = {p["id"] for p in projs}
+    raw = {p["id"]: str(p.get("parent") or "") for p in projs}
+    out: dict[str, str] = {}
+    for pid in raw:
+        par = raw[pid] if raw[pid] in known and raw[pid] != pid else ""
+        seen, cur = {pid}, par
+        while cur:  # 위로 따라 올라가다 자기에게 돌아오면 순환 — 맨 위로
+            if cur in seen:
+                par = ""
+                break
+            seen.add(cur)
+            nxt = raw.get(cur, "")
+            cur = nxt if nxt in known else ""
+        out[pid] = par
+    return out
+
+
+def _chain(pid: str, projs: list[dict]) -> list[dict]:
+    """자기부터 맨 위 조상까지 [자기, 부모, 조부모, …] (없는 id면 [])."""
+    by_id = {p["id"]: p for p in projs}
+    par = _parents(projs)
+    out = []
+    cur = pid if pid in by_id else ""
+    while cur:
+        out.append(by_id[cur])
+        cur = par.get(cur, "")
+    return out
+
+
+def parent_of(pid: str, projs: list[dict] | None = None) -> str:
+    """상위 프로젝트 id ('' = 맨 위)."""
+    return _parents(all_projects() if projs is None else projs).get(pid, "")
+
+
+def ancestors(pid: str, projs: list[dict] | None = None) -> list[str]:
+    """상위 프로젝트 id들 — 가까운 것부터 (자기는 빼고)."""
+    return [p["id"] for p in _chain(pid, all_projects() if projs is None else projs)[1:]]
+
+
+def descendants(pid: str, projs: list[dict] | None = None) -> list[str]:
+    """하위 프로젝트 id들 — 깊이 우선, 만든 순서 (자기는 빼고)."""
+    projs = all_projects() if projs is None else projs
+    par = _parents(projs)
+    kids: dict[str, list[str]] = {}
+    for p in projs:
+        kids.setdefault(par[p["id"]], []).append(p["id"])
+    out: list[str] = []
+    stack = list(reversed(kids.get(pid, [])))
+    while stack:
+        cur = stack.pop()
+        out.append(cur)
+        stack.extend(reversed(kids.get(cur, [])))
+    return out
+
+
+def tree(projs: list[dict] | None = None) -> list[tuple[dict, int]]:
+    """사이드바·메뉴에 늘어놓을 순서 — [(프로젝트, 깊이)], 부모 바로 아래에 자식들(만든 순서)."""
+    projs = all_projects() if projs is None else projs
+    by_id = {p["id"]: p for p in projs}
+    par = _parents(projs)
+    kids: dict[str, list[str]] = {}
+    for p in projs:
+        kids.setdefault(par[p["id"]], []).append(p["id"])
+    out: list[tuple[dict, int]] = []
+    stack = [(pid, 0) for pid in reversed(kids.get("", []))]
+    while stack:
+        pid, d = stack.pop()
+        out.append((by_id[pid], d))
+        stack.extend((c, d + 1) for c in reversed(kids.get(pid, [])))
+    return out
+
+
+def path_name(pid: str, projs: list[dict] | None = None, sep: str = " / ") -> str:
+    """'SCALE / 리뷰'처럼 맨 위부터 이은 이름 (미분류·없는 id는 '미분류')."""
+    chain = _chain(pid, all_projects() if projs is None else projs)
+    return sep.join(p["name"] for p in reversed(chain)) if chain else NONE_LABEL
+
+
+def can_move(pid: str, parent: str, projs: list[dict] | None = None) -> bool:
+    """pid를 parent 아래로 옮길 수 있는지 — 자기 자신·자기 하위로는 못 간다('' = 맨 위는 늘 된다)."""
+    projs = all_projects() if projs is None else projs
+    known = {p["id"] for p in projs}
+    if pid not in known:
+        return False
+    if not parent:
+        return True
+    return parent in known and parent != pid and parent not in descendants(pid, projs)
+
+
+def set_parent(pid: str, parent: str | None) -> bool:
+    """상위 프로젝트 바꾸기 (None·'' = 맨 위로). 순환이 생기면 거절. 반환: 바꿨거나 이미 그랬는지."""
+    parent = parent or ""
+    data = load()
+    if not can_move(pid, parent, data["projects"]):
+        return False
+    for p in data["projects"]:
+        if p["id"] == pid:
+            if str(p.get("parent") or "") != parent:
+                p["parent"] = parent
+                _save(data)
+            return True
+    return False
+
+
+def set_collapsed(pid: str, collapsed: bool) -> None:
+    """사이드바에서 하위 프로젝트를 접어 둘지 기억."""
+    data = load()
+    for p in data["projects"]:
+        if p["id"] == pid and bool(p.get("collapsed")) != bool(collapsed):
+            p["collapsed"] = bool(collapsed)
+            _save(data)
+            return
 
 
 def active() -> str:
@@ -339,12 +496,15 @@ def assign_target(pid: str | None = None) -> str:
 
 
 def options(*, with_all: bool = False, with_none: bool = True) -> dict[str, str]:
-    """NiceGUI select용 {값: 라벨}. 프로젝트가 없어도 미분류 항목은 유지한다."""
+    """NiceGUI select용 {값: 라벨}. 프로젝트가 없어도 미분류 항목은 유지한다.
+
+    트리 순서로, 하위 프로젝트는 'SCALE / 리뷰'처럼 경로 이름으로 (같은 이름의 하위가 섞이지 않게)."""
     opts: dict[str, str] = {}
     if with_all:
         opts[ALL] = ALL_LABEL
     if with_none:
         opts[NONE] = NONE_LABEL
-    for p in all_projects():
-        opts[p["id"]] = p["name"]
+    projs = all_projects()
+    for p, _depth in tree(projs):
+        opts[p["id"]] = path_name(p["id"], projs)
     return opts
