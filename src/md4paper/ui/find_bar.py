@@ -44,11 +44,11 @@ CSS = """
 
 HTML = """
 <div id="md4-find" role="search">
-  <input type="search" placeholder="페이지에서 찾기" spellcheck="false" autocomplete="off">
+  <input type="search" placeholder="⦃페이지에서 찾기⦄" spellcheck="false" autocomplete="off">
   <span class="md4f-count"></span>
-  <button data-act="prev" title="이전 (Shift+Enter)">&#8593;</button>
-  <button data-act="next" title="다음 (Enter)">&#8595;</button>
-  <button data-act="close" title="닫기 (Esc)">&#10005;</button>
+  <button data-act="prev" title="⦃이전 (Shift+Enter)⦄">&#8593;</button>
+  <button data-act="next" title="⦃다음 (Enter)⦄">&#8595;</button>
+  <button data-act="close" title="⦃닫기 (Esc)⦄">&#10005;</button>
 </div>
 <script>
 (function(){
@@ -151,7 +151,7 @@ HTML = """
 
   function show(n){
     countEl.classList.toggle('none', !ranges.length);
-    countEl.textContent = !query ? '' : (ranges.length ? (n + 1) + ' / ' + ranges.length : '결과 없음');
+    countEl.textContent = !query ? '' : (ranges.length ? (n + 1) + ' / ' + ranges.length : md4T('결과 없음'));
   }
 
   function step(dir){
@@ -160,7 +160,7 @@ HTML = """
     if (!HL){                              // 물러선 길: 브라우저 내장 찾기 (개수는 못 센다)
       query = q;
       countEl.classList.remove('none');
-      countEl.textContent = window.find(q, false, dir < 0, true) ? '' : '결과 없음';
+      countEl.textContent = window.find(q, false, dir < 0, true) ? '' : md4T('결과 없음');
       return;
     }
     var isNew = q !== query;
@@ -249,7 +249,8 @@ HTML = """
 
 def install() -> None:
     """현재 페이지에 찾기 바를 얹는다 (CSS + 바 + 키 바인딩)."""
+    from md4paper import i18n
     from md4paper.ui import spa
 
     spa.add_css(CSS)
-    spa.add_body_html(HTML)  # 이미 얹혀 있으면(탭을 옮겨 본문만 바뀐 경우) 그대로 쓴다
+    spa.add_body_html(i18n.html(HTML))  # 이미 얹혀 있으면(탭을 옮겨 본문만 바뀐 경우) 그대로 쓴다

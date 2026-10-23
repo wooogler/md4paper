@@ -64,7 +64,7 @@ HTML = """
   function done(path, res, what){
     if (!res || !res.ok){
       if (typeof emitEvent === 'function')
-        emitEvent('md4-fig-recropped', {ok: false, error: (res && res.error) || '서버에 닿지 못했습니다.'});
+        emitEvent('md4-fig-recropped', {ok: false, error: (res && res.error) || md4T('서버에 닿지 못했습니다.')});
       return;
     }
     // 같은 주소라 브라우저가 옛 그림을 계속 쓴다 — 캐시를 새로 받은 뒤 캔버스를 다시 그리게 한다
@@ -81,23 +81,23 @@ HTML = """
     fetch(base).then(function(r){ if (!r.ok) throw 0; return r.json(); }).then(function(info){
       window.__md4CropOpen({
         tok: tok, pages: info.pages,
-        hint: info.guess ? '드래그해 그림 전체를 감싸세요 (지금 사각형은 짐작한 자리)'
-                         : '드래그해 그림 전체를 감싸세요',
-        ok: '이 영역으로 바꾸기',
+        hint: info.guess ? md4T('드래그해 그림 전체를 감싸세요 (지금 사각형은 짐작한 자리)')
+                         : md4T('드래그해 그림 전체를 감싸세요'),
+        ok: md4T('이 영역으로 바꾸기'),
         onOk: function(page, rect){
           fetch(base + '/crop', {method: 'POST', headers: {'Content-Type': 'application/json'},
                                  body: JSON.stringify({page: page, rect: rect})})
             .then(function(r){ return r.json(); })
             .then(function(res){ done(path, res, 'crop'); }, function(){ done(path, null); });
         },
-        extra: info.backup ? {label: '원래 그림으로', run: function(){
+        extra: info.backup ? {label: md4T('원래 그림으로'), run: function(){
           fetch(base + '/restore', {method: 'POST'}).then(function(r){ return r.json(); })
             .then(function(res){ done(path, res, 'restore'); }, function(){ done(path, null); });
         }} : null
       }, info.page || 1, info.bbox);
     }).catch(function(){
       if (typeof emitEvent === 'function')
-        emitEvent('md4-fig-recropped', {ok: false, error: '이 그림의 원본을 찾지 못했습니다.'});
+        emitEvent('md4-fig-recropped', {ok: false, error: md4T('이 그림의 원본을 찾지 못했습니다.')});
     });
   };
 })();
