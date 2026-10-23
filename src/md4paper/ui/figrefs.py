@@ -1,4 +1,4 @@
-"""본문의 그림·표 참조("Figure 3", "Fig. 2a", "Table 1", "그림 3", "표 1") 호버 미리보기 + 클릭 확대.
+"""본문의 그림·표 참조("Figure 3", "Fig. 2a", "Table 1", "그림 3", "표 1", "図3", "Tabla 2") 호버 미리보기 + 클릭 확대.
 
 인용 툴팁(#ref-N)과 같은 짜임이다 — 서버는 논문마다 `window.__mdFigRefs` 맵만 실어 주고,
 참조를 찾아 감싸고 띄우는 일은 클라이언트 스크립트 하나가 한다(spa.add_body_html로 한 번만).
@@ -209,8 +209,9 @@ HTML = """
   var tip = document.getElementById('md-fig-tip'), view = document.getElementById('md-tbl-view');
   if (!tip || !view) return;
   // 단어 앞이 글자면 안 된다(목표 1·Subtable 1) — 뒤는 한국어 조사가 바로 붙으니 숫자·영문자만 막는다.
-  var RE = /(?<![A-Za-z\\u3131-\\u318e\\uac00-\\ud7a3])(Figures?|Figs?\\.?|Tables?|Tab\\.|그림|표)(\\s*|\\u00a0)(\\d+|[IVXLC]+)(?:([a-z])|\\(([a-z])\\))?(?![0-9A-Za-z])/g;
-  var MORE = /^(\\s*(?:,|;|and|&|–|-|및|와|과)\\s*)(\\d+)(?:[a-z]|\\([a-z]\\))?(?![0-9A-Za-z])/;
+  // 번역 언어별 낱말: 그림/표(ko) · 図/表(ja) · 图/表(zh) · Figura/Tabla(es). 일·중은 띄어 쓰지 않으니 앞을 막지 않는다.
+  var RE = /(?<![A-Za-z\\u3131-\\u318e\\uac00-\\ud7a3])(Figures?|Figuras?|Figs?\\.?|Tables?|Tablas?|Tab\\.|그림|표|図|图|圖|表)(\\s*|\\u00a0)(\\d+|[IVXLC]+)(?:([a-z])|\\(([a-z])\\))?(?![0-9A-Za-z])/g;
+  var MORE = /^(\\s*(?:,|;|、|and|&|–|-|및|와|과|y|および|及び|和|与)\\s*)(\\d+)(?:[a-z]|\\([a-z]\\))?(?![0-9A-Za-z])/;
   var ROMAN = {I: 1, V: 5, X: 10, L: 50, C: 100};
   function num(t){
     if (/^\\d+$/.test(t)) return parseInt(t, 10);
@@ -220,10 +221,10 @@ HTML = """
   }
   // 섹션 참조: "Section 3.4", "Sec. 5", "§3.2.1", "부록 A.1", "Appendix B" / 한국어 "3.4절".
   // 번호가 본문 헤더("## 3.4 결과", "# A Appendix")에 실제로 있을 때만 감싼다 — 맵은 DOM 헤더에서 짓는다.
-  var SECRE = /(?<![A-Za-z\\u3131-\\u318e\\uac00-\\ud7a3])([Ss]ections?|SECTIONS?|[Ss]ecs?\\.|§§?|섹션|절|[Aa]ppendix|[Aa]ppendices|APPENDIX|부록)(\\s*|\\u00a0)(\\d+(?:\\.\\d+)*|[A-Z](?:\\.\\d+)*)(?![0-9A-Za-z]|\\.\\d)/g;
-  var SECRE2 = /(?<![0-9.A-Za-z])(\\d+(?:\\.\\d+)*)(\\s?)절(?![차반대약감단])/g;
-  var SECMORE = /^(\\s*(?:,|;|and|&|–|-|및|와|과)\\s*)(\\d+(?:\\.\\d+)*|[A-Z](?:\\.\\d+)*)(?![0-9A-Za-z]|\\.\\d)/;
-  var HNUM = /^\\s*(Appendix\\s+|APPENDIX\\s+|부록\\s+)?([A-Z]|\\d+)((?:\\.\\d+)*)\\.?(?:\\s+|$)/;
+  var SECRE = /(?<![A-Za-z\\u3131-\\u318e\\uac00-\\ud7a3])([Ss]ections?|SECTIONS?|[Ss]ecs?\\.|§§?|섹션|절|[Aa]ppendix|[Aa]ppendices|APPENDIX|부록|[Ss]ecci(?:ón|ones)|[Aa]péndices?|付録|附录)(\\s*|\\u00a0)(\\d+(?:\\.\\d+)*|[A-Z](?:\\.\\d+)*)(?![0-9A-Za-z]|\\.\\d)/g;
+  var SECRE2 = /(?<![0-9.A-Za-z])(\\d+(?:\\.\\d+)*)(\\s?)(?:절(?![차반대약감단])|節|节)/g;   // 3.4절 · 3.4節 · 3.4节
+  var SECMORE = /^(\\s*(?:,|;|、|and|&|–|-|및|와|과|y|および|及び|和|与)\\s*)(\\d+(?:\\.\\d+)*|[A-Z](?:\\.\\d+)*)(?![0-9A-Za-z]|\\.\\d)/;
+  var HNUM = /^\\s*(Appendix\\s+|APPENDIX\\s+|부록\\s+|Apéndice\\s+|付録\\s*|附录\\s*)?([A-Z]|\\d+)((?:\\.\\d+)*)\\.?(?:\\s+|$)/;
   var secCache = null;
   function headText(h){
     var t = '';
@@ -239,7 +240,7 @@ HTML = """
       var t = headText(h), m = HNUM.exec(t);
       if (!m) return;
       // 한 글자 번호("A Study of …")는 부록 헤더일 때만 — 제목 첫 단어 'A'를 섹션 A로 보지 않게
-      if (/^[A-Z]$/.test(m[2]) && !m[3] && !m[1] && !/appendix|부록/i.test(t)) return;
+      if (/^[A-Z]$/.test(m[2]) && !m[3] && !m[1] && !/appendix|부록|apéndice|付録|附录/i.test(t)) return;
       var k = 'sec-' + m[2] + m[3];
       (idx[k] = idx[k] || []).push(h);
     });
@@ -252,7 +253,7 @@ HTML = """
     if (/^[A-Z]$/.test(tok) && idx[k + '.1']) return k + '.1';
     return null;
   }
-  function kindOf(w){ return (/^Tab|^표/.test(w)) ? 'tab-' : 'fig-'; }
+  function kindOf(w){ return (/^Tab|^표|^表/.test(w)) ? 'tab-' : 'fig-'; }
   function anyMap(){ var m = window.__mdFigRefs || {}; return m.en || {}; }
   var SKIP = 'a, code, pre, blockquote, h1, h2, h3, h4, h5, h6, script, style, textarea, .md-figref, math';
 

@@ -393,7 +393,7 @@ def _convert_panel(ui, save_global, export_target):  # noqa: ANN001, ANN202 — 
     ui.select(langs.language_options(_lang), value=_lang, label="번역 언어 (모국어)", on_change=pick_lang) \
         .props("dense outlined").classes("w-full")
     ui.label("새로 번역하는 논문이 이 언어로 번역됩니다. 이미 번역한 논문은 그 언어를 그대로 둡니다. "
-             "그림 속 글자 번역은 아직 한국어만 됩니다.").classes("text-xs text-gray-400")
+             "그림 속 글자 번역은 아랍·데바나가리·태국 문자처럼 이어 쓰는 문자에선 아직 안 됩니다.").classes("text-xs text-gray-400")
     style_select()
     ui.switch("섹션 제목도 번역", value=config.resolve_translate_headers(),
               on_change=lambda e: save_global("translate", "translate_headers", e.value, "헤더 번역")) \

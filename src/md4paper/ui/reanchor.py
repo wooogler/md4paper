@@ -50,10 +50,11 @@ JS = """
     for (var i = 0; i + 1 < s.length; i++){ var k = s.substr(i, 2); m[k] = (m[k] || 0) + 1; n++; }
     return {m: m, n: n};
   }
-  function hangulRatio(t){
+  function hangulRatio(t){   // 번역 언어 문자의 비율 — 한글·가나·한자·키릴 (이름은 옛것)
     var h = 0, n = 0;
     for (var i = 0; i < t.length; i++){ var c = t.charCodeAt(i);
-      if (c >= 0xac00 && c <= 0xd7a3) h++;
+      if ((c >= 0xac00 && c <= 0xd7a3) || (c >= 0x3040 && c <= 0x30ff) || (c >= 0x3400 && c <= 0x9fff)
+          || (c >= 0xf900 && c <= 0xfaff) || (c >= 0x0400 && c <= 0x04ff)) h++;
       if (c > 0x2f) n++; }
     return n ? h / n : 0;
   }

@@ -216,16 +216,66 @@ def test_collection_glossary_is_per_language(tmp_path, monkeypatch, paper):
     assert not list((tmp_path / "cfg" / "glossary").glob(f"{pid}*"))
 
 
-# --- 아직 한국어만인 기능 -------------------------------------------------------
+# --- 그림 속 글자 번역 --------------------------------------------------------
 
-def test_figure_translation_refuses_other_languages(paper):
+def test_figure_translation_refuses_joined_scripts(paper):
+    """이어 쓰는 문자(아랍·데바나가리·태국 …)는 Pillow 기본 배치로 깨지므로 막는다 — 일·중·라틴은 된다."""
     from md4paper import figure_translate
 
-    paper.set_lang("ja")
-    with pytest.raises(figure_translate.FigureTranslateError, match="한국어만"):
+    assert all(figure_translate.supported(c) for c in ("ko", "ja", "zh-Hans", "es", "fr", "ru"))
+    paper.set_lang("ar")
+    with pytest.raises(figure_translate.FigureTranslateError, match="지원하지 않습니다"):
         figure_translate.translate(paper, "figure-1.png", FakeProvider())
     with pytest.raises(figure_translate.FigureTranslateError):
         figure_translate.translate_many(paper, FakeProvider())
+
+
+def test_translated_figure_names_carry_the_language():
+    from md4paper import figure_translate as ft
+
+    assert ft.ko_name("figure-3.png") == "figure-3.ko.png"
+    assert ft.ko_name("figure-3.jpg", "zh-Hans") == "figure-3.zh-Hans.png"
+    for name in ("figure-3.ko.png", "figure-3.ja.png", "image-1.zh-Hans.png", "figure-2.es.png"):
+        assert ft.is_ko(name) and not ft.is_candidate(name)
+    for name in ("figure-3.png", "image-12.png", "formula-01.png"):
+        assert not ft.is_ko(name)
+
+
+def test_figure_label_prompt_names_the_language():
+    from md4paper import figure_translate as ft
+
+    assert ft._system("ko") == ft._SYSTEM
+    ja = ft._system("ja")
+    assert "into Japanese" not in ja and "replace it with Japanese" in ja and "Korean" not in ja
+
+
+def test_caption_lookup_strips_any_language_suffix():
+    from md4paper.structure import captions
+
+    import re as _re
+    src = (Path(captions.__file__).read_text(encoding="utf-8"))
+    assert ".ko.png" not in src  # 언어별 번역 그림 이름을 모두 원본으로 (정규식)
+    assert _re.sub(r"\.[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*\.png$", ".png", "figure-3.zh-Hans.png") == "figure-3.png"
+
+
+# --- 검색·문장 나누기 -------------------------------------------------------------
+
+def test_search_tokenizer_handles_japanese_chinese_and_spanish():
+    from md4paper.ui.agent.retrieval import tokenize
+
+    assert "調査" in tokenize("問卷調査を行った") and "調査" in tokenize("調査")
+    assert "参与" in tokenize("参与者共有20人")
+    assert "investigación" in tokenize("La investigación muestra")
+    assert tokenize("설문조사") == ["설문", "문조", "조사"]  # 한국어는 예전 그대로
+    assert tokenize("We studied participants") == ["studi", "participant"]
+
+
+def test_term_example_sentences_split_after_cjk_full_stops():
+    from md4paper.ui.term_examples import sentences
+
+    assert sentences("図3に示す。表2は結果だ。") == ["図3に示す。", "表2は結果だ。"]
+    assert sentences("如图3所示。表2！ 好") == ["如图3所示。", "表2！", "好"]
+    assert sentences("We test 3.5 units. 우리는 시험한다.") == ["We test 3.5 units.", "우리는 시험한다."]
 
 
 # --- CLI ------------------------------------------------------------------
@@ -288,11 +338,13 @@ def test_toc_toggle_names_the_translation_language():
     assert _toc_lang_options("ja")["ko"] == "日本語"
 
 
-def test_batch_plan_skips_figures_for_other_languages(paper, monkeypatch):
+def test_batch_plan_skips_figures_only_for_unsupported_scripts(paper, monkeypatch):
     from md4paper import figure_translate
     from md4paper.ui import translate_job
 
     monkeypatch.setattr(figure_translate, "todo", lambda wd: ["figure-1.png"])
     assert translate_job.plan([paper.root], model_for=lambda wd: "openai/gpt-6-luna")["figures"] == 1
     paper.set_lang("ja")
+    assert translate_job.plan([paper.root], model_for=lambda wd: "openai/gpt-6-luna")["figures"] == 1
+    paper.set_lang("th")
     assert translate_job.plan([paper.root], model_for=lambda wd: "openai/gpt-6-luna")["figures"] == 0

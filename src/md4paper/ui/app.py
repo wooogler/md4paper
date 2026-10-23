@@ -1459,7 +1459,7 @@ _IMG_ZOOM_HTML = """
   }
   function altOf(src){        // 번역 그림(figure-3.ko.png, figure_ko.py)은 원본 그림의 설명을 쓴다
     var m = window.__mdFigAlts || {}, f = fileOf(src);
-    return m[f] || m[f.replace(/\\.ko\\.png$/, '.png')] || '';
+    return m[f] || m[f.replace(/\\.[a-z]{2,3}(-[A-Za-z0-9]{2,8})*\\.png$/, '.png')] || '';
   }
   function markAlts(root){
     var imgs = root.querySelectorAll ? root.querySelectorAll('.md-preview img') : [];
@@ -1576,7 +1576,7 @@ _IMG_ZOOM_HTML = """
     var path = imgPath(), fig = new RegExp('^/wdimages/[^/]+/(?!formula-)[^/]+$').test(path);
     box.classList.toggle('can-recrop', !!window.__md4FigRecrop && fig);
     // 그림 속 글자 번역 단추 (figure_ko.py) — 번역 그림(.ko.png)에서 열어도 같은 메뉴
-    box.classList.toggle('can-figko', !!window.__md4FigKoOpen && fig && (window.__md4TrLang || 'ko') === 'ko');
+    box.classList.toggle('can-figko', !!window.__md4FigKoOpen && fig && window.__md4FigTrOk !== false);
     if (window.__md4FigKoOpen) window.__md4FigKoOpen(fig ? path : '');
     box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
     layoutFoot();
@@ -3920,8 +3920,15 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             else:
                 text_area(solo=True)
         ui.run_javascript("window.__mdAnnoApply && window.__mdAnnoApply()")  # 하이라이트 다시 얹기
-        # 번역 언어 — 그림 확대 뷰어의 '그림 속 글자 번역' 단추는 아직 한국어 논문에서만 (figure_translate)
-        ui.run_javascript(f"window.__md4TrLang = {json.dumps(ctrl.wd.lang)}")
+        # 번역 언어 — 그림 글자를 그릴 수 없는 언어(이어 쓰는 문자)면 확대 뷰어의 '그림 속 글자 번역' 단추를 숨긴다
+        from md4paper import figure_translate
+
+        # 칸마다 lang — 일·중 한자는 언어에 따라 글자 모양이 달라 브라우저가 그 언어 글꼴을 고르게 한다
+        ui.run_javascript(f"window.__md4TrLang = {json.dumps(ctrl.wd.lang)}; "
+                          f"window.__md4FigTrOk = {json.dumps(figure_translate.supported(ctrl.wd.lang))}; "
+                          "setTimeout(function(){ document.querySelectorAll('[data-side=ko],[data-side=en]')"
+                          ".forEach(function(c){ c.lang = c.getAttribute('data-side') === 'ko' ? "
+                          "window.__md4TrLang : 'en'; }); }, 0)")
         place = viewer_state.pop("_place", None)  # 편집기에서 보던 자리 → 그리드의 같은 행·같은 비율
         if place and (show_en or show_ko):
             ui.run_javascript(_RESTORE_JS % json.dumps({"row": str(place[0]), "f": place[1], "off": 0, "ratio": 0}))

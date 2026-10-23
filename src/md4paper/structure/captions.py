@@ -68,7 +68,7 @@ def _image_name(line: str) -> str | None:
     m = _IMAGE_RE.match(line.strip())
     if not m:
         return None
-    return os.path.basename(m.group(1)).replace(".ko.png", ".png")
+    return re.sub(r"\.[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*\.png$", ".png", os.path.basename(m.group(1)))  # 번역 그림 → 원본
 
 
 def drop_duplicate_captions(md: str, *, same_text: bool = True,

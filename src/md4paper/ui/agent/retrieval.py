@@ -188,8 +188,11 @@ def _read_chunks(wd: WorkDir, include_notes: bool = True) -> list[Chunk]:
 
 _TEX_RE = re.compile(r"\\[a-z]+", re.IGNORECASE)      # \alpha, \frac 등 LaTeX 명령
 _SYM_RE = re.compile(r"[*_#`>|~$\[\]()!{}\\/,;:\"'^=+<>&%@?]")  # 마크다운·수식 기호
-_WORD_RE = re.compile(r"[a-z0-9][a-z0-9\-.]*")
-_HANGUL_RE = re.compile(r"[가-힣]+")
+# 띄어 쓰는 문자 — 영문에 더해 라틴 확장(스페인어 á·ñ 등)·키릴 문자도 한 단어로 (번역 언어가 그쪽일 때)
+_L = "a-z0-9ß-öø-ÿā-ʯа-яё"
+_WORD_RE = re.compile(rf"[{_L}][{_L}\-.]*")
+# 띄어 쓰지 않거나 형태소 분석이 필요한 문자 — 한글·히라가나·가타카나·한자는 문자 바이그램으로
+_BIGRAM_RE = re.compile(r"[가-힣\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
 
 # 영어 기능어 — 문서 수가 수백뿐인 한 편짜리 색인에서는 이런 흔한 말의 idf가 과대평가돼
 # "how many participants" 같은 질문이 엉뚱한 문단으로 간다. 한국어는 바이그램이라 따로 안 뺀다.
@@ -210,10 +213,11 @@ def _stem(w: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
-    """영문은 단어(간단 스테밍), 한글은 문자 바이그램으로. 마크다운·LaTeX 기호는 버린다.
+    """영문(과 라틴·키릴 문자)은 단어(간단 스테밍), 한글·일본어·중국어는 문자 바이그램으로. 기호는 버린다.
 
     한국어는 형태소 분석기 없이(새 의존성 없이) 다뤄야 하므로 바이그램을 쓴다 —
-    '설문조사'와 '설문'이 '설문' 바이그램으로 겹쳐 검색이 걸린다.
+    '설문조사'와 '설문'이 '설문' 바이그램으로 겹쳐 검색이 걸린다. 띄어 쓰지 않는 일본어·중국어도 같다
+    (번역 언어가 그쪽일 때 — '問卷調査'와 '調査'가 '調査'로 겹친다).
     """
     t = _SYM_RE.sub(" ", _TEX_RE.sub(" ", text.lower()))
     toks: list[str] = []
@@ -221,7 +225,7 @@ def tokenize(text: str) -> list[str]:
         w = m.group(0).strip(".-")
         if w and w not in _STOP:
             toks.append(_stem(w))
-    for m in _HANGUL_RE.finditer(t):
+    for m in _BIGRAM_RE.finditer(t):
         s = m.group(0)
         if len(s) == 1:
             toks.append(s)
