@@ -292,6 +292,16 @@ sup.md-fn a:hover { text-decoration: underline; }
 #md-img-zoom .mdz-cap.long { text-align: left; }
 #md-img-zoom .mdz-cap b { color: #fff; }
 #md-img-zoom .mdz-hint { color: #8e8e8e; font-size: 11.5px; }
+/* 그림 설명(태그 PDF의 대체 텍스트) — 접힌 채로 캡션 아래. 펼치면 왼쪽 정렬 문단, 길면 안에서 스크롤 */
+#md-img-zoom .mdz-alt { display: none; margin: 6px auto 4px; pointer-events: auto; text-align: left;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; }
+#md-img-zoom.has-alt .mdz-alt { display: block; }
+#md-img-zoom .mdz-alt summary { cursor: pointer; color: #b8c7ff; font-size: 13px; text-align: center;
+  list-style-position: inside; user-select: none; }
+#md-img-zoom .mdz-alt summary span { color: #8e8e8e; font-size: 11.5px; }
+#md-img-zoom .mdz-alt-text { max-height: 24vh; overflow-y: auto; margin-top: 4px; padding: 8px 12px;
+  border-radius: 8px; background: rgba(255,255,255,.07); color: #dcdcdc; font-size: 14px; line-height: 1.6;
+  user-select: text; white-space: pre-line; }
 @media (prefers-color-scheme: dark) {
   .md-preview { color: #d4d4d4; }
   .md-preview h6 { color: #9a9a9a; }  /* 다크에서 h6 옅은 색 대비 보정 */
@@ -1415,6 +1425,8 @@ _IMG_ZOOM_HTML = """
     <button data-act="close" title="닫기 (Esc)">&#10005;</button>
   </div>
   <div class="mdz-foot"><div class="mdz-cap"></div>
+    <details class="mdz-alt"><summary>그림 설명 <span>· 저자가 PDF에 단 대체 텍스트</span></summary>
+      <div class="mdz-alt-text"></div></details>
     <div class="mdz-hint">휠·더블클릭으로 확대 · 드래그로 이동 · ⌘/Ctrl+C 복사 · Esc로 닫기</div></div>
 </div>
 <script>
@@ -1429,17 +1441,34 @@ _IMG_ZOOM_HTML = """
       if (m && !imgs[i].style.width) imgs[i].style.width = m[1] + 'px';
     }
   }
-  hidpi(document);
+  // 그림 설명(window.__mdFigAlts, 파일명 → 설명)이 있는 본문 그림에 표시 — 글자는 넣지 않는다
+  // (본문 textContent가 바뀌면 하이라이트 앵커·문장 짝이 어긋난다)
+  function fileOf(src){
+    var p = String(src || '').split('#')[0].split('?')[0];
+    try { return decodeURIComponent(p.slice(p.lastIndexOf('/') + 1)); } catch (e) { return ''; }
+  }
+  function altOf(src){ var m = window.__mdFigAlts || {}; return m[fileOf(src)] || ''; }
+  function markAlts(root){
+    var imgs = root.querySelectorAll ? root.querySelectorAll('.md-preview img') : [];
+    for (var i = 0; i < imgs.length; i++){
+      var has = !!altOf(imgs[i].getAttribute('src'));
+      imgs[i].classList.toggle('md-has-alt', has);
+      if (has && !imgs[i].title) imgs[i].title = '그림 설명 있음 — 클릭해서 확대';
+    }
+  }
+  hidpi(document); markAlts(document);
+  window.__mdFigAltsMark = function(){ markAlts(document); };
   new MutationObserver(function(muts){
     for (var i = 0; i < muts.length; i++)
       for (var j = 0; j < muts[i].addedNodes.length; j++){
         var n = muts[i].addedNodes[j];
-        if (n.nodeType === 1) hidpi(n.parentNode || n);
+        if (n.nodeType === 1) { hidpi(n.parentNode || n); markAlts(n.parentNode || n); }
       }
   }).observe(document.body, {childList: true, subtree: true});
   var box = document.getElementById('md-img-zoom');
   if (!box) return;
   var img = box.querySelector('img'), pct = box.querySelector('.mdz-pct'), cap = box.querySelector('.mdz-cap');
+  var altBox = box.querySelector('.mdz-alt'), altText = box.querySelector('.mdz-alt-text');
   var s = 1, tx = 0, ty = 0, base = 1, drag = null, moved = false;
   // base = 열었을 때의 배율(화면에 꽉 차게, 저해상도 그림을 너무 흐리게 늘리지 않도록 3배까지).
   // 논문 그림은 원본이 작은 경우가 많아 1배로 열면 본문에서 보던 크기와 다를 게 없다.
@@ -1527,6 +1556,9 @@ _IMG_ZOOM_HTML = """
       cap.classList.toggle('long', info.text.length > 160);
     } else { cap.textContent = alt || ''; cap.classList.remove('long'); }
     cap.scrollTop = 0;
+    var desc = altOf(src);           // 그림 설명 — 접힘 상태는 그림을 바꿔도 유지한다
+    altText.textContent = desc; altText.scrollTop = 0;
+    box.classList.toggle('has-alt', !!desc);
     // 본문 그림(수식 크롭 말고)이면 영역 다시 지정 단추 (figure_crop.py)
     var path = imgPath();
     box.classList.toggle('can-recrop', !!window.__md4FigRecrop
@@ -1536,16 +1568,22 @@ _IMG_ZOOM_HTML = """
     if (img.complete) fit(); else img.onload = fit;
   }
   window.__mdImgZoomOpen = openZoom;   // 본문의 그림·표 참조(figrefs.py) 클릭도 이 뷰어로 연다
+  altBox.addEventListener('toggle', function(){       // 설명을 펼치거나 접으면 그림 자리도 다시 잡는다
+    if (!box.classList.contains('open')) return;
+    layoutFoot(); fit();
+  });
   document.addEventListener('click', function(ev){
     var t = ev.target;
     if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.md-preview')) return;
     if (window.__md4FxAt && window.__md4FxAt(t)) return;   // 읽기 실패로 남은 수식 그림 — 원본 대조 팝오버 몫
     ev.preventDefault();             // 그림을 감싼 링크가 있어도 이동하지 않게
-    openZoom(t.currentSrc || t.src, t.getAttribute('alt') || t.getAttribute('title') || '', null, t);
+    // title은 캡션 대신 쓰지 않는다 — 그림 설명 표시(markAlts)가 단 안내문일 수 있다
+    openZoom(t.currentSrc || t.src, t.getAttribute('alt')
+      || (t.classList.contains('md-has-alt') ? '' : t.getAttribute('title')) || '', null, t);
   });
   box.addEventListener('click', function(ev){
     if (moved) { moved = false; return; }               // 드래그 끝의 클릭은 닫기가 아니다
-    if (ev.target === img || (ev.target.closest && ev.target.closest('.mdz-bar, .mdz-cap'))) return;
+    if (ev.target === img || (ev.target.closest && ev.target.closest('.mdz-bar, .mdz-cap, .mdz-alt'))) return;
     close();                                            // 배경 클릭 → 닫기
   });
   [].forEach.call(box.querySelectorAll('.mdz-bar button'), function(b){
@@ -1560,6 +1598,7 @@ _IMG_ZOOM_HTML = """
   box.addEventListener('wheel', function(ev){
     // 긴 캡션 위의 휠은 캡션 스크롤 — 그림 확대가 아니다
     if (ev.target.closest && ev.target.closest('.mdz-cap') && cap.scrollHeight > cap.clientHeight) return;
+    if (ev.target.closest && ev.target.closest('.mdz-alt-text') && altText.scrollHeight > altText.clientHeight) return;
     ev.preventDefault();                                // 뒤 패널이 같이 스크롤되지 않게
     var d = ev.deltaY * (ev.deltaMode === 1 ? 16 : 1);  // 줄 단위로 오는 브라우저 보정
     var f = Math.exp(-d * (ev.ctrlKey ? 0.008 : 0.0015));  // ctrl+휠 = 트랙패드 핀치 (더 민감하게)
@@ -1710,6 +1749,12 @@ def cite_tips_js(tips: dict[str, str]) -> str:
     """
     payload = json.dumps(tips, ensure_ascii=False).replace("<", "\\u003c")
     return f"window.__mdCiteTips = {payload};"
+
+
+def fig_alts_js(alts: dict[str, str]) -> str:
+    """그림 설명 사전(out 그림 파일명 → 설명)을 window.__mdFigAlts에 실어줄 JS (확대 뷰어용, §figure_alt)."""
+    payload = json.dumps(alts, ensure_ascii=False).replace("<", "\\u003c")
+    return f"window.__mdFigAlts = {payload}; window.__mdFigAltsMark && window.__mdFigAltsMark();"
 
 
 def fn_tips_js(tips: dict[str, str]) -> str:
@@ -2844,6 +2889,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     # 인용·각주 호버 툴팁: 맵 주입 → 툴팁 요소/스크립트 (같은 툴팁 UI를 #ref-·#fn- 둘 다 씀)
     spa.add_body_html(f"<script>{cite_tips_js(ctrl.citation_tooltips())}</script>")
     spa.add_body_html(f"<script>{fn_tips_js(ctrl.footnote_tooltips())}</script>")
+    spa.add_body_html(f"<script>{fig_alts_js(ctrl.figure_alts())}</script>")  # 확대 뷰어의 그림 설명
     spa.add_body_html(_CITE_TIP_HTML)
     spa.add_body_html(_SEC_JUMP_HTML)  # 마크다운 헤더 ⚙ 클릭 → 섹션 트리 항목 스크롤+하이라이트
     spa.add_body_html(_IMG_ZOOM_HTML)  # 본문 그림 클릭 → 확대 뷰어

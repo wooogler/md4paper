@@ -41,6 +41,7 @@ class Chunk:
     searchable: bool = True   # 헤더만 있는 행·빈 행은 검색에서 제외
     notes: list[dict] = field(default_factory=list)   # 이 행에 걸린 독자 메모 (attach_notes)
     head_level: int = 0   # 이 행이 섹션 첫 행이면 그 헤더 레벨(1~6), 아니면 0 — outline용
+    figures: list[str] = field(default_factory=list)   # 이 행 그림의 설명 "Figure 3: …" (attach_figures)
 
 
 _HEAD_LINE_RE = re.compile(r"^\s*#{1,6}\s+.*$", re.MULTILINE)
@@ -144,10 +145,40 @@ def attach_notes(chunks: list[Chunk], items: object) -> list[Chunk]:
     return chunks
 
 
+# --- 그림 설명 붙이기 ---------------------------------------------------
+# 이미지 줄은 `![Figure 3](images/figure-3.png)`뿐이라 에이전트는 그림 내용을 모른다. 태그 PDF에서 읽은
+# 설명(figure_alt)이 있으면 그 행에 붙여 검색·읽기에 함께 싣는다.
+
+_IMG_REF_RE = re.compile(r"!\[([^\]]*)\]\(([^)\s]+)\)")
+
+
+def attach_figures(chunks: list[Chunk], alts: dict[str, str]) -> list[Chunk]:
+    """원문 블록의 그림 → 설명 ("라벨: 설명"). 같은 그림은 한 행에 한 번만."""
+    if not alts:
+        return chunks
+    for c in chunks:
+        for m in _IMG_REF_RE.finditer(c.en):
+            name = m.group(2).split("#")[0].split("?")[0].rsplit("/", 1)[-1]
+            alt = alts.get(name)
+            if not alt:
+                continue
+            line = f"{m.group(1).strip() or name}: {' '.join(alt.split())}"
+            if line not in c.figures:
+                c.figures.append(line)
+                c.searchable = True
+    return chunks
+
+
 def _read_chunks(wd: WorkDir, include_notes: bool = True) -> list[Chunk]:
+    from md4paper import figure_alt
+
     en = wd.en_md.read_text(encoding="utf-8") if wd.en_md.exists() else ""
     ko = wd.ko_md.read_text(encoding="utf-8") if wd.ko_md.exists() else None
     chunks = build_chunks(en, ko)
+    try:
+        attach_figures(chunks, figure_alt.alts(wd))
+    except Exception:  # noqa: BLE001 — 설명은 덤이다
+        pass
     if include_notes:
         attach_notes(chunks, annotations.load(wd))
     return chunks
@@ -204,7 +235,7 @@ def tokenize(text: str) -> list[str]:
 
 def doc_text(chunk: Chunk, include_notes: bool = True) -> str:
     """색인에 넣을 한 행의 텍스트 — 원문 + 번역 (+ 독자 메모의 인용문·본문)."""
-    parts = [chunk.en, chunk.ko or ""]
+    parts = [chunk.en, chunk.ko or "", *chunk.figures]
     if include_notes:
         for n in chunk.notes:
             parts += [n.get("quote", ""), n.get("note", "")]
@@ -315,13 +346,20 @@ def _mtime(path: Path) -> int | None:
 
 
 def cache_key(wd: WorkDir) -> tuple:
-    """캐시 키 — 경로 + 원문·번역·메모 파일의 mtime. 셋 중 하나라도 바뀌면 다른 키가 된다."""
+    """캐시 키 — 경로 + 원문·번역·메모·그림 설명 파일의 mtime. 하나라도 바뀌면 다른 키가 된다."""
     return (str(Path(wd.root).resolve()), _mtime(wd.en_md), _mtime(wd.ko_md),
-            _mtime(wd.annotations_json))
+            _mtime(wd.annotations_json), _mtime(wd.figure_alts_json))
 
 
 def paper(wd: WorkDir) -> Paper:
     """논문의 청크·색인 (캐시). 파일이 바뀌었으면 다시 만들고 옛 항목은 버린다."""
+    if not wd.figure_alts_json.exists():  # 뷰어에서 한 번도 안 연 옛 논문 — 그림 설명을 먼저 짝지어 둔다
+        from md4paper import figure_alt
+
+        try:
+            figure_alt.ensure(wd)
+        except Exception:  # noqa: BLE001 — 설명은 덤이다
+            pass
     key = cache_key(wd)
     with _cache_lock:
         hit = _cache.get(key)

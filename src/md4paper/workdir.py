@@ -119,6 +119,11 @@ class WorkDir:
         return self.extract / "figures.json"
 
     @property
+    def figure_alts_json(self) -> Path:
+        """그림 설명 {out 그림 파일명: {alt, via}} — 태그 PDF의 대체 텍스트(/Alt)를 그림에 짝지은 것 (§figure_alt)."""
+        return self.extract / "figure_alts.json"
+
+    @property
     def figure_backup(self) -> Path:
         """영역을 다시 지정하기 전의 원래 그림 — extract/images 밖에 둔다(조립이 images를 통째로 복사한다)."""
         return self.extract / "figure-backup"

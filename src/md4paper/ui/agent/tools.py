@@ -154,6 +154,8 @@ def _row_block(c: retrieval.Chunk, label: str, clip: int = ROW_CLIP) -> str:
     block = f"[{label}]{head}\nEN: {_clip(c.en, clip)}"
     if c.ko:
         block += f"\nKO: {_clip(c.ko, clip)}"
+    for f in c.figures:   # 그림 설명 — 저자가 PDF에 단 대체 텍스트 (이미지 줄만으로는 그림 내용을 모른다)
+        block += f"\n그림 설명(PDF): {_clip(f, clip)}"
     for n in c.notes:
         block += "\n" + _note_line(n)
     return block
