@@ -369,6 +369,9 @@ def _job_result(rec: dict, job) -> dict:  # noqa: ANN001 — ui.jobs.Job
                 "translated": int(res.get("ok", 0)) + int(res.get("retried", 0)),
                 "failed": int(res.get("passthrough", 0)),
                 "cost_usd": round(float(res.get("cost_usd") or 0.0), 6)}
+    if rec.get("kind") == "figures" and isinstance(res, dict):
+        return {"figures": int(res.get("done", 0)), "empty": int(res.get("empty", 0)),
+                "failed": len(res.get("failed") or {}), "cost_usd": round(float(res.get("cost_usd") or 0.0), 6)}
     if rec.get("kind") == "glossary":
         return {"entries": int(res or 0),
                 "cost_usd": round(float(job.detail.get("cost_usd") or 0.0), 6)}

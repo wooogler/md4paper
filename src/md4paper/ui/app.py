@@ -17,8 +17,8 @@ from md4paper import config, formula_fix, library, projects
 from md4paper import notes as notes_io
 from md4paper.ir import Flavor, GlossaryEntry
 from md4paper.ui import (
-    agent_panel, annotations, desktop, figrefs, figure_crop, find_bar, formula_pop, jobs, live_preview, mdrender,
-    reanchor,
+    agent_panel, annotations, desktop, figrefs, figure_crop, figure_ko, find_bar, formula_pop, jobs,
+    live_preview, mdrender, reanchor,
     scroll_memory, sentpair, spa, tabstore, term_examples, translate_job, update_banner,
 )
 from md4paper.ui.controller import LEVEL_OPTIONS, RUNIN_LEVEL_OPTIONS, UIController
@@ -1422,6 +1422,7 @@ _IMG_ZOOM_HTML = """
       <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true">
         <path d="M17 15h2V7c0-1.1-.9-2-2-2H9v2h8v8zM7 17V1H5v4H1v2h4v10c0 1.1.9 2 2 2h10v4h2v-4h4v-2H7z"/>
       </svg></button>
+    <button data-act="figko" title="그림 속 글자 번역 — 번역 그림 보기·만들기·고치기">가</button>
     <span class="mdz-sep"></span>
     <button data-act="close" title="닫기 (Esc)">&#10005;</button>
   </div>
@@ -1448,7 +1449,10 @@ _IMG_ZOOM_HTML = """
     var p = String(src || '').split('#')[0].split('?')[0];
     try { return decodeURIComponent(p.slice(p.lastIndexOf('/') + 1)); } catch (e) { return ''; }
   }
-  function altOf(src){ var m = window.__mdFigAlts || {}; return m[fileOf(src)] || ''; }
+  function altOf(src){        // 번역 그림(figure-3.ko.png, figure_ko.py)은 원본 그림의 설명을 쓴다
+    var m = window.__mdFigAlts || {}, f = fileOf(src);
+    return m[f] || m[f.replace(/\\.ko\\.png$/, '.png')] || '';
+  }
   function markAlts(root){
     var imgs = root.querySelectorAll ? root.querySelectorAll('.md-preview img') : [];
     for (var i = 0; i < imgs.length; i++){
@@ -1561,9 +1565,11 @@ _IMG_ZOOM_HTML = """
     altText.textContent = desc; altText.scrollTop = 0;
     box.classList.toggle('has-alt', !!desc);
     // 본문 그림(수식 크롭 말고)이면 영역 다시 지정 단추 (figure_crop.py)
-    var path = imgPath();
-    box.classList.toggle('can-recrop', !!window.__md4FigRecrop
-      && new RegExp('^/wdimages/[^/]+/(?!formula-)[^/]+$').test(path));
+    var path = imgPath(), fig = new RegExp('^/wdimages/[^/]+/(?!formula-)[^/]+$').test(path);
+    box.classList.toggle('can-recrop', !!window.__md4FigRecrop && fig);
+    // 그림 속 글자 번역 단추 (figure_ko.py) — 번역 그림(.ko.png)에서 열어도 같은 메뉴
+    box.classList.toggle('can-figko', !!window.__md4FigKoOpen && fig);
+    if (window.__md4FigKoOpen) window.__md4FigKoOpen(fig ? path : '');
     box.classList.add('open');       // 크기를 재려면 먼저 보여야 한다(display:none이면 0)
     layoutFoot();
     if (img.complete) fit(); else img.onload = fit;
@@ -1573,6 +1579,8 @@ _IMG_ZOOM_HTML = """
     if (!box.classList.contains('open')) return;
     layoutFoot(); fit();
   });
+  // 연 채로 그림만 바꾼다(번역 그림 ↔ 원본, figure_ko.py) — 캡션은 그대로
+  window.__mdImgZoomSrc = function(src){ img.src = src; if (img.complete) fit(); else img.onload = fit; };
   document.addEventListener('click', function(ev){
     var t = ev.target;
     if (!t || t.tagName !== 'IMG' || !t.closest || !t.closest('.md-preview')) return;
@@ -1584,7 +1592,7 @@ _IMG_ZOOM_HTML = """
   });
   box.addEventListener('click', function(ev){
     if (moved) { moved = false; return; }               // 드래그 끝의 클릭은 닫기가 아니다
-    if (ev.target === img || (ev.target.closest && ev.target.closest('.mdz-bar, .mdz-cap, .mdz-alt'))) return;
+    if (ev.target === img || (ev.target.closest && ev.target.closest('.mdz-bar, .mdz-cap, .mdz-alt, .mdz-kmenu, .mdz-kedit'))) return;
     close();                                            // 배경 클릭 → 닫기
   });
   [].forEach.call(box.querySelectorAll('.mdz-bar button'), function(b){
@@ -1593,6 +1601,7 @@ _IMG_ZOOM_HTML = """
       if (a === 'in') zoomBy(1.25); else if (a === 'out') zoomBy(0.8);
       else if (a === 'fit') fit(); else if (a === 'copy') copyImg(); else if (a === 'save') saveImg();
       else if (a === 'recrop'){ var p = imgPath(); close(); if (window.__md4FigRecrop) window.__md4FigRecrop(p); }
+      else if (a === 'figko'){ if (window.__md4FigKoMenu) window.__md4FigKoMenu(imgPath()); }
       else close();
     });
   });
@@ -1600,6 +1609,7 @@ _IMG_ZOOM_HTML = """
     // 긴 캡션 위의 휠은 캡션 스크롤 — 그림 확대가 아니다
     if (ev.target.closest && ev.target.closest('.mdz-cap') && cap.scrollHeight > cap.clientHeight) return;
     if (ev.target.closest && ev.target.closest('.mdz-alt-text') && altText.scrollHeight > altText.clientHeight) return;
+    if (ev.target.closest && ev.target.closest('.mdz-kedit, .mdz-kmenu')) return;   // 번역 고치기 목록 스크롤
     ev.preventDefault();                                // 뒤 패널이 같이 스크롤되지 않게
     var d = ev.deltaY * (ev.deltaMode === 1 ? 16 : 1);  // 줄 단위로 오는 브라우저 보정
     var f = Math.exp(-d * (ev.ctrlKey ? 0.008 : 0.0015));  // ctrl+휠 = 트랙패드 핀치 (더 민감하게)
@@ -2935,6 +2945,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     spa.add_body_html(formula_pop.HTML)
     spa.add_css(figure_crop.CSS)  # 확대 뷰어 ✂ → 그림 영역 다시 지정 (위 영역 지정 화면을 같이 쓴다)
     spa.add_body_html(figure_crop.HTML)
+    spa.add_css(figure_ko.CSS)  # 확대 뷰어 '가' → 그림 속 글자 번역 (번역 그림 보기·만들기·고치기)
+    spa.add_body_html(figure_ko.HTML)
 
     # 캔버스를 다시 지으면(그리드를 통째로) 스크롤이 맨 위로 간다. 그림·수식 하나 고쳤을 뿐인데 읽던 자리를
     # 잃으면 안 되므로, 다시 짓기 전에 화면 맨 위에 걸친 행과 그 행의 위치를 재 두고, 새 그리드가 붙으면
@@ -2996,6 +3008,25 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                   type="positive")
 
     ui.on("md4-fig-recropped", on_figure_recropped)
+
+    async def on_figure_ko_changed(e) -> None:  # noqa: ANN001 — 번역 그림·ko.md는 이미 바뀌었다(서버 라우트)
+        a = e.args or {}
+        if not a.get("ok"):
+            ui.notify(f"그림 글자를 번역하지 못했습니다: {a.get('error', '')}", type="warning")
+            return
+        await refresh_canvas_keeping_place()  # 번역 열의 그림 참조(.ko.png)가 바뀌었다
+        what = a.get("what")
+        if what == "remove":
+            ui.notify("번역 그림을 지웠습니다 — 번역 열은 원본 그림으로", type="positive")
+        elif what == "edit":
+            ui.notify("고친 번역으로 그림을 다시 그렸습니다", type="positive")
+        elif a.get("translated"):
+            ui.notify(f"그림 글자 {a['translated']}줄을 번역했습니다 (≈${float(a.get('cost_usd') or 0):.4f})",
+                      type="positive")
+        else:
+            ui.notify("이 그림에서 번역할 글자를 찾지 못했습니다", type="info")
+
+    ui.on("md4-figko-changed", on_figure_ko_changed)
 
     async def on_formula_apply(e) -> None:  # noqa: ANN001 — 팝오버의 '적용'
         from nicegui import run
@@ -4377,8 +4408,12 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
             if args.get("token") != tok or bar.is_deleted:
                 return  # 다른 논문, 또는 화면을 갈아 끼우며 남은 옛 핸들러 (ui.on은 창 단위로 쌓인다)
             kind = args.get("job")
-            job = jobs.get(ctrl.wd.root, kind) if kind in ("translate", "terms") else None
+            job = jobs.get(ctrl.wd.root, kind) if kind in ("translate", "terms", "figures") else None
             if job is None:
+                return
+            if kind == "figures":  # 그림 속 글자 번역 — 끝나면 번역 열의 그림이 바뀐다
+                with bar.parent_slot:
+                    attach_figures(job)
                 return
             if kind == "translate" and not translate_state["active"]:
                 translate_state.update(status={}, done=0, total=0, failures={})
@@ -4389,6 +4424,25 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
                 with bar.parent_slot:  # 타이머를 이 패널의 고정 영역에 단다 (attach_translate와 같은 까닭)
                     attach_terms(job)
 
+        def attach_figures(job: jobs.Job) -> None:
+            """그림 글자 번역 작업(에이전트가 띄움)을 지켜보다 끝나면 캔버스를 다시 그리고 알린다."""
+            def tick() -> None:
+                if job.running:
+                    return
+                timer.deactivate()
+                fresh = not job.seen
+                job.seen = True
+                if job.status == "done":
+                    refresh_canvas()
+                if fresh:
+                    ui.notify(job.message if job.status == "done" else f"그림 번역 실패: {job.error}",
+                              type="positive" if job.status == "done" else "negative")
+
+            timer = ui.timer(0.5, tick)
+
+        if jobs.is_running(ctrl.wd.root, "figures"):
+            with bar.parent_slot:
+                attach_figures(jobs.get(ctrl.wd.root, "figures"))
         ui.on(agent_panel.WATCH_JOB_EVENT, on_agent_job)
 
     def _sec_page0(sid: str) -> int | None:
@@ -5908,6 +5962,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         register_token=lambda w: (_register_wd(w), wd_token(w.root))[1],
         workspace=lambda: state["upload_dir"])
     formula_pop.register_routes(fastapi_app, _wd_for)
+    figure_ko.register_routes(fastapi_app, _wd_for)  # 그림 속 글자 번역 — /figko/{token}/{name}
     figure_crop.register_routes(fastapi_app, _wd_for)  # 그림 영역 다시 지정 — /figure/{token}/{name}  # 수식 원본 크롭·다시 생성 — /formula/{token}/{id}
     fastapi_app.add_static_files(CREPE_URL, CREPE_DIR)  # 메모 패널 위지윅 편집기 번들
 

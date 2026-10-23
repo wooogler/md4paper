@@ -42,12 +42,13 @@ def ahead(job: jobs.Job) -> int:
     return gate().ahead(job)
 
 
-def start(wd: WorkDir, provider, *, title: str = "", style: str | None = None) -> jobs.Job | None:  # noqa: ANN001
+def start(wd: WorkDir, provider, *, title: str = "", style: str | None = None,  # noqa: ANN001
+          figures: bool = False) -> jobs.Job | None:
     """이 논문의 번역을 백그라운드로 띄운다 — 이미 번역 중이면 None.
 
-    지금 용어집(effective)·설정으로 `UIController.translate`(바뀐 유닛만 새로, 나머지는 캐시) → 저장 위치로
-    자동 저장 → 완료 문구. 워커 스레드에서 화면 없이 완결된다. style이 None이면 논문 설정의 문체.
-    이벤트 루프 안(UI 핸들러)에서 불러야 한다.
+    지금 용어집(effective)·설정으로 `UIController.translate`(바뀐 유닛만 새로, 나머지는 캐시) → (figures면)
+    아직 번역하지 않은 그림의 글자 번역(§figure_translate) → 저장 위치로 자동 저장 → 완료 문구. 워커
+    스레드에서 화면 없이 완결된다. style이 None이면 논문 설정의 문체. 이벤트 루프 안(UI 핸들러)에서 불러야 한다.
     """
     from md4paper.ui.controller import UIController
 
@@ -58,8 +59,17 @@ def start(wd: WorkDir, provider, *, title: str = "", style: str | None = None) -
 
         ctrl = UIController(wd)  # 문을 지난 뒤에 읽는다 — 기다리는 사이 고친 설정·용어집도 따라온다
         summary = ctrl.translate(provider, style, on_progress)
+        figs = None
+        if figures:
+            from md4paper import figure_translate
+
+            job.detail["figures"] = True
+            figs = figure_translate.translate_many(wd, provider, on_progress=lambda d, t: job.progress(d, t))
+            summary["figures"] = figs
         saved = library.auto_export(wd)  # 저장 위치로 자동 저장
-        msg = f"번역 완료 (≈${summary['cost_usd']:.4f})"
+        msg = f"번역 완료 (≈${summary['cost_usd'] + (figs['cost_usd'] if figs else 0.0):.4f})"
+        if figs and (figs["done"] or figs["failed"]):
+            msg += f" · 그림 {figs['done']}개 글자 번역" + (f"(실패 {len(figs['failed'])}개)" if figs["failed"] else "")
         if saved:
             msg += f" · 저장 위치에 {len(saved)}개 파일 저장"
         if summary.get("passthrough"):
@@ -111,16 +121,19 @@ def plan(roots: list[Path | str], model_for: Callable[[WorkDir], str] | None = N
     - skipped: 원문(en.md)·구조가 없어 번역할 수 없다.
 
     model_for(wd) → 'provider/model'(기본: 지난 번역 모델 > 전역 기본). 항목: {root, title, model,
-    manual_ko(번역문을 직접 고쳤는지), chars, est_cost_usd, sections(full·stale만)}. 합계: cost_fresh,
-    cost_full, full_sections, cost_stale, stale_sections.
+    manual_ko(번역문을 직접 고쳤는지), chars, est_cost_usd, sections(full·stale만), figures(글자 번역 안 한
+    그림 수), est_figures_usd}. 합계: cost_fresh, cost_full, full_sections, cost_stale, stale_sections,
+    figures(그림 수), cost_figures — 그림 숫자는 대화상자에서 '그림 속 글자도 번역'을 켰을 때만 쓴다.
     """
+    from md4paper import figure_translate
     from md4paper.review import manifest as manifest_io
     from md4paper.translate import apply
     from md4paper.workdir import paper_title
 
     pick = model_for or default_model
     out: dict = {"fresh": [], "full": [], "stale": [], "current": [], "skipped": [],
-                 "cost_fresh": 0.0, "cost_full": 0.0, "full_sections": 0, "cost_stale": 0.0, "stale_sections": 0}
+                 "cost_fresh": 0.0, "cost_full": 0.0, "full_sections": 0, "cost_stale": 0.0, "stale_sections": 0,
+                 "figures": 0, "cost_figures": 0.0}
     for root in roots:
         wd = WorkDir(Path(root))
         item: dict = {"root": wd.root, "title": paper_title(wd.root),
@@ -136,6 +149,10 @@ def plan(roots: list[Path | str], model_for: Callable[[WorkDir], str] | None = N
         choice = pick(wd)
         model = choice.partition("/")[2] or choice
         item["model"] = choice
+        nfig = len(figure_translate.todo(wd))
+        item["figures"], item["est_figures_usd"] = nfig, figure_translate.estimate_usd(model, nfig)
+        out["figures"] += nfig
+        out["cost_figures"] += item["est_figures_usd"]
         if not wd.ko_md.exists():
             chars = len(wd.en_md.read_text(encoding="utf-8"))
             cost = estimate_usd(model, chars)

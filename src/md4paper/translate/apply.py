@@ -624,6 +624,9 @@ def run_translate(
 
     ko = postprocess.dedupe_first_use("\n".join(results) + "\n", gloss)
     ko = postprocess.enforce_keep(ko, gloss)  # keep(원어 유지) 용어가 번역됐으면 영어로 되돌림
+    from md4paper import figure_translate
+
+    ko = figure_translate.link_text(wd, ko)  # 글자를 번역한 그림이 있으면 그 그림으로 (그림 참조는 원문 그대로 왔다)
     wd.out.mkdir(parents=True, exist_ok=True)
     wd.ko_md.write_text(ko, encoding="utf-8")
     # 캐시는 합친다 — 이번에 안 쓴 항목도 지금 문서에 그 원문이 남아 있으면 보관(체크를 풀었다가

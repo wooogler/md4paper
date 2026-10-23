@@ -122,6 +122,30 @@ def render_region_png(  # noqa: ANN001
         return buf.getvalue()
 
 
+def text_lines(src, page: int, rect: tuple[float, float, float, float]) -> list[tuple[str, tuple]]:  # noqa: ANN001
+    """영역 안 글자 레이어의 줄 — [(글자, (l, t, r, b) 좌상단 원점 pt)]. 그림 속 글자 번역이 쓴다.
+
+    pdfium의 사각형(`count_rects`)은 같은 글꼴·기준선으로 이어진 글자 묶음, 사실상 한 줄이다.
+    가운데가 영역 안에 든 것만 돌려준다. 벡터 그림에서만 나온다 — 래스터 그림은 빈 목록.
+    """
+    left, top, right, bottom = rect
+    out: list[tuple[str, tuple]] = []
+    with open_document(src) as doc:
+        if not (0 <= page < len(doc)):
+            return out
+        pg = doc[page]
+        height = pg.get_size()[1]
+        tp = pg.get_textpage()
+        for i in range(tp.count_rects(0, -1)):
+            ll, bb, rr, tt = tp.get_rect(i)
+            t_, b_ = height - tt, height - bb
+            if not (left <= (ll + rr) / 2 <= right and top <= (t_ + b_) / 2 <= bottom):
+                continue
+            text = tp.get_text_bounded(left=ll, bottom=bb, right=rr, top=tt)
+            out.append((text, (ll, t_, rr, b_)))
+    return out
+
+
 # --- 위첨자 각주 마커 — 글자 크기·기준선으로 PDF에서 직접 읽는다 ------------------------
 # Docling은 위첨자를 평문으로 눕혀 버려서 "Cursor 2"의 2가 각주인지 그냥 숫자인지 텍스트만으론
 # 알 수 없다. 원본 PDF엔 증거가 남아 있다: 각주 마커는 본문보다 작은 글자로(보통 0.6~0.8배),

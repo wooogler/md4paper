@@ -169,4 +169,8 @@ def upscale(wd: WorkDir, pdf: Path) -> dict:
     for f, png in new_png.items():
         f.write_bytes(png)
     stats["done"] = len(new_png)
+    if new_png:  # 옛 그림으로 만든 번역 그림은 상자 좌표가 안 맞는다 — ko.md에서 뺀다 (§figure_translate)
+        from md4paper import figure_translate
+
+        figure_translate.link_ko(wd)
     return stats

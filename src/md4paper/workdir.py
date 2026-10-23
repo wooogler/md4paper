@@ -124,6 +124,11 @@ class WorkDir:
         return self.extract / "figure_alts.json"
 
     @property
+    def figures_ko_json(self) -> Path:
+        """그림 속 글자 번역 기록 {extract 그림 파일명: {원본 digest, 줄 상자·영어·한국어}} (§figure_translate)."""
+        return self.extract / "figures-ko.json"
+
+    @property
     def figure_backup(self) -> Path:
         """영역을 다시 지정하기 전의 원래 그림 — extract/images 밖에 둔다(조립이 images를 통째로 복사한다)."""
         return self.extract / "figure-backup"

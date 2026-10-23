@@ -4,6 +4,10 @@
 (캐시 못 씀) · 낡은 섹션 있음 · 최신)으로 세어 대략 비용과 함께 보여 주고, 확인을 받아야 논문마다 번역 작업을 띄운다
 (`translate_job.start` — 동시에 두 편씩, 나머지는 대기). 숫자는 `translate_job.plan`이 센다(LLM 없음).
 
+'그림 속 글자도 번역'을 켜면 본문 번역 뒤 아직 번역하지 않은 그림의 축 라벨·범례를 한국어로 바꾼 그림도
+만든다(§figure_translate — 그림 한 장에 LLM 한 번). 기본은 꺼 둔다 — 그림이 많은 논문은 시간이 꽤 든다.
+켜면 번역은 최신이지만 그림이 남은 논문도 대상에 든다(본문은 캐시라 비용 0).
+
 모델은 논문마다 그 논문을 지난번에 번역한 모델(없으면 전역 기본) — 뷰어 드롭다운 기본값과 같다.
 키가 없는 제공사의 논문은 건너뛰고 알린다.
 """
@@ -29,13 +33,14 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
     from nicegui import run, ui
 
     roots = [Path(r) for r in roots]
-    st: dict = {"plan": None, "redo": False}
+    st: dict = {"plan": None, "redo": False, "figures": False}
 
     def targets() -> list[dict]:
         p = st["plan"] or {}
         # 전체 재번역(캐시 못 씀)은 기본으로 넣는다 — 낡은 것을 고치려고 누른 것이니(redo 체크와 무관)
-        return [*p.get("fresh", []), *p.get("full", []), *p.get("stale", []),
-                *(p.get("current", []) if st["redo"] else [])]
+        cur = p.get("current", []) if st["redo"] else (
+            [c for c in p.get("current", []) if c.get("figures")] if st["figures"] else [])
+        return [*p.get("fresh", []), *p.get("full", []), *p.get("stale", []), *cur]
 
     def launch() -> None:
         started, busy, nokey = 0, [], []
@@ -49,7 +54,7 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
             except RuntimeError:
                 nokey.append(item["title"])
                 continue
-            if translate_job.start(wd, prov, title=item["title"]) is None:
+            if translate_job.start(wd, prov, title=item["title"], figures=st["figures"]) is None:
                 busy.append(item["title"])
             else:
                 started += 1
@@ -104,12 +109,19 @@ def open_batch_translate(roots: list[Path | str], *, on_started: Callable[[int],
             ui.checkbox("최신인 논문도 다시 번역", value=st["redo"],
                         on_change=lambda e: (st.update(redo=e.value), body.refresh())).props("dense") \
                 .tooltip("설정·문체를 바꾼 뒤 결과 파일을 다시 쓰고 싶을 때 — 바뀐 곳이 없으면 캐시로 채워집니다")
+        if p.get("figures"):
+            ui.checkbox(f"그림 속 글자도 번역 — 그림 {p['figures']}개 {_money(p.get('cost_figures', 0.0))}",
+                        value=st["figures"], on_change=lambda e: (st.update(figures=e.value), body.refresh())) \
+                .props("dense").tooltip("본문 번역 뒤 축 라벨·범례·상자 글자를 한국어로 바꾼 그림을 만듭니다 "
+                                        "(그림 한 장에 AI 한 번, 몇 초~수십 초). 그림의 선·막대·숫자는 그대로 — "
+                                        "AI는 글자 번역만 정하고 그림은 원본에서 그 자리만 고쳐 그립니다.")
         manual = [t for t in targets() if t.get("manual_ko")]
         if manual:
             ui.label(f"⚠ 번역문을 직접 고친 {len(manual)}편은 새 결과로 다시 쓰여 고친 내용이 사라집니다.") \
                 .classes("text-xs text-orange-9")
         n = len(targets())
-        total = p["cost_fresh"] + p.get("cost_full", 0.0) + p["cost_stale"]
+        total = p["cost_fresh"] + p.get("cost_full", 0.0) + p["cost_stale"] + (
+            sum(t.get("est_figures_usd", 0.0) for t in targets()) if st["figures"] else 0.0)
         ui.label(f"합계 {n}편 · {_money(total)} (대략 — 원문 글자 수로 어림) · 동시에 "
                  f"{translate_job.gate().limit}편씩").classes("text-xs text-gray-500 q-mt-xs")
         with ui.row().classes("justify-end gap-2 w-full q-mt-sm"):

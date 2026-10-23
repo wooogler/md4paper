@@ -75,7 +75,9 @@ HTML = """
   window.__md4FigRecrop = function(path){
     var m = /^\\/wdimages\\/([^\\/]+)\\/([^\\/?#]+)$/.exec(path || '');
     if (!m || !window.__md4CropOpen) return;
-    var tok = m[1], name = m[2], base = '/figure/' + tok + '/' + encodeURIComponent(name);
+    // 번역 그림(figure-3.ko.png, figure_ko.py)에서 열었으면 원본 그림을 다시 자른다
+    var tok = m[1], name = m[2].replace(/\\.ko\\.png$/, '.png');
+    var base = '/figure/' + tok + '/' + encodeURIComponent(name);
     fetch(base).then(function(r){ if (!r.ok) throw 0; return r.json(); }).then(function(info){
       window.__md4CropOpen({
         tok: tok, pages: info.pages,

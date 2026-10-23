@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -37,6 +38,9 @@ TRANSLATE_LABEL = "번역"
 GLOSSARY_KIND = "terms"        # 뷰어의 '용어 추출'과 같은 종류 — 둘 다 glossary.yaml을 쓴다
 GLOSSARY_LABEL = "용어집 생성"
 SECTIONS_MAX = 30              # 한 번에 다시 번역할 섹션 수 상한 (비용 사고 방지)
+FIGURES_KIND = "figures"       # 그림 속 글자 번역 — 논문마다 하나만 돈다 (§figure_translate)
+FIGURES_LABEL = "그림 번역"
+FIGURES_MAX = 40               # 한 번에 번역할 그림 수 상한
 
 
 # --- 모델 ---------------------------------------------------------------
@@ -317,6 +321,93 @@ async def run_glossary(ctx: RunContext[Deps], token: str | None = None,
             "백그라운드로 돌고, 끝나면 알려 드립니다.")
 
 
+def figure_names(wd: WorkDir, figures: list[str] | None, redo: bool) -> list[str] | str:
+    """tool 인자 → 번역할 out 그림 이름들(문서 순서) 또는 안 되는 까닭.
+
+    'figure-3' · 'figure-3.png' · 'Figure 3' · 'image-1'을 받는다. 생략하면 아직 안 한 그림 전부(redo면 전부).
+    """
+    from md4paper import figure_translate as ft
+
+    every = ft.candidates(wd)
+    if not every:
+        return "이 논문에는 글자를 번역할 본문 그림이 없습니다."
+    if not figures:
+        names = every if redo else ft.todo(wd)
+        return names or "모든 그림을 이미 번역했습니다. 다시 하려면 redo=true로 부르세요."
+    by_stem = {n.rsplit(".", 1)[0].lower(): n for n in every}
+    out, bad = [], []
+    for raw in figures:
+        key = " ".join(str(raw).strip().lower().replace(".ko.png", "").split())
+        key = key.rsplit(".", 1)[0] if key.endswith((".png", ".jpg", ".jpeg")) else key
+        key = re.sub(r"^(figure|fig\.?)\s*-?\s*", "figure-", key)
+        n = by_stem.get(key)
+        if n is None:
+            bad.append(str(raw))
+        elif n not in out:
+            out.append(n)
+    if bad:
+        return (f"없는 그림입니다: {', '.join(bad)}. 이 논문의 그림: " + ", ".join(n.rsplit('.', 1)[0] for n in every[:20]))
+    return out
+
+
+async def translate_figures(ctx: RunContext[Deps], figures: list[str] | None = None,
+                            token: str | None = None, redo: bool = False) -> str:
+    """논문 그림 속 글자(축 라벨·범례·다이어그램 상자 글자)를 한국어로 바꾼 그림을 만든다 (LLM 비용 발생).
+    **사용자가 승인해야 실행된다.**
+
+    사용자가 그림의 글자를 번역해 달라고 할 때만 쓴다. 그림 한 장에 LLM 한 번(이 논문의 번역 모델)이고,
+    그림의 선·막대·숫자는 바꾸지 않는다(LLM은 글자 번역만 정하고 그림은 코드가 원본 위에 고쳐 그린다).
+    만든 그림은 번역 열(ko.md)에 들어간다. 백그라운드 작업으로 돌고 이 tool은 바로 돌아온다.
+
+    Args:
+        figures: 그림 이름 목록 ('figure-3', 'Figure 3', 'image-1'). 생략하면 아직 번역하지 않은 그림 전부.
+        token: 논문 token. 생략하면 지금 화면의 논문.
+        redo: True면 이미 번역한 그림도 다시 번역한다 (figures를 생략했을 때 전부).
+    """
+    from md4paper import library
+    from md4paper import figure_translate as ft
+    from md4paper.ui import jobs
+
+    deps = ctx.deps
+    got = _write_target(ctx, token)
+    if isinstance(got, str):
+        return got
+    tok, wd = got
+    names = await asyncio.to_thread(figure_names, wd, figures, bool(redo))
+    if isinstance(names, str):
+        return names
+    if len(names) > FIGURES_MAX:
+        return f"한 번에 {FIGURES_MAX}장까지 번역할 수 있습니다 (대상: {len(names)}장). figures로 나눠 부르세요."
+    if jobs.is_running(Path(wd.root), "reconvert"):
+        return "이 논문은 PDF에서 다시 변환하는 중이라 지금은 할 수 없습니다. 끝난 뒤 다시 요청하세요."
+    try:
+        prov = await asyncio.to_thread(_provider_for(deps), "translate", wd)
+    except RuntimeError as e:
+        return f"그림 번역을 시작하지 못했습니다: {e}"
+
+    def work(job: jobs.Job) -> dict:
+        res = ft.translate_many(wd, prov, names, on_progress=lambda d, t: job.progress(d, t))
+        saved = library.auto_export(wd)
+        msg = f"그림 {res['done']}개 글자 번역 완료 (≈${res['cost_usd']:.4f})"
+        if res["empty"]:
+            msg += f" · 번역할 글자 없음 {res['empty']}개"
+        if res["failed"]:
+            msg += f" · 실패 {len(res['failed'])}개: " + "; ".join(f"{k} {v[:60]}" for k, v in list(res["failed"].items())[:3])
+        if saved:
+            msg += f" · 저장 위치에 {len(saved)}개 파일 저장"
+        job.message = msg
+        return res
+
+    job = jobs.start(wd.root, FIGURES_KIND, FIGURES_LABEL, work, title=await _title(wd))
+    if job is None:
+        return "이 논문은 이미 그림을 번역하는 중입니다. 지금 작업이 끝난 뒤 다시 요청하세요."
+    rec = _record(deps, job, "figures", tok, wd, f"그림 {len(names)}개", figures=names,
+                  model=f"{getattr(prov, 'name', '')}/{prov.model}")
+    deps.ui_actions.put_nowait({"kind": "watch_job", "job": FIGURES_KIND, "token": tok})
+    return (f"그림 번역 작업을 시작했습니다(job {rec['id']}): {', '.join(n.rsplit('.', 1)[0] for n in names[:8])}"
+            f"{' …' if len(names) > 8 else ''} ({len(names)}장), 모델 {prov.model}. 끝나면 알려 드립니다.")
+
+
 # --- 승인 카드 설명 -----------------------------------------------------
 
 
@@ -352,10 +443,26 @@ def describe_glossary(args: dict, root: Path | None) -> str:
     return out
 
 
+def describe_figures(args: dict, root: Path | None) -> str:
+    from md4paper import figure_translate as ft
+
+    if root is None:
+        return "그림 속 글자 번역 (LLM 비용 발생)"
+    wd = WorkDir(Path(root))
+    names = figure_names(wd, args.get("figures") or None, bool(args.get("redo")))
+    if isinstance(names, str):
+        return f"그림 속 글자 번역 — 실행되지 않음: {names[:80]}"
+    choice = translate_choice(wd)
+    est = ft.estimate_usd(choice[1], len(names))
+    return (f"그림 {len(names)}장 글자 번역 (LLM 비용 ≈${est:.3f}, {_model_text(choice)}) · 그림의 선·숫자는 그대로, "
+            "번역 열에 들어감")
+
+
 # tool 이름 → (args, 논문 경로|None) → 승인 카드 한 줄
 DESCRIBE: dict[str, Callable[[dict, Path | None], str]] = {
     "retranslate_sections": describe_retranslate,
     "run_glossary": describe_glossary,
+    "translate_figures": describe_figures,
 }
 
-TOOLS = [retranslate_sections, run_glossary]
+TOOLS = [retranslate_sections, run_glossary, translate_figures]
