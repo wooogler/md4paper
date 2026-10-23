@@ -37,6 +37,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from md4paper import config
+from md4paper.i18n import t
 from md4paper.ui.agent import sessions
 from md4paper.ui.agent.agent import default_agent, run_turn
 from md4paper.ui.agent.context import ScreenContext
@@ -198,7 +199,7 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
         try:
             ctx = ScreenContext.model_validate(body.get("context") or {})
         except ValidationError as e:
-            return JSONResponse({"error": f"화면 맥락 형식 오류: {e.errors()[:1]}"},
+            return JSONResponse({"error": t("화면 맥락 형식 오류: {err}", err=e.errors()[:1])},
                                 status_code=400)
         tok = ctx.token
         if tok and wd_for(tok) is None:
@@ -210,11 +211,11 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
         pending = s.pending
         if approvals:
             if pending is None or not isinstance(approvals, dict):
-                return JSONResponse({"error": "승인 대기 중인 작업이 없습니다."}, status_code=400)
+                return JSONResponse({"error": t("승인 대기 중인 작업이 없습니다.")}, status_code=400)
             want = [c["id"] for c in pending["calls"]]
             unknown = set(map(str, approvals)) - set(want)
             if unknown:
-                return JSONResponse({"error": f"대기 중이 아닌 작업입니다: {sorted(unknown)}"},
+                return JSONResponse({"error": t("대기 중이 아닌 작업입니다: {ids}", ids=sorted(unknown))},
                                     status_code=400)
             got = {str(k): v for k, v in approvals.items()}
             # 일부만 와도 된다 — 답이 없는 호출은 거절로 닫는다(Pydantic AI는 전부 답해야 재개한다)
@@ -224,14 +225,14 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
             want = [c["id"] for c in pending["calls"]]
             deferred = _results(want, dict.fromkeys(want, False), pending, why=SKIPPED)
         elif not message:
-            return JSONResponse({"error": "질문이 비어 있습니다."}, status_code=400)
+            return JSONResponse({"error": t("질문이 비어 있습니다.")}, status_code=400)
 
         cap = config.resolve_agent_cost_cap()
         spent = float(s.usage.get("cost_usd") or 0.0)
         if cap > 0 and spent >= cap and body.get("override") is not True:
             return JSONResponse(
-                {"error": (f"이 세션의 누적 비용(${spent:.4f})이 상한 ${cap:g}에 닿았습니다. "
-                           "계속하면 이번 질문만 상한을 넘겨 진행합니다."),
+                {"error": t("이 세션의 누적 비용(${spent:.4f})이 상한 ${cap:g}에 닿았습니다. "
+                            "계속하면 이번 질문만 상한을 넘겨 진행합니다.", spent=spent, cap=cap),
                  "code": "cost_cap", "cost_usd": round(spent, 6), "cost_cap": cap},
                 status_code=400)
 
@@ -242,7 +243,7 @@ def register_routes(fastapi_app, wd_for: Callable[[str], WorkDir | None],  # noq
 
         with _busy_lock:
             if time.time() - _BUSY.get(sid, 0.0) < BUSY_TTL:
-                return JSONResponse({"error": "이 세션에서 이미 답을 만드는 중입니다."},
+                return JSONResponse({"error": t("이 세션에서 이미 답을 만드는 중입니다.")},
                                     status_code=409)
             _BUSY[sid] = time.time()
 

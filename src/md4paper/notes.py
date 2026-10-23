@@ -20,9 +20,15 @@ import re
 import time
 from pathlib import Path
 
+from md4paper.i18n import N_, t
 from md4paper.workdir import WorkDir
 
-DEFAULT_NAME = "메모"
+DEFAULT_NAME = N_("메모")  # 화면 언어로 보일 때는 default_name()
+
+
+def default_name() -> str:
+    """기본 메모 탭 이름 — 화면 언어로 (탭 목록을 저장하기 전엔 이름이 파일에 남지 않는다)."""
+    return t(DEFAULT_NAME)
 _MAIN_FILE = "notes.md"           # 첫 탭 — 탭을 도입하기 전부터 쓰던 자리
 _BAD = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _MAX_NAME = 40
@@ -59,7 +65,7 @@ def _load(wd: WorkDir) -> list[dict]:
                 if isinstance(t, dict) and isinstance(t.get("name"), str) and isinstance(t.get("file"), str)]
     except (OSError, json.JSONDecodeError, AttributeError):
         tabs = []
-    return tabs or [{"name": DEFAULT_NAME, "file": _MAIN_FILE}]
+    return tabs or [{"name": default_name(), "file": _MAIN_FILE}]
 
 
 def _raw(wd: WorkDir) -> dict:
@@ -230,7 +236,7 @@ def keep(wd: WorkDir, name: str, text: str) -> Path | None:
 def add(wd: WorkDir, name: str = "") -> str:
     """새 탭을 맨 뒤에 — 이름이 비거나 겹치면 '메모 2'처럼 번호를 붙인다. 붙은 이름을 돌려준다."""
     tabs = _load(wd)
-    name = _unique(tabs, clean_name(name) or DEFAULT_NAME)
+    name = _unique(tabs, clean_name(name) or default_name())
     tabs.append({"name": name, "file": _new_file(wd, tabs, name)})
     _save(wd, tabs)
     return name

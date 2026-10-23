@@ -422,8 +422,8 @@ def test_panel_polls_jobs_only_while_unfinished():
 
 def test_panel_job_lines():
     text = JS[JS.index("function jobText("):JS.index("function jobNode(")]
-    for s in ("'⏳ '", "'번역 중 — '", "'✅ 번역 완료: '", "'개 섹션'", "'✅ 용어집 완료: '",
-              "' 실패: '"):
+    for s in ("'⏳ '", "md4T('번역 중 — {detail}…'", "md4T('번역 완료: {n}개 섹션'", "'✅ '",
+              "md4T('용어집 완료: {n}개 항목'", "md4T('번역 실패: {e}'"):
         assert s in text
     assert "cost_usd" not in text          # 작업 비용은 머리의 세션 누적에만 (§test_agent_panel)
     assert "jobsAfter(t.id, used)" in JS                        # 작업을 띄운 턴 뒤에 그린다

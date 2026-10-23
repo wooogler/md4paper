@@ -38,6 +38,8 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlencode
 
+from md4paper import i18n
+
 PANEL_ID = "md4-agent"           # body 직속 서랍 id — spa.add_body_html이 같은 id를 다시 넣지 않는다
 PANEL_Z = 9000                   # 메모 서랍(#md-anno-panel)과 같은 층 — 둘은 번갈아 열린다
 NAV_EVENT = "md4-agent-nav"      # JS → 서버: SPA 화면 이동 요청 (JS는 ui.sub_pages 이동을 직접 못 한다)
@@ -54,7 +56,7 @@ STANDALONE_PATH = "/agent"                  # app.py run()의 @ui.page — 셸(s
 POPOUT_EVENT = "md4-agent-popout"           # JS → 서버(앱 창 모드만): 이 세션을 형제 웹뷰 창으로 띄워 달라
 STANDALONE_CLASS = "ag-standalone"          # 단독 페이지 body 클래스 — 서랍을 화면 전체로 편다
 SA_POLL_MS = 10000                          # 단독 창이 턴 없을 때 세션을 다시 읽는 간격 (JS의 SA_POLL_MS)
-WINDOW_TITLE = "md4paper 도우미"
+WINDOW_TITLE = i18n.N_("md4paper 도우미")  # 창 제목 — 쓰는 자리에서 i18n.t
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")   # 쿼리로 받은 세션 id·논문 token — 스크립트에 싣기 전 거른다
 
 # '읽던 자리로' 되돌리기 알약 — 아래 CSS/HTML/JS 문자열과 이 상수가 한 짝이다(테스트가 대조한다).
@@ -377,39 +379,39 @@ a.chat-cite-note:hover { background: #f7cf60; }
 
 # 서랍 마크업. body에 고정돼 있어 화면을 갈아 끼워도 대화·진행 중인 답이 그대로 남는다.
 HTML = """
-<div id="md4-agent" role="complementary" aria-label="에이전트">
-  <div class="ag-handle" title="드래그해서 너비 조절"></div>
+<div id="md4-agent" role="complementary" aria-label="⦃에이전트⦄">
+  <div class="ag-handle" title="⦃드래그해서 너비 조절⦄"></div>
   <div class="ag-head">
-    <button type="button" class="ag-sess" title="세션 — 목록 · 이름 바꾸기 · 삭제"><span
-      class="ag-sess-t">에이전트</span><span class="ag-sess-c">&#9662;</span></button>
-    <select class="ag-model" title="에이전트가 쓸 모델 — 번역 설정과 별개입니다"></select>
-    <span class="ag-cost" title="이 세션에서 쓴 비용 (누적)"></span>
-    <button type="button" class="ag-btn ag-new" title="새 세션">+ 새 세션</button>
+    <button type="button" class="ag-sess" title="⦃세션 — 목록 · 이름 바꾸기 · 삭제⦄"><span
+      class="ag-sess-t">⦃에이전트⦄</span><span class="ag-sess-c">&#9662;</span></button>
+    <select class="ag-model" title="⦃에이전트가 쓸 모델 — 번역 설정과 별개입니다⦄"></select>
+    <span class="ag-cost" title="⦃이 세션에서 쓴 비용 (누적)⦄"></span>
+    <button type="button" class="ag-btn ag-new" title="⦃새 세션⦄">+ ⦃새 세션⦄</button>
     <a class="ag-btn ag-pop" href="/agent" target="_blank" rel="noopener"
-      title="새 창으로 열기 — 이 창의 서랍은 닫힙니다"><i class="material-icons"
+      title="⦃새 창으로 열기 — 이 창의 서랍은 닫힙니다⦄"><i class="material-icons"
       aria-hidden="true">open_in_new</i></a>
-    <button type="button" class="ag-btn ag-x" title="닫기 (Esc)">&#10005;</button>
+    <button type="button" class="ag-btn ag-x" title="⦃닫기 (Esc)⦄">&#10005;</button>
     <div class="ag-menu" role="menu"></div>
   </div>
   <div class="ag-list"></div>
   <div class="ag-foot">
-    <div class="ag-sel"><span>선택한 글 함께 보냄:</span><span class="ag-sel-t"></span>
-      <button type="button" class="ag-btn ag-sel-x" title="선택한 글 빼기">&#10005;</button></div>
+    <div class="ag-sel"><span>⦃선택한 글 함께 보냄:⦄</span><span class="ag-sel-t"></span>
+      <button type="button" class="ag-btn ag-sel-x" title="⦃선택한 글 빼기⦄">&#10005;</button></div>
     <div class="ag-row">
       <textarea class="ag-input" rows="1"
-        placeholder="무엇이든 물어보세요 (Shift+Enter 줄바꿈)"></textarea>
-      <button type="button" class="ag-send" title="전송 (Enter)">&#10148;</button>
+        placeholder="⦃무엇이든 물어보세요 (Shift+Enter 줄바꿈)⦄"></textarea>
+      <button type="button" class="ag-send" title="⦃전송 (Enter)⦄">&#10148;</button>
     </div>
   </div>
 </div>
 <!-- 서랍 **밖**이다: 서랍 안에 두면 서랍을 닫는 순간 함께 사라지는데, 서랍을 접고 본문만
      읽는 사람에게도 읽던 자리로 돌아갈 길은 있어야 한다. -->
 <div id="md-jump-back" role="status" aria-live="polite">
-  <button type="button" class="mjb-go" aria-label="읽던 자리로 돌아가기"
-    title="칩을 누르기 전 읽던 자리로 돌아갑니다"><span class="mjb-i"
-    aria-hidden="true">&#8617;</span><span>읽던 자리로</span><span class="mjb-w"></span></button>
-  <button type="button" class="mjb-x" aria-label="되돌아가기 버튼 닫기"
-    title="닫기 (Esc)">&#10005;</button>
+  <button type="button" class="mjb-go" aria-label="⦃읽던 자리로 돌아가기⦄"
+    title="⦃칩을 누르기 전 읽던 자리로 돌아갑니다⦄"><span class="mjb-i"
+    aria-hidden="true">&#8617;</span><span>⦃읽던 자리로⦄</span><span class="mjb-w"></span></button>
+  <button type="button" class="mjb-x" aria-label="⦃되돌아가기 버튼 닫기⦄"
+    title="⦃닫기 (Esc)⦄">&#10005;</button>
 </div>
 """
 
@@ -455,7 +457,7 @@ JS = r"""
   var capRetry = null;       // 비용 상한으로 막힌 요청 {body, msg} — '그래도 계속'이 override를 더해 다시 보낸다
   var notice = null;         // 단독 창의 화면 이동 안내 {url} — 다음 질문을 보내면 걷힌다
   var PH_IDLE = input.placeholder;
-  var PH_WAIT = '승인을 기다리는 중 — 그냥 보내면 건너뜁니다';
+  var PH_WAIT = md4T('승인을 기다리는 중 — 그냥 보내면 건너뜁니다');
   var models = [], modelInfo = {ready: true, reason: '', provider: '', model: ''};
 
   function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : s;
@@ -780,9 +782,9 @@ JS = r"""
     jbJumpAt = Date.now();
     var go = jbEl.querySelector('.mjb-go');
     jbEl.querySelector('.mjb-w').textContent = pin.sec ? ' · ' + pin.sec.slice(0, 26) : '';
-    go.title = '칩을 누르기 전 읽던 자리로 돌아갑니다' + (pin.sec ? ' — ' + pin.sec : '')
+    go.title = md4T('칩을 누르기 전 읽던 자리로 돌아갑니다') + (pin.sec ? ' — ' + pin.sec : '')
       + (pin.head ? ' “' + pin.head.slice(0, 50) + '”' : '');
-    go.setAttribute('aria-label', '읽던 자리로 돌아가기' + (pin.sec ? ' — ' + pin.sec : ''));
+    go.setAttribute('aria-label', md4T('읽던 자리로 돌아가기') + (pin.sec ? ' — ' + pin.sec : ''));
     jbKey = '';                          // 다음 프레임에 좌표를 새로 쓰게
     if (!jbRaf) jbRaf = requestAnimationFrame(jbTick);
     return true;
@@ -935,7 +937,7 @@ JS = r"""
         o.value = m.provider + '/' + m.model;
         // 키 없는 제공사는 목록에 남기되 못 고르게 — 왜 안 보이는지 헤매지 않도록.
         // 단가는 싣지 않는다 — 돈은 머리의 세션 누적 한 곳에서만 보인다
-        o.textContent = m.model + (m.has_key ? '' : '  (키 없음)');
+        o.textContent = m.model + (m.has_key ? '' : '  ' + md4T('(키 없음)'));
         o.disabled = !m.has_key;
         if (m.model === cur && m.provider === modelInfo.provider) o.selected = true;
         g.appendChild(o);
@@ -960,7 +962,7 @@ JS = r"""
     if (v.length < 2) return;
     api('PUT', '/agent/model', {provider: v[0], model: v.slice(1).join('/')})
       .then(function(j){ takeModels(j); errMsg = null; render(); })
-      .catch(function(e){ errMsg = '모델을 바꾸지 못했습니다: ' + e.message; render(); });
+      .catch(function(e){ errMsg = md4T('모델을 바꾸지 못했습니다: {e}', {e: e.message}); render(); });
   });
 
   // ---- 세션 ----
@@ -1005,16 +1007,17 @@ JS = r"""
   }
   // 완료 줄에 작업 비용을 붙이지 않는다 — 끝난 작업 비용은 세션 누적(머리)에 더해져 거기서만 보인다
   function jobText(j){
-    var what = j.kind === 'glossary' ? '용어집' : '번역';
+    var gl = j.kind === 'glossary';
     if (!j.done){
       var p = j.progress || [0, 0], prog = p[1] ? ' ' + p[0] + '/' + p[1] : '';
-      return '⏳ ' + (j.kind === 'glossary' ? '용어집 만드는 중…' : '번역 중 — ' + (j.detail || '') + '…') + prog;
+      return '⏳ ' + (gl ? md4T('용어집 만드는 중…') : md4T('번역 중 — {detail}…', {detail: j.detail || ''})) + prog;
     }
-    if (j.status !== 'done') return '❌ ' + what + ' 실패: ' + (j.error || '알 수 없는 오류');
+    var err = j.error || md4T('알 수 없는 오류');
+    if (j.status !== 'done') return '❌ ' + (gl ? md4T('용어집 실패: {e}', {e: err}) : md4T('번역 실패: {e}', {e: err}));
     var r = j.result || {};
-    if (j.kind === 'glossary') return '✅ 용어집 완료: ' + (r.entries || 0) + '개 항목';
-    return '✅ 번역 완료: ' + (r.sections || 0) + '개 섹션'
-      + (r.failed ? ' · ' + r.failed + '개 구간은 영어 유지(구조 검증 실패)' : '');
+    if (gl) return '✅ ' + md4T('용어집 완료: {n}개 항목', {n: r.entries || 0});
+    return '✅ ' + md4T('번역 완료: {n}개 섹션', {n: r.sections || 0})
+      + (r.failed ? ' · ' + md4T('{n}개 구간은 영어 유지(구조 검증 실패)', {n: r.failed}) : '');
   }
   function jobNode(j){
     var d = document.createElement('div');
@@ -1023,7 +1026,7 @@ JS = r"""
     d.textContent = jobText(j);
     // 작업 message는 쓰지 않는다 — jobtools가 '(≈$…)' 비용을 붙여 둔 뷰어 토스트용 문구다
     d.title = (j.title ? '‘' + j.title + '’ — ' : '') + (j.label || '')
-      + (j.model ? '\n모델 ' + j.model : '');
+      + (j.model ? '\n' + md4T('모델 {m}', {m: j.model}) : '');
     return d;
   }
   function paintJob(j){
@@ -1050,7 +1053,7 @@ JS = r"""
       setSession(d);
       return loadList();
     }).then(function(){ renderHead(); setTimeout(function(){ input.focus(); }, 30); })
-      .catch(function(e){ errMsg = '세션을 만들지 못했습니다: ' + e.message; render(); });
+      .catch(function(e){ errMsg = md4T('세션을 만들지 못했습니다: {e}', {e: e.message}); render(); });
   }
   // 활성 세션을 정한다 — 브라우저가 기억한 것 → 목록 첫 번째(최근) → 없으면 새로 만든다
   function ensureSession(){
@@ -1061,7 +1064,7 @@ JS = r"""
       hit = hit || ss[0];
       if (hit) return openSession(hit.id).catch(function(){ return newSession(); });
       return newSession();
-    }).catch(function(e){ errMsg = '세션 목록을 읽지 못했습니다: ' + e.message; render(); });
+    }).catch(function(e){ errMsg = md4T('세션 목록을 읽지 못했습니다: {e}', {e: e.message}); render(); });
   }
   function refreshSession(){
     if (!sid) return Promise.resolve();
@@ -1077,8 +1080,8 @@ JS = r"""
     if (menuMode === 'rename'){
       var box = document.createElement('div'); box.className = 'ag-rename';
       var inp = document.createElement('input'); inp.value = (sess && sess.title) || '';
-      inp.placeholder = '세션 이름';
-      var ok = document.createElement('button'); ok.className = 'ag-btn'; ok.textContent = '저장';
+      inp.placeholder = md4T('세션 이름');
+      var ok = document.createElement('button'); ok.className = 'ag-btn'; ok.textContent = md4T('저장');
       function save(){
         var t = inp.value.trim();
         if (!t || !sid) return closeMenu();
@@ -1098,10 +1101,10 @@ JS = r"""
     }
     if (menuMode === 'delete'){
       var q = document.createElement('div'); q.className = 'ag-mi';
-      q.textContent = '“' + ((sess && sess.title) || '이 세션') + '”을(를) 지울까요? 되돌릴 수 없습니다.';
+      q.textContent = md4T('“{title}”을(를) 지울까요? 되돌릴 수 없습니다.', {title: (sess && sess.title) || md4T('이 세션')});
       menu.appendChild(q);
-      var yes = document.createElement('button'); yes.className = 'ag-mi ag-mi-del'; yes.textContent = '삭제';
-      var no = document.createElement('button'); no.className = 'ag-mi ag-mi-act'; no.textContent = '취소';
+      var yes = document.createElement('button'); yes.className = 'ag-mi ag-mi-del'; yes.textContent = md4T('삭제');
+      var no = document.createElement('button'); no.className = 'ag-mi ag-mi-act'; no.textContent = md4T('취소');
       yes.addEventListener('click', function(){
         var gone = sid;
         api('DELETE', '/agent/sessions/' + encodeURIComponent(gone)).then(function(){
@@ -1116,8 +1119,8 @@ JS = r"""
     sessList.forEach(function(s){
       var b = document.createElement('button');
       b.className = 'ag-mi' + (s.id === sid ? ' on' : '');
-      b.innerHTML = '<span class="ag-mi-t">' + esc(s.title || '새 세션') + '</span>'
-        + '<span class="ag-mi-s">' + (s.turns ? s.turns + '문 · ' : '') + esc(shortTime(s.updated))
+      b.innerHTML = '<span class="ag-mi-t">' + esc(s.title || md4T('새 세션')) + '</span>'
+        + '<span class="ag-mi-s">' + (s.turns ? md4T('{n}문', {n: s.turns}) + ' · ' : '') + esc(shortTime(s.updated))
         + '</span>';
       b.addEventListener('click', function(){
         closeMenu();
@@ -1127,7 +1130,7 @@ JS = r"""
       menu.appendChild(b);
     });
     if (sessList.length){ var sp = document.createElement('div'); sp.className = 'ag-msep'; menu.appendChild(sp); }
-    [['+ 새 세션', 'new'], ['이름 바꾸기', 'rename'], ['이 세션 삭제', 'delete']].forEach(function(a){
+    [['+ ' + md4T('새 세션'), 'new'], [md4T('이름 바꾸기'), 'rename'], [md4T('이 세션 삭제'), 'delete']].forEach(function(a){
       var b = document.createElement('button');
       b.className = 'ag-mi ' + (a[1] === 'delete' ? 'ag-mi-del' : 'ag-mi-act');
       b.textContent = a[0];
@@ -1151,13 +1154,13 @@ JS = r"""
   });
 
   // ---- 렌더 ----
-  var TOOL_KO = {search_paper: '논문 검색', read_rows: '행 읽기', outline: '목차 보기',
-    list_note_tabs: '메모 탭 목록', read_notes: '메모 읽기', read_highlights: '하이라이트 읽기',
-    list_papers: '논문 목록', list_projects: '컬렉션 목록', get_bibtex: 'BibTeX',
-    goto_row: '행으로 이동', open_paper: '논문 열기',
-    write_note: '메모 쓰기', add_highlight: '하이라이트 추가',
-    set_project_membership: '컬렉션 소속 바꾸기', remember: '기억하기',
-    retranslate_sections: '섹션 재번역', run_glossary: '용어집 만들기'};
+  var TOOL_KO = {search_paper: md4T('논문 검색'), read_rows: md4T('행 읽기'), outline: md4T('목차 보기'),
+    list_note_tabs: md4T('메모 탭 목록'), read_notes: md4T('메모 읽기'), read_highlights: md4T('하이라이트 읽기'),
+    list_papers: md4T('논문 목록'), list_projects: md4T('컬렉션 목록'), get_bibtex: 'BibTeX',
+    goto_row: md4T('행으로 이동'), open_paper: md4T('논문 열기'),
+    write_note: md4T('메모 쓰기'), add_highlight: md4T('하이라이트 추가'),
+    set_project_membership: md4T('컬렉션 소속 바꾸기'), remember: md4T('기억하기'),
+    retranslate_sections: md4T('섹션 재번역'), run_glossary: md4T('용어집 만들기')};
   // 승인 카드의 아이콘 — Material Icons 글꼴(NiceGUI가 싣는다)의 이름
   var TOOL_ICON = {write_note: 'edit_note', add_highlight: 'border_color',
     set_project_membership: 'bookmark_add', remember: 'psychology',
@@ -1172,7 +1175,7 @@ JS = r"""
   function toolNode(t){
     var d = document.createElement('div');
     d.className = 'ag-tool';
-    d.title = t.name + ' — 눌러서 펼치기/접기';
+    d.title = t.name + ' — ' + md4T('눌러서 펼치기/접기');
     d.innerHTML = '🔧 <b>' + esc(TOOL_KO[t.name] || t.name) + '</b>'
       + (t.args ? ': ' + esc(argsText(t.args)) : '')
       + (t.summary ? ' <span class="ag-tres">→ ' + esc(t.summary) + '</span>' : '');
@@ -1191,7 +1194,7 @@ JS = r"""
       var more = document.createElement('button');
       more.type = 'button';
       more.className = 'ag-tools-more';
-      more.textContent = open ? '▾ tool ' + tools.length + '개 — 접기' : '▸ 앞선 tool ' + n + '개';
+      more.textContent = open ? '▾ ' + md4T('tool {n}개 — 접기', {n: tools.length}) : '▸ ' + md4T('앞선 tool {n}개', {n: n});
       more.addEventListener('click', function(){
         toolOpen[key] = !open;
         g.replaceWith(toolGroup(tools, key));
@@ -1222,10 +1225,10 @@ JS = r"""
       var here = !!tok && tok === paper && onReview();
       if (!here) chip.classList.add('ag-far');   // 다른 논문(또는 홈) — 누르면 그 논문을 연다
       var tip = isNote
-        ? '내 메모 — “' + (c.quote || '').slice(0, 90) + '”'
+        ? md4T('내 메모') + ' — “' + (c.quote || '').slice(0, 90) + '”'
           + ((c.note || '').trim() ? ' / ' + c.note.replace(/\s+/g, ' ').slice(0, 70) : '')
         : (c.heading ? c.heading + ' — ' : '') + (c.en || '').replace(/\s+/g, ' ').slice(0, 160);
-      chip.title = (here ? '' : '다른 논문 — 누르면 열고 그 자리로\n') + tip;
+      chip.title = (here ? '' : md4T('다른 논문 — 누르면 열고 그 자리로') + '\n') + tip;
       // 칩은 곧장 뷰어의 그 문단으로 보낸다 — 원문·번역은 거기 이미 나란히 있으므로
       // 서랍 안에 한 번 더 그리지 않는다(툴팁으로 어디로 가는지만 미리 보여준다).
       chip.addEventListener('click', function(ev){
@@ -1235,7 +1238,7 @@ JS = r"""
           return;
         }
         if (!gotoElsewhere(tok, row, isNote ? id : null, c.url, true)){
-          errMsg = '그 논문의 위치를 찾지 못했습니다.'; render();
+          errMsg = md4T('그 논문의 위치를 찾지 못했습니다.'); render();
         }
       });
     });
@@ -1303,8 +1306,8 @@ JS = r"""
     box.className = 'ag-appr' + (open ? '' : ' done');
     var h = document.createElement('div');
     h.className = 'ag-appr-h';
-    h.textContent = open ? ('실행해도 될까요?' + (calls.length > 1 ? ' (' + calls.length + '건)' : ''))
-      : (rec.skipped ? '건너뜀 — 새 메시지를 보내 실행하지 않았습니다' : '승인 결과');
+    h.textContent = open ? (calls.length > 1 ? md4T('실행해도 될까요? ({n}건)', {n: calls.length}) : md4T('실행해도 될까요?'))
+      : (rec.skipped ? md4T('건너뜀 — 새 메시지를 보내 실행하지 않았습니다') : md4T('승인 결과'));
     box.appendChild(h);
     calls.forEach(function(c){
       var row = document.createElement('div'); row.className = 'ag-appr-c';
@@ -1319,13 +1322,13 @@ JS = r"""
       var hasArgs = c.args && typeof c.args === 'object' && Object.keys(c.args).length;
       if (hasArgs){                          // 무엇을 넘기는지 — 접어 두고 필요할 때만 펼친다
         var tg = document.createElement('button');
-        tg.type = 'button'; tg.className = 'ag-appr-tg'; tg.textContent = '자세히';
-        tg.title = '넘길 인자 펼치기/접기';
+        tg.type = 'button'; tg.className = 'ag-appr-tg'; tg.textContent = md4T('자세히');
+        tg.title = md4T('넘길 인자 펼치기/접기');
         tg.addEventListener('click', function(){ row.classList.toggle('open'); });
         top.appendChild(tg);
       }
       if (open){
-        [['승인', true, 'ag-appr-ok'], ['거절', false, 'ag-appr-no']].forEach(function(o){
+        [[md4T('승인'), true, 'ag-appr-ok'], [md4T('거절'), false, 'ag-appr-no']].forEach(function(o){
           var b = document.createElement('button');
           b.type = 'button'; b.textContent = o[0];
           b.className = o[2] + (decisions[c.id] === o[1] ? ' on' : '');
@@ -1337,7 +1340,7 @@ JS = r"""
         var st = document.createElement('span');
         var ok = !!(rec.decisions || {})[c.id];
         st.className = 'ag-appr-s ' + (rec.skipped ? 'skip' : (ok ? 'ok' : 'no'));
-        st.textContent = rec.skipped ? '건너뜀' : (ok ? '승인됨' : '거절됨');
+        st.textContent = rec.skipped ? md4T('건너뜀') : (ok ? md4T('승인됨') : md4T('거절됨'));
         top.appendChild(st);
       }
       row.appendChild(top);
@@ -1350,7 +1353,7 @@ JS = r"""
     });
     if (open && calls.length > 1){
       var all = document.createElement('div'); all.className = 'ag-appr-all';
-      [['모두 승인', true], ['모두 거절', false]].forEach(function(o){
+      [[md4T('모두 승인'), true], [md4T('모두 거절'), false]].forEach(function(o){
         var b = document.createElement('button');
         b.type = 'button'; b.textContent = o[0]; b.disabled = busy;
         b.className = o[1] ? 'ag-appr-allok' : 'ag-appr-allno';
@@ -1367,24 +1370,24 @@ JS = r"""
   function capNode(){
     var box = document.createElement('div'); box.className = 'ag-cap';
     var t = document.createElement('span'); t.className = 'ag-cap-t';
-    t.textContent = capRetry.msg || '이 세션의 비용 상한을 넘었습니다.';
+    t.textContent = capRetry.msg || md4T('이 세션의 비용 상한을 넘었습니다.');
     var go = document.createElement('button');
-    go.type = 'button'; go.className = 'ag-cap-go'; go.textContent = '그래도 계속';
-    go.title = '이번 요청만 상한을 넘겨 보냅니다';
+    go.type = 'button'; go.className = 'ag-cap-go'; go.textContent = md4T('그래도 계속');
+    go.title = md4T('이번 요청만 상한을 넘겨 보냅니다');
     go.disabled = busy;
     go.addEventListener('click', function(){ var r = capRetry; if (r) send(null, null, r.body); });
     var no = document.createElement('button');
-    no.type = 'button'; no.className = 'ag-cap-x'; no.textContent = '그만두기';
+    no.type = 'button'; no.className = 'ag-cap-x'; no.textContent = md4T('그만두기');
     no.addEventListener('click', function(){ capRetry = null; render(); });
     box.appendChild(t); box.appendChild(go); box.appendChild(no);
     return box;
   }
   function noticeNode(){                   // 단독 창 — 화면 이동을 여기서 못 했다
     var box = document.createElement('div'); box.className = 'ag-note';
-    box.textContent = '이 창에는 논문 화면이 없습니다 — 메인 창에서 열어 주세요.';
+    box.textContent = md4T('이 창에는 논문 화면이 없습니다 — 메인 창에서 열어 주세요.');
     if (!window.__md4AgentNative && notice.url){     // 브라우저면 진짜 링크 — 누르면 새 탭(차단 없음)
       var a = document.createElement('a');
-      a.href = notice.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = '새 탭에서 열기';
+      a.href = notice.url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = md4T('새 탭에서 열기');
       box.appendChild(a);
     }
     return box;
@@ -1407,7 +1410,7 @@ JS = r"""
     if (!live.text){
       var wt = document.createElement('div'); wt.className = 'ag-wait';
       wt.innerHTML = '<span class="ag-dots"><span></span><span></span><span></span></span>'
-        + (live.tools.length ? '자료를 읽는 중…' : '생각하는 중…');
+        + (live.tools.length ? md4T('자료를 읽는 중…') : md4T('생각하는 중…'));
       w.appendChild(wt);
     }
     if (live.err){
@@ -1421,13 +1424,13 @@ JS = r"""
   function renderHead(){
     if (sess && !sess.title)                  // 첫 질문이 제목이 된다 — 목록에서 받아 온다
       for (var i = 0; i < sessList.length; i++) if (sessList[i].id === sess.id) sess.title = sessList[i].title;
-    sessT.textContent = (sess && sess.title) || '새 세션';
+    sessT.textContent = (sess && sess.title) || md4T('새 세션');
     sessBtn.disabled = busy; newBtn.disabled = busy;
     var c = sess && sess.usage ? Number(sess.usage.cost_usd || 0) : 0;
     var cap = sess && sess.cost_cap ? Number(sess.cost_cap) : 0;     // 세션 비용 상한(USD) — 있으면 함께
     costEl.textContent = '$' + c.toFixed(4) + (cap ? ' / $' + cap.toFixed(2) : '');
     costEl.classList.toggle('over', !!cap && c >= cap);
-    costEl.title = '이 세션에서 쓴 비용 (누적)' + (cap ? ' / 세션 상한 — 넘으면 다음 질문 전에 묻습니다' : '');
+    costEl.title = md4T('이 세션에서 쓴 비용 (누적)') + (cap ? ' / ' + md4T('세션 상한 — 넘으면 다음 질문 전에 묻습니다') : '');
     if (popBtn) popBtn.setAttribute('href', popHref());   // 가운데 클릭·⌘클릭도 지금 세션으로
   }
   function render(){
@@ -1437,19 +1440,19 @@ JS = r"""
     if (!modelInfo.ready){
       var note = document.createElement('div');
       note.className = 'ag-err';
-      note.textContent = (modelInfo.reason || 'AI 키가 설정되지 않았습니다.')
-        + ' 홈 → 설정에서 키를 넣으세요.';
+      note.textContent = (modelInfo.reason || md4T('AI 키가 설정되지 않았습니다.'))
+        + ' ' + md4T('홈 → 설정에서 키를 넣으세요.');
       list.appendChild(note);
     }
     if (!turns.length && !live && modelInfo.ready){
       var em = document.createElement('div');
       em.className = 'ag-empty';
       em.textContent = (paper && (onReview() || SA)
-        ? '열린 논문과 라이브러리의 다른 논문을 읽고 답합니다.\n'
-          + '예: "이 논문의 방법 섹션 핵심은?", "선택한 문장 쉽게 풀어 줘", "3번째 섹션으로 가 줘"'
-        : '라이브러리의 논문을 찾아 읽고 답합니다.\n'
-          + '예: "이 라이브러리에 논문 몇 편 있어?", "튜터링 관련 논문 열어 줘"')
-        + '\n답 속 숫자 칩을 누르면 근거 문단(노란 칩은 메모)으로 이동합니다.';
+        ? md4T('열린 논문과 라이브러리의 다른 논문을 읽고 답합니다.') + '\n'
+          + md4T('예: “이 논문의 방법 섹션 핵심은?”, “선택한 문장 쉽게 풀어 줘”, “3번째 섹션으로 가 줘”')
+        : md4T('라이브러리의 논문을 찾아 읽고 답합니다.') + '\n'
+          + md4T('예: “이 라이브러리에 논문 몇 편 있어?”, “튜터링 관련 논문 열어 줘”'))
+        + '\n' + md4T('답 속 숫자 칩을 누르면 근거 문단(노란 칩은 메모)으로 이동합니다.');
       list.appendChild(em);
     }
     var used = {};
@@ -1566,7 +1569,7 @@ JS = r"""
     } else if (name === 'done'){
       live.done = d;
     } else if (name === 'error'){
-      live.err = d.message || '답을 만들지 못했습니다.';
+      live.err = d.message || md4T('답을 만들지 못했습니다.');
     }
   }
   function lastTurnId(){ return turns.length ? turns[turns.length - 1].id : null; }
@@ -1629,7 +1632,7 @@ JS = r"""
               refreshSession().then(function(){ errMsg = m; render(); });
           }
           live = null;
-        } else if (live) live.err = live.err || ('연결이 끊겼습니다: ' + (e.message || e));
+        } else if (live) live.err = live.err || md4T('연결이 끊겼습니다: {e}', {e: e.message || e});
       })
       .then(function(){
         var L = live;
@@ -1910,7 +1913,7 @@ def install(state: dict | None = None,  # noqa: ARG001 — 셸 설치 훅들과 
     from md4paper.ui import spa
 
     spa.add_css(CSS)
-    spa.add_body_html(HTML)
+    spa.add_body_html(i18n.html(HTML))
     spa.add_body_html(_flags_js(popout is not None, None))
     spa.add_body_html(f"<script>{JS}</script>")
     ui.on(NAV_EVENT, lambda e: _nav((e.args or {}).get("url", ""), bool((e.args or {}).get("refresh"))))
@@ -1943,9 +1946,11 @@ def standalone_page(state: dict, session: str = "", paper: str = "", *, native: 
             title = " ".join(paper_title(Path(wd.root)).split())[:200]
         except OSError:
             title = ""
-    ui.page_title(f"{WINDOW_TITLE} — {title}" if title else WINDOW_TITLE)
+    name = i18n.t(WINDOW_TITLE)
+    ui.page_title(f"{name} — {title}" if title else name)
     ui.add_css(CSS)
-    ui.add_body_html(HTML)
+    ui.add_head_html(i18n.head_html())  # 단독 창엔 셸 head가 없다 — md4T와 카탈로그를 여기서
+    ui.add_body_html(i18n.html(HTML))
     ui.add_body_html(_flags_js(native, {"session": sid, "paper": paper if wd is not None else None,
                                         "title": title or None}))
     ui.add_body_html(f"<script>{JS}</script>")

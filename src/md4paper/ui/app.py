@@ -2920,7 +2920,7 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
     fig_js = figrefs.index_js(served_markdown(ctrl.en_markdown() or "", tok),
                               served_markdown(ctrl.ko_markdown() or "", tok))
     spa.add_body_html(f"<script>{fig_js}</script>")
-    spa.add_body_html(figrefs.HTML)
+    spa.add_body_html(i18n.html(figrefs.HTML))
 
     def zoomed_file(e) -> Path | None:  # noqa: ANN001 — GenericEventArguments
         """확대 뷰어가 넘긴 `/wdimages/<토큰>/<파일>` → 이 논문의 out/images 안 실제 파일."""
@@ -6249,7 +6249,7 @@ def run(wd: WorkDir | None = None, upload_dir: Path | None = None,
         # 첫 화면(뷰어·홈)이 부르는 setPaper가 이미 떠 있는 창에 닿는다.
         # 앱 창 모드면 '새 창으로'가 단독 창(/agent)을 형제 웹뷰로 띄운다(브라우저 모드는 링크가 새 탭).
         agent_panel.install(state, popout=(lambda path: _spawn_path(
-            path, state, agent_panel.WINDOW_TITLE, dup_note=t("이 대화는 이미 다른 창에 떠 있습니다.")))
+            path, state, t(agent_panel.WINDOW_TITLE), dup_note=t("이 대화는 이미 다른 창에 떠 있습니다.")))
             if desktop.active() else None)
         # w-full: 없으면 sub_pages 상자가 내용 폭으로 줄어(큰 화면에서 1275px) 변환·번역 탭 splitter가 좁아진다
         ui.sub_pages({"/": index_view, "/home": home_view, "/review": review_view}).classes("w-full")

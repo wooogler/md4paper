@@ -201,7 +201,7 @@ CSS = """
 # (window.__mdImgZoomOpen)를 쓰고, 마크다운 표는 #md-tbl-view에 렌더된 표를 띄운다.
 HTML = """
 <div id="md-fig-tip"></div>
-<div id="md-tbl-view"><button class="mtv-close" title="닫기 (Esc)">&#10005;</button>
+<div id="md-tbl-view"><button class="mtv-close" title="⦃닫기 (Esc)⦄">&#10005;</button>
   <div class="mtv-card"><div class="mtv-cap"></div><div class="mtv-body"></div></div></div>
 <script>
 (function(){

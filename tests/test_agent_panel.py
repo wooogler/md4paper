@@ -319,9 +319,9 @@ def test_approval_card_markup_and_buttons():
     node = _js_block(JS, "function approvalNode(")
     assert "c.description ||" in _js_block(JS, "function apprText(")   # 없으면 이름+인자 요약
     for s in ("'ag-appr' + (open ? '' : ' done')", "material-icons ag-appr-i", "'ag-appr-d'",
-              "['승인', true, 'ag-appr-ok'], ['거절', false, 'ag-appr-no']", "'ag-appr-args'",
-              "row.classList.toggle('open')", "calls.length > 1", "['모두 승인', true], ['모두 거절', false]",
-              "'승인됨'", "'거절됨'", "'건너뜀'"):
+              "[md4T('승인'), true, 'ag-appr-ok'], [md4T('거절'), false, 'ag-appr-no']", "'ag-appr-args'",
+              "row.classList.toggle('open')", "calls.length > 1", "[md4T('모두 승인'), true], [md4T('모두 거절'), false]",
+              "md4T('승인됨')", "md4T('거절됨')", "md4T('건너뜀')"):
         assert s in node, s
     assert ".ag-appr-args { display: none;" in CSS and ".ag-appr-c.open .ag-appr-args { display: block; }" in CSS
     for cls in (".ag-appr.done", ".ag-appr-s.ok", ".ag-appr-s.no", ".ag-appr-s.skip", ".ag-appr-all"):
@@ -331,7 +331,7 @@ def test_approval_card_markup_and_buttons():
         assert cls in dark, cls
     # 쓰기 tool 넷은 사람 말 이름과 아이콘이 있다
     for name in ("write_note", "add_highlight", "set_project_membership", "remember"):
-        assert f"{name}: '" in JS.split("var TOOL_KO = {", 1)[1].split("};", 1)[0]
+        assert f"{name}: md4T('" in JS.split("var TOOL_KO = {", 1)[1].split("};", 1)[0]
         assert f"{name}: '" in JS.split("var TOOL_ICON = {", 1)[1].split("};", 1)[0]
 
 
@@ -362,7 +362,7 @@ def test_pending_keeps_input_open_with_wait_placeholder():
     rend = _js_block(JS, "function render(")
     assert "input.disabled = busy || !modelInfo.ready;" in rend      # 대기 중에도 그냥 보낼 수 있다
     assert "input.placeholder = pending ? PH_WAIT : PH_IDLE;" in rend
-    assert "var PH_WAIT = '승인을 기다리는 중 — 그냥 보내면 건너뜁니다';" in JS
+    assert "var PH_WAIT = md4T('승인을 기다리는 중 — 그냥 보내면 건너뜁니다');" in JS
     # 진행 중 말풍선 아래에, 그리고 세션을 다시 열면 서버의 pending으로 카드가 되살아난다
     assert rend.index("liveNode()") < rend.index("approvalNode(pending, true)")
     assert "pending = d.pending || null;" in _js_block(JS, "function setSession(")
@@ -433,7 +433,7 @@ def test_cost_cap_warning_and_override_retry():
     assert "e.code === 'cost_cap'" in snd and "capRetry = {body: body, msg: m};" in snd
     assert "body.override = true;" in snd                      # 다시 보낼 때 같은 본문 + override
     cap = _js_block(JS, "function capNode(")
-    assert "'그래도 계속'" in cap and "send(null, null, r.body)" in cap
+    assert "md4T('그래도 계속')" in cap and "send(null, null, r.body)" in cap
     assert "if (capRetry) list.appendChild(capNode());" in _js_block(JS, "function render(")
     head = _js_block(JS, "function renderHead(")
     assert "sess.cost_cap" in head and "' / $' + cap.toFixed(2)" in head
@@ -472,7 +472,7 @@ def test_home_refresh_rebuilds_sub_pages_only_when_home_is_shown(monkeypatch):
 def test_money_shows_only_in_head_session_total():
     """쓴 돈은 머리의 세션 누적(상한 있으면 '/ 상한') 한 곳만 — 모델 단가·턴별 비용·작업 비용·토큰은 없다."""
     assert "m.price" not in JS                         # 드롭다운에 단가를 붙이지 않는다
-    assert "(m.has_key ? '' : '  (키 없음)')" in JS     # 키 없음 표시는 남는다
+    assert "(m.has_key ? '' : '  ' + md4T('(키 없음)'))" in JS     # 키 없음 표시는 남는다
     assert "money(" not in JS                          # 작업 완료 줄의 ', $0.0016'
     turn = _js_block(JS, "function turnNode(")
     assert "cost_usd" not in turn and "toFixed" not in turn
