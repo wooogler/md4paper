@@ -179,6 +179,12 @@ def _job_line(rec: dict) -> str:
             bits.append(f"{res['failed']}개 구간은 구조 검증 실패로 영어 유지")
     elif rec.get("kind") == "glossary":
         bits.append(f"용어 {res.get('entries', 0)}개")
+    elif rec.get("kind") == "figures":
+        bits.append(f"그림 {res.get('figures', 0)}개 글자 번역")
+        if res.get("empty"):
+            bits.append(f"번역할 글자 없음 {res['empty']}개")
+        if res.get("failed"):
+            bits.append(f"실패 {res['failed']}개")
     bits.append(f"비용 ${float(res.get('cost_usd') or 0):.4f}")
     return f"- 끝남: {what} — {paper}. {', '.join(bits)}"
 

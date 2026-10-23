@@ -447,3 +447,54 @@ def test_cost_tools_have_names_icons_and_are_in_agent():
     tools = agent._function_toolset.tools  # noqa: SLF001
     assert tools["retranslate_sections"].requires_approval
     assert tools["run_glossary"].requires_approval
+
+
+def test_translate_figures_round_trip(paper, monkeypatch):
+    """그림 속 글자 번역 tool — 승인 카드(장 수·비용) → 승인 → 'figures' 작업 → 끝남 → 다음 턴 지시문에 한 번."""
+    from md4paper import figure_translate
+
+    paper.out_images.mkdir(parents=True, exist_ok=True)
+    (paper.out_images / "figure-2.png").write_bytes(b"\x89PNG fig")
+    paper.en_md.write_text(paper.en_md.read_text(encoding="utf-8") + "\n![Figure 2](images/figure-2.png)\n",
+                           encoding="utf-8")
+    ran: list = []
+
+    def many(wd, prov, names=None, on_progress=None, **kw):  # noqa: ANN001, ANN202 — 그림·글꼴 없이 배관만
+        ran.append(names)
+        return {"done": 1, "empty": 0, "failed": {}, "cost_usd": 0.0004, "total": 1}
+
+    monkeypatch.setattr(figure_translate, "translate_many", many)
+    seen: list = []
+
+    def step(msgs: list):  # noqa: ANN202
+        from agent_support import tool_returns
+
+        users = sum(1 for m in msgs if getattr(m, "kind", "") == "request"
+                    and any(p.part_kind == "user-prompt" for p in m.parts))
+        if users >= 2:
+            return "그림 번역이 끝났어요."
+        if any("그림 번역 작업을 시작했습니다" in r for r in tool_returns(msgs)):
+            return "시작했어요."
+        return [("translate_figures", {"figures": ["Figure 2"]})]
+
+    app, tok = _app(paper, [step], seen=seen)
+    with TestClient(app) as client:
+        sid = client.post("/agent/sessions").json()["id"]
+        events = _turn(client, sid, message="그림 2 글자 번역해 줘", context=_ctx(tok))
+        call = events[-2][1]["calls"][0]
+        assert events[-2][0] == "approval_needed" and call["name"] == "translate_figures"
+        assert call["description"].startswith("그림 1장 글자 번역 (LLM 비용 ≈$")
+        assert not jobs.running()
+        events = _turn(client, sid, approvals={call["id"]: True}, context=_ctx(tok))
+        assert ("ui_action", {"kind": "watch_job", "job": "figures", "token": tok}) in events
+        got = _wait_jobs(client, sid)
+        rec = got["jobs"][0]
+        assert rec["kind"] == "figures" and rec["done"] and rec["status"] == "done", rec
+        assert rec["result"] == {"figures": 1, "empty": 0, "failed": 0, "cost_usd": 0.0004}
+        assert ran == [["figure-2.png"]]
+        job = jobs.get(paper.root, "figures")
+        assert job is not None and job.message.startswith("그림 1개 글자 번역 완료")
+        seen.clear()
+        _turn(client, sid, message="끝났어?", context=_ctx(tok))
+        ins = seen[0].instructions
+        assert "끝남: 그림 번역" in ins and "그림 1개 글자 번역" in ins
