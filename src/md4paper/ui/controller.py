@@ -62,19 +62,63 @@ def footnote_tooltips(wd: WorkDir) -> dict[str, str]:
     return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
 
 
+def demote_ko_headings(ko: str, en_before: str, dropped: list[str]) -> str | None:
+    """en 재조립으로 헤더에서 빠진 섹션의 ko 헤더를 기울임 문단으로. 바꿀 게 없거나 못 맞추면 None.
+
+    번역은 en.md의 헤더를 순서대로 옮기므로 재조립 전 en의 i번째 헤더 = ko의 i번째 헤더다.
+    빠진 헤더(dropped, 문서 순서의 제목들)를 재조립 전 en 헤더에서 차례로 찾아 그 자리를 ko에서 바꾼다.
+    헤더 수가 다르거나(손으로 고친 번역 등) 제목을 못 찾으면 자리를 믿을 수 없어 건드리지 않는다.
+    """
+    from md4paper.structure import build, numbering
+
+    en_heads, ko_heads = build.parse_headings(en_before), build.parse_headings(ko)
+    if not dropped or len(en_heads) != len(ko_heads):
+        return None
+    idx, k = [], 0
+    for text in dropped:
+        while k < len(en_heads) and en_heads[k][2] != build.clean_heading_text(text):
+            k += 1
+        if k == len(en_heads):
+            return None
+        idx.append(k)
+        k += 1
+    lines = ko.splitlines()
+    for i in idx:
+        ln, _, text = ko_heads[i]
+        label, rest = numbering.split_front_matter_label(text)
+        if not rest and ":" in text[:40]:  # 번역된 라벨('CCS 개념: · …')은 영어 라벨 사전에 없다
+            label, _, rest = text.partition(":")
+            label, rest = label + ":", rest.strip()
+        lines[ln] = f"*{label}* {rest}" if rest else f"*{text}*"
+    return "\n".join(lines) + ("\n" if ko.endswith("\n") else "")
+
+
 class UIController:
     """paper.md4/ 작업 디렉토리 위의 리뷰 상태."""
 
     def __init__(self, wd: WorkDir) -> None:
         self.wd = wd
-        before = wd.sections_yaml.read_text(encoding="utf-8") if wd.sections_yaml.exists() else None
         self.manifest: Manifest = manifest_io.load(wd)
-        # load가 옛 매니페스트를 고쳐 썼으면(앞부분 라벨 → 기울임 등) en.md도 맞춘다 — 손으로 고친 en.md는 그대로
-        if (before is not None and wd.raw_md.exists() and not self.has_manual_edit()
-                and wd.sections_yaml.read_text(encoding="utf-8") != before):
+        # load가 옛 매니페스트를 고쳐 썼으면(앞부분 라벨 → 기울임 등) en.md도 맞춘다 — 손으로 고친 en.md는 그대로.
+        # yaml이 바뀌었는지가 아니라 'en.md에 아직 남은 헤더가 매니페스트에선 헤더가 아닌지'로 본다:
+        # 고친 yaml만 저장되고 재조립 없이 끝난 논문(다른 경로의 load)도 잡도록.
+        old_map = self.section_map()
+        not_head = {s.id for s in self.manifest.sections if not isinstance(s.level, int)}
+        if (wd.raw_md.exists() and not self.has_manual_edit()
+                and any(e.get("id") in not_head for e in old_map)):
             from md4paper import pipeline
 
-            pipeline.run_assemble(wd)
+            en_before = self.en_markdown()
+            pipeline.run_assemble(wd, force=True)
+            # 번역은 그대로 두되 en에서 빠진 헤더(라벨)는 ko에서도 같은 자리를 기울임 문단으로 —
+            # 헤더 수가 어긋나면 원문·번역 나란히 보기(align_rows)가 섹션 짝을 잃는다
+            ko = self.ko_markdown()
+            if ko and not self.has_manual_edit_ko():
+                new_ids = {e["id"] for e in self.section_map()}
+                dropped = [e["text"] for e in old_map if e.get("id") not in new_ids]
+                patched = demote_ko_headings(ko, en_before, dropped)
+                if patched is not None:
+                    self._write_atomic(wd.ko_md, patched)
 
     # --- 섹션 편집 ---
     def section(self, sid: str):

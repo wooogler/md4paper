@@ -831,3 +831,46 @@ def test_formula_fix_rekeys_cache_with_effective_glossary(tmp_path, _coll_config
     res = c.apply_formula("formula-01", "a - b", "display")
     assert res["ko"] and res["cache_moved"] >= 1
     assert c.stale_sections() == set()
+
+
+def test_opening_old_manifest_demotes_matching_ko_headings(tmp_path):
+    """en에서 빠진 라벨 헤더는 ko의 같은 자리도 기울임 문단으로 — 원문·번역 헤더 수가 맞게."""
+    from md4paper.assemble import render
+    from md4paper.review import manifest as manifest_io
+    from md4paper.structure import build
+
+    wd = WorkDir(tmp_path / "p.md4")
+    wd.ensure()
+    raw = ("# A Paper\n\n## Abstract\n\nText.\n\n## CCS Concepts\n\n· HCI.\n\n## Keywords\n\nwriting\n\n"
+           "# 1 Introduction\n\nBody.\n")
+    wd.raw_md.write_text(raw, encoding="utf-8")
+    m = build.build(raw, wd)
+    for s in m.sections:
+        if s.text in ("CCS Concepts", "Keywords"):
+            s.level = s.auto_level = 1  # 옛 build 결과
+    manifest_io.save(m, wd)
+    render.assemble(raw, m, wd)
+    wd.ko_md.write_text("# 논문\n\n# 초록\n\n글.\n\n# CCS 개념\n\n· HCI.\n\n# 키워드\n\n글쓰기\n\n"
+                        "```\n# 코드 속 주석\n```\n\n# 1 서론\n\n본문.\n", encoding="utf-8")
+    manifest_io.load(wd)  # 다른 경로가 yaml만 고쳐 쓰고 재조립은 안 한 상태
+
+    UIController(wd)
+    ko = wd.ko_md.read_text(encoding="utf-8")
+    assert "*CCS 개념*\n\n· HCI." in ko and "*키워드*\n\n글쓰기" in ko
+    assert "# 초록" in ko and "# 1 서론" in ko and "# 코드 속 주석" in ko
+    from md4paper.ui.app import align_rows  # noqa: PLC0415 — nicegui 필요
+
+    assert align_rows(wd.en_md.read_text(encoding="utf-8"), ko) is not None
+
+
+def test_demote_ko_headings_skips_when_counts_differ():
+    from md4paper.ui.controller import demote_ko_headings
+
+    en = "# Abstract\n\nText.\n\n# Keywords\n\nwriting\n"
+    ko = "# 초록\n\n글.\n\n# 키워드\n\n글쓰기\n"
+    assert demote_ko_headings(ko, en, ["Keywords"]) == "# 초록\n\n글.\n\n*키워드*\n\n글쓰기\n"
+    assert demote_ko_headings(ko + "\n# 더\n", en, ["Keywords"]) is None  # 헤더 수가 달라 자리를 못 믿음
+    assert demote_ko_headings(ko, en, ["CCS Concepts"]) is None  # 빠진 헤더를 en에서 못 찾음
+    assert demote_ko_headings(ko, en, []) is None  # 바뀐 게 없음
+    assert demote_ko_headings("# 초록\n\n# CCS 개념: · HCI\n", "# Abstract\n\n# CCS Concepts: · HCI\n",
+                              ["CCS Concepts: · HCI"]) == "# 초록\n\n*CCS 개념:* · HCI\n"
