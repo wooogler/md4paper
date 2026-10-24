@@ -1377,7 +1377,7 @@ def phone_push_cmd(workdirs: tuple[Path, ...], project_ref: str | None, to_dir: 
             raise
         raise click.ClickException(str(e)) from e
     click.echo(f"새로 올림 {s['uploaded']}편 · 그대로 {s['skipped']}편 · 지움 {s['removed']}편 "
-               f"({s['bytes'] / 1e6:.1f}MB) → {target}")
+               f"({s['bytes'] / 1e6:.1f}MB) · 폰 메모 기록 {s['merged']}개 합침 · 메모 파일 {s['notes']}개 올림 → {target}")
 
 
 @phone_group.command("connect")

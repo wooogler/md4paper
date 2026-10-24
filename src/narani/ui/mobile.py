@@ -549,19 +549,39 @@ CORE_JS = r"""
       openSheet(label, [para(md4T('이 문단은 문장 짝을 맞추지 못했어요. 문단째로 대조해 보세요.'), 'more')], [peekButton(row)]);
       return;
     }
-    // 방금 감쌌으면 e.target은 감싸기 전 노드다 — 손가락 아래를 다시 본다
-    var under = doc.elementFromPoint(e.clientX, e.clientY);
-    var sp = under && under.closest ? under.closest('.sent') : null;
-    if (!sp || !cell.contains(sp)){ clearSent(); closeSheet(); return; }
-    var pi = sp.getAttribute('data-pi'), key = row.id + ':' + pi;
+    var pi = sentAt(e, cell, pr, side);
+    if (pi === null){ clearSent(); closeSheet(); return; }
+    var key = row.id + ':' + pi;
     clearSent();
     if (tapped === key){ closeSheet(); return; }
     [].forEach.call(row.querySelectorAll('.sent[data-pi="' + pi + '"]'), function(s){ s.classList.add('on'); });
-    if (bothVisible(row)){ tapped = null; closeSheet(); return; }   // 양쪽이 다 보이면 짝 표시로 충분
-    var txt = sentText(pr, other, +pi);
-    openSheet(label, [para(txt || md4T('(짝이 되는 문장이 없어요 — 번역에서 합쳐지거나 빠진 문장)'), txt ? '' : 'more')],
-              [peekButton(row)]);
+    // 쓰는 쪽이 문장에 붙일 동작(폰 리더의 하이라이트·메모)을 줄 수 있다 — {nodes, buttons}
+    var acts = typeof sentenceActs === 'function' ? sentenceActs(row, +pi, pr, side) : null;
+    if (bothVisible(row) && !acts){ tapped = null; closeSheet(); return; }   // 양쪽이 다 보이면 짝 표시로 충분
+    var nodes = [];
+    if (!bothVisible(row)){
+      var txt = sentText(pr, other, +pi);
+      nodes.push(para(txt || md4T('(짝이 되는 문장이 없어요 — 번역에서 합쳐지거나 빠진 문장)'), txt ? '' : 'more'));
+    }
+    openSheet(bothVisible(row) ? '' : label, nodes.concat(acts ? acts.nodes : []), acts ? acts.buttons : []);
     tapped = key;
+  }
+  function sentAt(e, cell, pr, side){
+    // 방금 감쌌으면 e.target은 감싸기 전 노드다 — 손가락 아래를 다시 본다
+    var under = doc.elementFromPoint(e.clientX, e.clientY);
+    var sp = under && under.closest ? under.closest('.sent') : null;
+    if (sp && cell.contains(sp)) return sp.getAttribute('data-pi');
+    // 못 찾으면 글자 위치로 — 누른 자리의 오프셋을 품은 문장
+    var r = doc.caretRangeFromPoint ? doc.caretRangeFromPoint(e.clientX, e.clientY) : null;
+    if (!r || !cell.contains(r.startContainer)) return null;
+    var pre = doc.createRange(); pre.selectNodeContents(cell);
+    try { pre.setEnd(r.startContainer, r.startOffset); } catch (err) { return null; }
+    var off = pre.toString().length, list = pr[side], i, k;
+    for (i = 0; i < pr.pairs.length; i++){
+      var idx = pr.pairs[i][side === 'en' ? 0 : 1];
+      for (k = 0; k < idx.length; k++) if (list[idx[k]].s <= off && off < list[idx[k]].e) return String(i);
+    }
+    return null;
   }
 
   // ---- 인용 · 각주 ----

@@ -141,3 +141,36 @@ def test_preview_server_serves_app_and_data(tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_preview_server_accepts_phone_records_only(tmp_path):
+    store_dir = tmp_path / "store"
+    store_dir.mkdir()
+    srv, _th = web.serve_in_background(store_dir)
+    base = f"http://127.0.0.1:{srv.server_address[1]}/data/"
+
+    def put(name: str, body: bytes) -> int:
+        req = urllib.request.Request(base + name, data=body, method="PUT",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    try:
+        assert put("mobile/abc.json", b'{"ops": []}') == 204
+        assert (store_dir / "mobile" / "abc.json").read_bytes() == b'{"ops": []}'
+        assert put("index.json", b"{}") == 403          # 데스크톱이 쓰는 파일은 못 고친다
+        assert put("mobile/../index.json", b"{}") == 403
+        assert put("mobile/bad.json", b"not json") == 400
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_phone_app_has_notes_and_mobile_html_does_not():
+    js = web.site_files(local=True)["app.js"][0].decode()
+    assert "function sentenceActs" in js and "function notesOpen" in js
+    from narani.ui import mobile
+
+    assert "function sentenceActs" not in mobile._JS  # 한 장 HTML은 저장할 곳이 없어 하이라이트를 받지 않는다
