@@ -29,6 +29,7 @@ from md4paper.ui import mobile, sentpair
 APP_NAME = "Narani"
 
 _PWA_CSS = """
+.top button, .seg label { white-space: nowrap; }
 .lib-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 6px; color: var(--muted);
   font-size: .8em; line-height: 1.4; }
 .lib-bar .grow { flex: 1; min-width: 12em; }
