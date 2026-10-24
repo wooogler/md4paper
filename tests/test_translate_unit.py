@@ -1,9 +1,9 @@
 """translate 단위 테스트 — 청킹/보호, 검증, 문체, 시스템 프롬프트, 병기 후처리, 유닛화."""
 
-from md4paper.ir import GlossaryEntry, GlossaryList
-from md4paper.translate import chunker, engine, glossary, postprocess
-from md4paper.translate.style import style_instruction
-from md4paper.translate.validate import validate
+from narani.ir import GlossaryEntry, GlossaryList
+from narani.translate import chunker, engine, glossary, postprocess
+from narani.translate.style import style_instruction
+from narani.translate.validate import validate
 
 
 def test_split_by_paragraphs_reassembles():
@@ -56,7 +56,7 @@ def test_glossary_dedupe_fills_empty_korean():
 
 
 def test_glossary_save_load_merges_case_variants(tmp_path):
-    from md4paper.workdir import WorkDir
+    from narani.workdir import WorkDir
 
     wd = WorkDir(tmp_path / "p.md4")
     glossary.save(GlossaryList(entries=[
@@ -220,7 +220,7 @@ def test_retry_names_dropped_sentinel_and_its_place():
     실측: 문장 중간 인용을 한국어 어순으로 옮기며 흘리는데, 개수만 알려 준 재시도는 같은 곳을
     또 흘려 섹션 전체가 영어로 남았다 (Peerception 4.2.1).
     """
-    from md4paper.llm.base import FakeProvider
+    from narani.llm.base import FakeProvider
 
     systems: list[str] = []
 
@@ -237,7 +237,7 @@ def test_retry_names_dropped_sentinel_and_its_place():
 
 
 def engine_fake_dropping_one_sentinel():
-    from md4paper.llm.base import FakeProvider
+    from narani.llm.base import FakeProvider
 
     return FakeProvider(  # 두 번째 센티넬을 흘리는 모델
         complete_fn=lambda system, user: user.replace("⟦MD4_1⟧", "", 1),

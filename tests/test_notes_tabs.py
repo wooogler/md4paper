@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from md4paper import library, notes
-from md4paper.ui import annotations
-from md4paper.workdir import WorkDir
+from narani import library, notes
+from narani.ui import annotations
+from narani.workdir import WorkDir
 
 
 def _wd(tmp_path) -> WorkDir:

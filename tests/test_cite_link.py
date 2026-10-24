@@ -1,7 +1,7 @@
 """본문 인용 탐지·치환 테스트 — 마스킹, 범위 바운드, 스타일."""
 
-from md4paper.cite import link
-from md4paper.ir import RefEntry
+from narani.cite import link
+from narani.ir import RefEntry
 
 REFS = [
     RefEntry(label="1", authors=["Ashish Vaswani", "Noam Shazeer", "Niki Parmar"], year=2017,

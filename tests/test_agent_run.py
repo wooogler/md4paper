@@ -14,12 +14,12 @@ pytest.importorskip("pydantic_ai", reason="agent 의존성 미설치")
 from agent_support import Registry, item, make_wd, scripted_model, tool_returns, write_notes  # noqa: E402
 from pydantic_ai import DeferredToolResults, RunContext, UsageLimits  # noqa: E402
 
-from md4paper import config  # noqa: E402
-from md4paper.llm.base import Usage, cost_usd  # noqa: E402
-from md4paper.ui.agent import retrieval, sessions  # noqa: E402
-from md4paper.ui.agent.agent import make_agent, run_turn  # noqa: E402
-from md4paper.ui.agent.context import ScreenContext  # noqa: E402
-from md4paper.ui.agent.tools import Deps, review_url  # noqa: E402
+from narani import config  # noqa: E402
+from narani.llm.base import Usage, cost_usd  # noqa: E402
+from narani.ui.agent import retrieval, sessions  # noqa: E402
+from narani.ui.agent.agent import make_agent, run_turn  # noqa: E402
+from narani.ui.agent.context import ScreenContext  # noqa: E402
+from narani.ui.agent.tools import Deps, review_url  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -204,7 +204,7 @@ def test_instructions_carry_screen_context_and_memory(tmp_path):
          "selection": {"side": "en", "row": 3, "quote": "We interviewed 18 instructors"}})
     _run(agent, sessions.create(), "이 문장 설명해 줘", deps)
     ins = seen[0].instructions
-    assert "md4paper" in ins and "[[r12]]" in ins            # 고정 지시문
+    assert "Narani" in ins and "[[r12]]" in ins            # 고정 지시문
     assert "HCI 연구자" in ins                               # memory.md
     assert "We interviewed 18 instructors" in ins and "현재 화면" in ins
     names = {t.name for t in seen[0].function_tools}
@@ -259,9 +259,9 @@ def test_list_papers_header_counts_whole_library(tmp_path):
     """목록을 잘라 보여도 머리에 전체·조건·보인 편수와 컬렉션별 편수가 있다 (줄 수로 세지 않게)."""
     from types import SimpleNamespace
 
-    from md4paper import projects
-    from md4paper.ui.agent.tools import list_papers
-    from md4paper.workdir import set_projects
+    from narani import projects
+    from narani.ui.agent.tools import list_papers
+    from narani.workdir import set_projects
 
     ws = tmp_path / "ws"
     wds = [make_wd(ws, f"p{i}", title=f"Paper {i}") for i in range(5)]

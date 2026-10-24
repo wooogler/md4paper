@@ -1,6 +1,6 @@
 """재조립 때 직접 고친 en.md 살리기 — 3-way merge (§assemble/merge)."""
 
-from md4paper.assemble.merge import line_map, merge3
+from narani.assemble.merge import line_map, merge3
 
 BASE = """# Title
 

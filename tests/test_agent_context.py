@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("pydantic_ai", reason="agent 의존성 미설치")
 
-from md4paper.ui.agent.context import PROMPT_MAX, QUOTE_MAX, ScreenContext, to_prompt  # noqa: E402
+from narani.ui.agent.context import PROMPT_MAX, QUOTE_MAX, ScreenContext, to_prompt  # noqa: E402
 
 
 def test_empty_context_gives_empty_prompt():

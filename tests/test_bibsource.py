@@ -11,8 +11,8 @@ import json
 
 import pytest
 
-from md4paper import bibsource, bibtex, library, projects
-from md4paper.workdir import WorkDir
+from narani import bibsource, bibtex, library, projects
+from narani.workdir import WorkDir
 
 # 실측 사례 — 단어 하나(Saudi)만 다른 논문. 유사도 0.9595로 0.90 게이트를 통과한다.
 _OURS = "The Effectiveness of Using Grammarly to Improve Students' Writing Skills"
@@ -420,7 +420,7 @@ def test_a_broken_cache_is_ignored_rather_than_crashing(wd):
 
 def test_enrichment_is_scoped_to_the_selected_project(tmp_path, monkeypatch):
     """한 번에 한 묶음을 손본다 — 전체를 훑으면 예전 프로젝트까지 API를 두드리게 된다."""
-    from md4paper import enrich, projects
+    from narani import enrich, projects
 
     ws = tmp_path / "ws"
     mine = projects.create("지금 쓰는 것")["id"]
@@ -440,7 +440,7 @@ def test_enrichment_is_scoped_to_the_selected_project(tmp_path, monkeypatch):
 
 def test_stopping_happens_between_papers_and_keeps_what_was_done(tmp_path, monkeypatch):
     """논문 하나의 중간에서 끊으면 반쯤 보강된 논문이 남는다 — 경계에서만 멈춘다."""
-    from md4paper import enrich
+    from narani import enrich
 
     seen = []
 
@@ -510,7 +510,7 @@ def test_a_source_that_is_down_does_not_block_the_others():
 
 def test_bib_lookup_is_on_by_default_and_can_be_set_per_project():
     """변환 직후 보강은 기본 켜짐 — 꺼 두면 .bib이 부실한 걸 알아채기 어렵다."""
-    from md4paper import config, projects
+    from narani import config, projects
 
     assert config.resolve_bib_lookup() is True
     pid = projects.create("느린 회선")["id"]
@@ -528,7 +528,7 @@ def test_bib_lookup_is_on_by_default_and_can_be_set_per_project():
 
 def test_the_convert_hook_runs_before_the_bib_is_written(tmp_path, monkeypatch):
     """훅이 auto_export보다 먼저 돌아야 논문을 올린 그 시점의 .bib이 이미 정확하다."""
-    from md4paper.ui import app as ui_app
+    from narani.ui import app as ui_app
 
     root = tmp_path / "Vault"
     pid = projects.create("서베이", str(root))["id"]
@@ -542,10 +542,10 @@ def test_the_convert_hook_runs_before_the_bib_is_written(tmp_path, monkeypatch):
 
     # boost_workdir 자리에 가짜 출판 기록을 놓는다 (네트워크 없이 순서만 확인)
     def fake_boost(wd, **kw):  # noqa: ANN001, ANN003, ARG001
-        from md4paper import bibsource
+        from narani import bibsource
         return bibsource.update_workdir(wd, client=_flower_client())
 
-    monkeypatch.setattr("md4paper.enrich.boost_workdir", fake_boost)
+    monkeypatch.setattr("narani.enrich.boost_workdir", fake_boost)
 
     assert ui_app._auto_bibsource(work)["year"] == 1981
     library.auto_export(work)
@@ -556,7 +556,7 @@ def test_the_convert_hook_runs_before_the_bib_is_written(tmp_path, monkeypatch):
 
 
 def test_the_convert_hook_is_skipped_when_the_project_turned_it_off(tmp_path, monkeypatch):
-    from md4paper.ui import app as ui_app
+    from narani.ui import app as ui_app
 
     pid = projects.create("느린 회선", str(tmp_path / "V"))["id"]
     projects.set_setting(pid, "bib_lookup", False)
@@ -567,13 +567,13 @@ def test_the_convert_hook_is_skipped_when_the_project_turned_it_off(tmp_path, mo
     def boom(wd, **kw):  # noqa: ANN001, ANN003, ARG001
         raise AssertionError("꺼져 있는데 네트워크를 썼다")
 
-    monkeypatch.setattr("md4paper.enrich.boost_workdir", boom)
+    monkeypatch.setattr("narani.enrich.boost_workdir", boom)
     assert ui_app._auto_bibsource(work) == {}
 
 
 def test_a_failing_lookup_never_fails_the_conversion(tmp_path, monkeypatch):
     """네트워크가 없어도 변환은 되어야 한다 — 훅은 조용히 넘어간다."""
-    from md4paper.ui import app as ui_app
+    from narani.ui import app as ui_app
 
     work = WorkDir(tmp_path / "p" / "x.md4")
     work.ensure()
@@ -581,5 +581,5 @@ def test_a_failing_lookup_never_fails_the_conversion(tmp_path, monkeypatch):
     def boom(wd, **kw):  # noqa: ANN001, ANN003, ARG001
         raise OSError("네트워크 없음")
 
-    monkeypatch.setattr("md4paper.enrich.boost_workdir", boom)
+    monkeypatch.setattr("narani.enrich.boost_workdir", boom)
     assert ui_app._auto_bibsource(work) == {}

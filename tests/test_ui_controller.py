@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline
-from md4paper.ir import Flavor
-from md4paper.ui.controller import UIController
-from md4paper.workdir import WorkDir
+from narani import pipeline
+from narani.ir import Flavor
+from narani.ui.controller import UIController
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 
@@ -100,8 +100,8 @@ def test_no_pdf_for_markdown_source(ctrl):
 
 
 def _fake_gloss():
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.llm import FakeProvider
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.llm import FakeProvider
 
     gl = GlossaryList(entries=[GlossaryEntry(term="attention", korean="어텐션", policy="transliterate")])
     return FakeProvider(complete_fn=lambda s, u: u, parse_fn=lambda s, u, sc: gl, model="gpt-5.6-luna")
@@ -116,7 +116,7 @@ def test_glossary_generate_and_load(ctrl):
 
 
 def test_glossary_save_edit(ctrl):
-    from md4paper.ir import GlossaryEntry
+    from narani.ir import GlossaryEntry
 
     ctrl.save_glossary([GlossaryEntry(term="encoder", korean="인코더", policy="translate")])
     loaded = ctrl.glossary_entries()
@@ -124,7 +124,7 @@ def test_glossary_save_edit(ctrl):
 
 
 def test_is_dense_section():
-    from md4paper.translate.context import _is_dense_section
+    from narani.translate.context import _is_dense_section
 
     assert _is_dense_section("Abstract")
     assert _is_dense_section("1 Introduction")
@@ -134,7 +134,7 @@ def test_is_dense_section():
 
 
 def test_glossary_source_has_abstract_full_and_titles(ctrl):
-    from md4paper.translate import context
+    from narani.translate import context
 
     src = context.extract_glossary_source(ctrl.wd, ctrl.manifest)
     assert "## Abstract" in src
@@ -144,9 +144,9 @@ def test_glossary_source_has_abstract_full_and_titles(ctrl):
 
 
 def test_glossary_extend_excludes_existing():
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.llm import FakeProvider
-    from md4paper.translate import glossary
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.llm import FakeProvider
+    from narani.translate import glossary
 
     returned = GlossaryList(entries=[
         GlossaryEntry(term="attention", korean="어텐션", policy="transliterate"),
@@ -158,8 +158,8 @@ def test_glossary_extend_excludes_existing():
 
 
 def test_new_terms_from_selected(ctrl):
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.llm import FakeProvider
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.llm import FakeProvider
 
     ctrl.set_all_translate(False)
     assert ctrl.selected_sections_text() == ""  # 선택 없으면 빈 텍스트
@@ -192,9 +192,9 @@ def test_bulk_zip_combines_workdirs(ctrl, tmp_path):
     import io
     import zipfile
 
-    from md4paper import pipeline
-    from md4paper.ui.controller import bulk_zip
-    from md4paper.workdir import WorkDir
+    from narani import pipeline
+    from narani.ui.controller import bulk_zip
+    from narani.workdir import WorkDir
 
     ctrl.wd.out_images.mkdir(parents=True, exist_ok=True)
     (ctrl.wd.out_images / "figure-1.png").write_bytes(b"\x89PNG\r\n\x1a\n0")
@@ -204,7 +204,7 @@ def test_bulk_zip_combines_workdirs(ctrl, tmp_path):
     pipeline.convert(CORPUS / "sample_arxiv.md", wd2)
 
     name, data = bulk_zip([ctrl.wd.root, wd2.root], "en")
-    assert "md4paper-2" in name  # 2편
+    assert "narani-2" in name  # 2편
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         names = z.namelist()
     tops = {n.split("/")[0] for n in names}
@@ -240,13 +240,13 @@ def test_translate_headers_setting(ctrl):
 
 
 def test_drop_in_level_options():
-    from md4paper.ui.controller import LEVEL_OPTIONS
+    from narani.ui.controller import LEVEL_OPTIONS
 
     assert "drop" in LEVEL_OPTIONS
 
 
 def test_served_markdown_rewrites_all_images():
-    from md4paper.ui.app import served_markdown
+    from narani.ui.app import served_markdown
 
     md = (
         "![a](images/fig-01.jpeg)\n"
@@ -266,7 +266,7 @@ def test_served_markdown_hints_hidpi_width(tmp_path):
     """dpi가 적힌 고해상도 그림만 예전 표시 폭(144dpi 기준) 힌트를 받는다."""
     from PIL import Image
 
-    from md4paper.ui.app import served_markdown
+    from narani.ui.app import served_markdown
 
     Image.new("RGB", (800, 400), "white").save(tmp_path / "hi.png", dpi=(288, 288))
     Image.new("RGB", (400, 200), "white").save(tmp_path / "old.png")  # 예전 그림 — dpi 없음
@@ -276,8 +276,8 @@ def test_served_markdown_hints_hidpi_width(tmp_path):
     assert "](/wdimages/t/missing.png)" in served_markdown("![c](missing.png)", "t", tmp_path)
 
 def test_format_reference_one_line():
-    from md4paper.ir import RefEntry
-    from md4paper.ui.controller import _format_reference
+    from narani.ir import RefEntry
+    from narani.ui.controller import _format_reference
 
     r = RefEntry(label="7", authors=["Ashish Vaswani", "Noam Shazeer"], year=2017,
                  title="Attention Is All You Need.", venue="NeurIPS", arxiv_id="1706.03762")
@@ -291,10 +291,10 @@ def test_format_reference_one_line():
 
 
 def test_citation_tooltips_structure(ctrl):
-    from md4paper.cite.apply import load_cached_refs
+    from narani.cite.apply import load_cached_refs
 
     # 파싱된 참고문헌 캐시를 심어 툴팁 사전이 {text, url} 형태로 나오는지 확인
-    from md4paper.ir import RefEntry
+    from narani.ir import RefEntry
     import json
     ctrl.wd.cite.mkdir(parents=True, exist_ok=True)
     refs = [RefEntry(label="7", authors=["A B"], year=2017, title="T", venue="V", arxiv_id="1706.03762")]
@@ -308,7 +308,7 @@ def test_citation_tooltips_structure(ctrl):
 
 
 def test_cite_tips_js_serializes_and_escapes():
-    from md4paper.ui.app import cite_tips_js
+    from narani.ui.app import cite_tips_js
 
     js = cite_tips_js({"54": {"text": 'Subramonyam et al. (2025). "Prototyping".', "url": "https://doi.org/x"}})
     assert js.startswith("window.__mdCiteTips = ")
@@ -320,7 +320,7 @@ def test_cite_tips_js_serializes_and_escapes():
 
 def test_upload_save_and_convert(tmp_path):
     # 웹 UI 업로드 핸들러가 쓰는 헬퍼 (바이트 → 저장 → 변환)
-    from md4paper.ui.app import save_and_convert
+    from narani.ui.app import save_and_convert
 
     data = (CORPUS / "sample_arxiv.md").read_bytes()
     wd = save_and_convert(data, "sample_arxiv.md", tmp_path / "uploads", "docling", "obsidian")
@@ -411,8 +411,8 @@ def test_assembled_markdown_matches_run_assemble(ctrl):
     """편집을 합칠 때의 공통 조상(base)은 run_assemble이 실제로 쓰는 en.md와 같아야 한다 — 인용 링크까지."""
     import json
 
-    from md4paper.ir import RefEntry
-    from md4paper.review import manifest as manifest_io
+    from narani.ir import RefEntry
+    from narani.review import manifest as manifest_io
 
     ctrl.wd.cite.mkdir(parents=True, exist_ok=True)
     refs = [RefEntry(label="1", authors=["A B"], year=2017, title="T", venue="V")]
@@ -426,8 +426,8 @@ def test_author_parts_change_keeps_edit_and_applies(tmp_path):
     """raw.md를 먼저 바꾸는 변경(저자 표기)도 편집을 살리고 새 표기를 반영한다 — base를 바꾸기 전에 떠 둔다."""
     import json
 
-    from md4paper.extract.front_matter import _render_authors_detail
-    from md4paper.ir import AuthorEntry
+    from narani.extract.front_matter import _render_authors_detail
+    from narani.ir import AuthorEntry
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.extract.mkdir(parents=True)
@@ -449,7 +449,7 @@ def test_rerender_reflects_level_without_yaml_save(ctrl):
     """rerender는 메모리 manifest로 en.md만 갱신 (yaml 저장·학습 없이 — 라이브 프리뷰)."""
     sid = next(s.id for s in ctrl.manifest.sections if s.text == "2 Background")
     yaml_before = ctrl.wd.sections_yaml.read_text(encoding="utf-8")
-    prefs_path = __import__("md4paper.prefs", fromlist=["PREFS_PATH"]).PREFS_PATH
+    prefs_path = __import__("narani.prefs", fromlist=["PREFS_PATH"]).PREFS_PATH
 
     ctrl.set_level(sid, 3)
     ctrl.rerender()
@@ -459,7 +459,7 @@ def test_rerender_reflects_level_without_yaml_save(ctrl):
 
 
 def test_section_map_anchors_align_with_headings(ctrl):
-    from md4paper.ui.app import anchored_markdown
+    from narani.ui.app import anchored_markdown
 
     smap = ctrl.section_map()
     out = anchored_markdown(ctrl.en_markdown(), smap)
@@ -479,7 +479,7 @@ def test_anchors_do_not_shift_source_line_numbers(ctrl):
     """
     import re
 
-    from md4paper.ui.app import anchored_markdown
+    from narani.ui.app import anchored_markdown
 
     en = ctrl.en_markdown()
     out = anchored_markdown(en, ctrl.section_map(), None, jump=True)
@@ -531,9 +531,9 @@ def test_title_excluded_from_translate_tree_and_toggled_separately(ctrl):
 
 def test_translate_settings_persist_across_reload(tmp_path):
     """번역 설정·섹션 선택은 sections.yaml에 저장돼 새로고침(컨트롤러 재생성)해도 남는다."""
-    from md4paper import pipeline
-    from md4paper.ui.controller import UIController
-    from md4paper.workdir import WorkDir
+    from narani import pipeline
+    from narani.ui.controller import UIController
+    from narani.workdir import WorkDir
 
     corpus = Path(__file__).parent / "corpus" / "sample_arxiv.md"
     wd = WorkDir(tmp_path / "p.md4")
@@ -590,11 +590,11 @@ def test_set_author_parts_shifts_line_anchors(tmp_path):
     """
     import json
 
-    from md4paper import pipeline
-    from md4paper.extract.front_matter import _render_authors_detail
-    from md4paper.ir import AuthorEntry
-    from md4paper.ui.controller import UIController
-    from md4paper.workdir import WorkDir
+    from narani import pipeline
+    from narani.extract.front_matter import _render_authors_detail
+    from narani.ir import AuthorEntry
+    from narani.ui.controller import UIController
+    from narani.workdir import WorkDir
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.extract.mkdir(parents=True)
@@ -677,7 +677,7 @@ def test_reconvert_needs_the_source_pdf(ctrl):
 
 
 def test_extract_outdated_follows_recorded_version(ctrl):
-    from md4paper import extract
+    from narani import extract
 
     ctrl.wd.mark_done("extract", "h")  # 버전을 적기 전의 논문
     assert ctrl.extract_outdated()
@@ -686,7 +686,7 @@ def test_extract_outdated_follows_recorded_version(ctrl):
 
 
 def test_row_pages_matches_headings_by_title_not_count():
-    from md4paper.ui.app import row_pages
+    from narani.ui.app import row_pages
 
     rows = [("# Title", None, (1, "Title")), ("p", None, None), ("## 1 Intro", None, (2, "1 Intro")),
             ("## Stray heading", None, (2, "Stray heading")), ("## 2 Method", None, (2, "2 Method"))]
@@ -696,7 +696,7 @@ def test_row_pages_matches_headings_by_title_not_count():
 
 
 def test_section_pages_fills_missing_pages_from_pdf_text(ctrl, tmp_path, monkeypatch):
-    from md4paper import pdfio
+    from narani import pdfio
 
     _as_pdf_source(ctrl, tmp_path)
     secs = ctrl.manifest.sections
@@ -732,7 +732,7 @@ def test_save_notes_empty_removes_file(ctrl):
 
 def test_notes_event_text_only_accepts_own_editor():
     """'md4-notes' 핸들러는 창 단위로 쌓인다 — 이 편집기 id가 보낸 마크다운만 받아야 한다."""
-    from md4paper.ui.app import notes_event_text
+    from narani.ui.app import notes_event_text
 
     assert notes_event_text({"id": "c12", "md": "# 메모\n\n- [ ] 할 일\n"}, "c12") == "# 메모\n\n- [ ] 할 일\n"
     assert notes_event_text({"id": "c12", "md": ""}, "c12") == ""  # 다 지웠다 → 파일 삭제로 이어진다
@@ -744,7 +744,7 @@ def test_notes_event_text_only_accepts_own_editor():
 
 def test_notes_event_saves_through_controller(ctrl):
     """이벤트 → notes_event_text → save_notes 경로로 notes.md가 원자적으로 쓰인다."""
-    from md4paper.ui.app import notes_event_text
+    from narani.ui.app import notes_event_text
 
     md = notes_event_text({"id": "c3", "md": "한국어 메모 **굵게**\n"}, "c3")
     ctrl.save_notes(md)
@@ -752,7 +752,7 @@ def test_notes_event_saves_through_controller(ctrl):
 
 
 def test_notes_editor_js_embeds_content_safely():
-    from md4paper.ui.app import CREPE_URL, notes_editor_js
+    from narani.ui.app import CREPE_URL, notes_editor_js
 
     js = notes_editor_js("c7", '메모 "따옴표" </script>\n줄')
     assert '"c7"' in js and "new W.MilkdownCrepe" in js and "emitEvent('md4-notes'" in js
@@ -762,7 +762,7 @@ def test_notes_editor_js_embeds_content_safely():
 
 def test_notes_pick_compares_with_editor_baseline_not_file():
     """capture()·자동 저장이 쓸지 정하는 규칙 — 편집기를 얹을 때의 기준과 견준다."""
-    from md4paper.ui.app import notes_pick
+    from narani.ui.app import notes_pick
 
     mem = {"raw": "- 하나\n- 둘\n", "saved": None, "stamp": "x"}
     base = "* 하나\n* 둘\n"                       # Crepe가 얹으며 다시 쓴 모양
@@ -782,7 +782,7 @@ def test_notes_pick_compares_with_editor_baseline_not_file():
 
 
 def test_notes_editor_js_marks_ready_and_baseline():
-    from md4paper.ui.app import NOTES_CAPTURE_JS, notes_editor_js
+    from narani.ui.app import NOTES_CAPTURE_JS, notes_editor_js
 
     js = notes_editor_js("c7", "메모")
     assert "crepe.create().then(" in js and "__md4ready=true" in js and "__md4base=crepe.getMarkdown()" in js
@@ -792,7 +792,7 @@ def test_notes_editor_js_marks_ready_and_baseline():
 
 
 def test_save_notes_conflict_and_trash(ctrl):
-    from md4paper import notes
+    from narani import notes
 
     ctrl.save_notes("다른 창이 쓴 긴 메모 " * 20)
     _, st = notes.read_stamped(ctrl.wd, "메모")
@@ -805,9 +805,9 @@ def test_save_notes_conflict_and_trash(ctrl):
 
 def test_opening_old_manifest_reassembles_front_matter_labels(tmp_path):
     """옛 매니페스트(CCS Concepts가 제목 1)로 만든 논문을 열면 en.md도 바로 고쳐진다."""
-    from md4paper.assemble import render
-    from md4paper.review import manifest as manifest_io
-    from md4paper.structure import build
+    from narani.assemble import render
+    from narani.review import manifest as manifest_io
+    from narani.structure import build
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.ensure()
@@ -827,8 +827,8 @@ def test_opening_old_manifest_reassembles_front_matter_labels(tmp_path):
 
 def test_group_level_does_not_promote_front_matter_labels(tmp_path):
     """무번호 그룹을 일괄 '제목 1'로 해도 Keywords 라벨은 기울임 문단으로 남는다."""
-    from md4paper.review import manifest as manifest_io
-    from md4paper.structure import build
+    from narani.review import manifest as manifest_io
+    from narani.structure import build
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.ensure()
@@ -846,7 +846,7 @@ def test_group_level_does_not_promote_front_matter_labels(tmp_path):
 @pytest.fixture
 def _coll_config(tmp_path, monkeypatch):
     """컬렉션 용어집은 CONFIG_DIR/glossary에 쌓인다 — 테스트 사이로 새지 않게 tmp로."""
-    from md4paper import config, projects
+    from narani import config, projects
 
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / "cfg")
     (tmp_path / "cfg").mkdir()
@@ -854,9 +854,9 @@ def _coll_config(tmp_path, monkeypatch):
 
 
 def test_collection_and_effective_glossary(ctrl, _coll_config):
-    from md4paper import projects, workdir
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.translate import glossary
+    from narani import projects, workdir
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.translate import glossary
 
     ctrl.save_glossary([GlossaryEntry(term="encoder", korean="인코더"), GlossaryEntry(term="decoder", korean="디코더")])
     assert ctrl.collection_id() == "" and ctrl.collection_glossary() == []  # 미분류 — 컬렉션 없음
@@ -879,8 +879,8 @@ def test_formula_fix_rekeys_cache_with_effective_glossary(tmp_path, _coll_config
     """
     import json
 
-    from md4paper.ir import GlossaryEntry
-    from md4paper.llm import FakeProvider
+    from narani.ir import GlossaryEntry
+    from narani.llm import FakeProvider
 
     src = tmp_path / "paper.md"
     src.write_text("# A Paper\n\n## 1 Intro\n\nWe define the score.\n\n$$a + b \\tag{1}$$\n\nThen the rest.\n",
@@ -903,9 +903,9 @@ def test_formula_fix_rekeys_cache_with_effective_glossary(tmp_path, _coll_config
 
 def test_opening_old_manifest_demotes_matching_ko_headings(tmp_path):
     """en에서 빠진 라벨 헤더는 ko의 같은 자리도 기울임 문단으로 — 원문·번역 헤더 수가 맞게."""
-    from md4paper.assemble import render
-    from md4paper.review import manifest as manifest_io
-    from md4paper.structure import build
+    from narani.assemble import render
+    from narani.review import manifest as manifest_io
+    from narani.structure import build
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.ensure()
@@ -926,13 +926,13 @@ def test_opening_old_manifest_demotes_matching_ko_headings(tmp_path):
     ko = wd.ko_md.read_text(encoding="utf-8")
     assert "*CCS 개념*\n\n· HCI." in ko and "*키워드*\n\n글쓰기" in ko
     assert "# 초록" in ko and "# 1 서론" in ko and "# 코드 속 주석" in ko
-    from md4paper.ui.app import align_rows  # noqa: PLC0415 — nicegui 필요
+    from narani.ui.app import align_rows  # noqa: PLC0415 — nicegui 필요
 
     assert align_rows(wd.en_md.read_text(encoding="utf-8"), ko) is not None
 
 
 def test_demote_ko_headings_skips_when_counts_differ():
-    from md4paper.ui.controller import demote_ko_headings
+    from narani.ui.controller import demote_ko_headings
 
     en = "# Abstract\n\nText.\n\n# Keywords\n\nwriting\n"
     ko = "# 초록\n\n글.\n\n# 키워드\n\n글쓰기\n"
@@ -945,9 +945,9 @@ def test_demote_ko_headings_skips_when_counts_differ():
 
 
 def _dup_caption_paper(tmp_path):
-    from md4paper.assemble import render
-    from md4paper.review import manifest as manifest_io
-    from md4paper.structure import build
+    from narani.assemble import render
+    from narani.review import manifest as manifest_io
+    from narani.structure import build
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.ensure()
@@ -965,7 +965,7 @@ def _dup_caption_paper(tmp_path):
 
 def test_opening_paper_drops_duplicate_captions(tmp_path):
     """옛 논문을 열면 그림 앞의 중복 캡션이 raw·en·ko에서 함께 빠진다 — 다시 변환 없이, 번역 정렬 유지."""
-    from md4paper.structure import captions
+    from narani.structure import captions
 
     wd = _dup_caption_paper(tmp_path)
     en = wd.en_md.read_text(encoding="utf-8")
@@ -982,7 +982,7 @@ def test_opening_paper_drops_duplicate_captions(tmp_path):
     ko = wd.ko_md.read_text(encoding="utf-8")
     assert ko.count("Figure 1") == 2 and ko.index("![") < ko.index("보기")  # 그림 alt + 뒤 캡션만
     assert "# 2 Method" in wd.en_md.read_text(encoding="utf-8")  # 라인 앵커가 밀려 헤더 자리 그대로
-    from md4paper.ui.app import align_rows  # noqa: PLC0415 — nicegui 필요
+    from narani.ui.app import align_rows  # noqa: PLC0415 — nicegui 필요
 
     assert align_rows(wd.en_md.read_text(encoding="utf-8"), ko) is not None
 

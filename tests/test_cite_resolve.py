@@ -8,10 +8,10 @@ import re
 
 import pytest
 
-from md4paper import bibsource
-from md4paper.cite import resolve as cite_resolve
-from md4paper.ir import RefEntry
-from md4paper.workdir import WorkDir
+from narani import bibsource
+from narani.cite import resolve as cite_resolve
+from narani.ir import RefEntry
+from narani.workdir import WorkDir
 
 
 @pytest.fixture(autouse=True)

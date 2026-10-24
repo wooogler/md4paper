@@ -2,9 +2,9 @@
 
 import pytest
 
-from md4paper import pdfio
-from md4paper.extract import tounicode
-from md4paper.extract.tounicode import emit_cmap, glyph_text, parse_cmap
+from narani import pdfio
+from narani.extract import tounicode
+from narani.extract.tounicode import emit_cmap, glyph_text, parse_cmap
 
 # 실제 사례(CHI '27 투고본)의 ToUnicode 그대로: 합자 네 개가 <ffff>, 마지막만 정상
 BROKEN_CMAP = b"""/CIDInit /ProcSet findresource begin

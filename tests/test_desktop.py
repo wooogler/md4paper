@@ -15,7 +15,7 @@ pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
 
 from nicegui import ui  # noqa: E402
 
-from md4paper.ui import desktop  # noqa: E402
+from narani.ui import desktop  # noqa: E402
 
 
 class FakeWindow:
@@ -131,7 +131,7 @@ def test_choose_folder_uses_window_dialog_in_native_mode(tmp_path, monkeypatch):
 
 def test_choose_folder_falls_back_to_os_dialog(tmp_path, monkeypatch):
     """웹뷰 대화상자가 안 되면 osascript 등 OS 대화상자로 물러선다."""
-    from md4paper.ui import folder_dialog
+    from narani.ui import folder_dialog
 
     monkeypatch.setattr(desktop, "window", lambda: FakeWindow(error=True))
     monkeypatch.setattr(folder_dialog, "choose_folder", lambda title, initial: str(tmp_path))
@@ -163,7 +163,7 @@ def test_open_file_uses_system_opener(monkeypatch, tmp_path):
     import subprocess
     import sys
 
-    from md4paper.ui import desktop
+    from narani.ui import desktop
 
     calls = []
     monkeypatch.setattr(sys, "platform", "darwin")
@@ -180,7 +180,7 @@ def test_sibling_window_keeps_web_storage(monkeypatch):
     import sys
     import types
 
-    from md4paper.ui import window
+    from narani.ui import window
 
     calls = {}
     fake = types.SimpleNamespace(

@@ -20,19 +20,19 @@ from agent_support import Registry, make_wd, scripted_model, tool_returns  # noq
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from md4paper import config, pipeline, projects, workdir  # noqa: E402
-from md4paper.ir import GlossaryEntry, GlossaryList  # noqa: E402
-from md4paper.llm import FakeProvider  # noqa: E402
-from md4paper.translate import glossary  # noqa: E402
-from md4paper.ui.agent import retrieval, routes, sessions  # noqa: E402
-from md4paper.ui.agent.agent import SYSTEM, make_agent  # noqa: E402
-from md4paper.ui.agent.glossary_tools import (  # noqa: E402
+from narani import config, pipeline, projects, workdir  # noqa: E402
+from narani.ir import GlossaryEntry, GlossaryList  # noqa: E402
+from narani.llm import FakeProvider  # noqa: E402
+from narani.translate import glossary  # noqa: E402
+from narani.ui.agent import retrieval, routes, sessions  # noqa: E402
+from narani.ui.agent.agent import SYSTEM, make_agent  # noqa: E402
+from narani.ui.agent.glossary_tools import (  # noqa: E402
     glossary_conflicts,
     read_collection_glossary,
     translation_impact,
     write_collection_glossary,
 )
-from md4paper.ui.agent.tools import TOOLS, Deps, describe_call, token_of  # noqa: E402
+from narani.ui.agent.tools import TOOLS, Deps, describe_call, token_of  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -308,7 +308,7 @@ def test_tools_registered_and_system_mentions_them():
 
 def test_term_contexts_one_paper_and_collection(tmp_path):
     """용어가 쓰인 문장 — 한 논문(용어집 번역어로 표시, 행 인용 등록)과 컬렉션(논문마다 자기 번역어)."""
-    from md4paper.ui.agent.glossary_tools import term_contexts
+    from narani.ui.agent.glossary_tools import term_contexts
 
     ws = tmp_path / "ws"
     pid, wds = _library(ws)

@@ -1,6 +1,6 @@
 """내보내기 형식 변환 — universal/notion/obsidian."""
 
-from md4paper.export_format import to_export_target
+from narani.export_format import to_export_target
 
 CANON = (
     "# Title\n\n"
@@ -111,7 +111,7 @@ def test_ensures_blank_line_before_headings_and_captions():
 
 
 def test_block_spacing_keeps_multiline_quote_and_code_together():
-    from md4paper.export_format import _ensure_block_spacing
+    from narani.export_format import _ensure_block_spacing
 
     # 인용 여러 줄 연속은 붙여 둔다 + 코드 펜스 안은 안 건드린다
     md = "> line one\n> line two\n\n```\n## not a heading\ncode\n```\n"

@@ -5,8 +5,8 @@ import os
 
 import pytest
 
-from md4paper import preview
-from md4paper.workdir import WorkDir
+from narani import preview
+from narani.workdir import WorkDir
 
 ABS = ("We present a system that helps students revise essays with feedback from a language model. "
        "In a study with forty participants, the system improved revision quality while keeping "

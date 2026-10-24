@@ -3,9 +3,9 @@
 import pytest
 from pydantic import BaseModel
 
-from md4paper import config
-from md4paper.llm import FakeProvider, Usage, cost_usd, get_provider
-from md4paper.llm.base import PRICING
+from narani import config
+from narani.llm import FakeProvider, Usage, cost_usd, get_provider
+from narani.llm.base import PRICING
 
 
 class Out(BaseModel):

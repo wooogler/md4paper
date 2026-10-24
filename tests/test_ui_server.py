@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline
-from md4paper.workdir import WorkDir
+from narani import pipeline
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 
@@ -39,7 +39,7 @@ def _serve_and_get_many(args: list[str], port: int, paths: list[str]) -> list[st
     # pytest/nicegui 테스트 모드 env 제거 (하위 서버가 스크린테스트 모드로 오인하지 않도록)
     env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTEST", "NICEGUI"))}
     proc = subprocess.Popen(
-        [sys.executable, "-m", "md4paper.cli", "ui", *args, "--no-show", "--port", str(port)],
+        [sys.executable, "-m", "narani.cli", "ui", *args, "--no-show", "--port", str(port)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         env=env,
@@ -159,7 +159,7 @@ def test_ui_home_empty_workspace_says_where_it_is_looking(tmp_path):
 
 def test_home_preview_field_parsing():
     """미리보기 서지 칸 — 입력칸 글자 ↔ 저장 값 (서버 없이). 저자는 한 줄에 한 명, 연도는 숫자만."""
-    from md4paper.ui.home import field_text, parse_field
+    from narani.ui.home import field_text, parse_field
 
     assert field_text("authors", ["A Kim", " ", "B Lee"]) == ("A Kim, B Lee", "A Kim\nB Lee")
     assert parse_field("authors", "A Kim\n\n  B Lee  \r\n") == ["A Kim", "B Lee"]
@@ -173,7 +173,7 @@ def test_home_preview_field_parsing():
 
 def test_home_naming_hint_ignores_uniquified_folder():
     """같은 이름의 다른 논문 때문에 'X (2)'로 유일화된 폴더는 이미 규칙대로 — 힌트가 영영 남지 않게."""
-    from md4paper.ui.home import _same_base
+    from narani.ui.home import _same_base
 
     assert _same_base("2017_Attention_Vaswani", "2017_Attention_Vaswani")
     assert _same_base("2017_Attention_Vaswani (2)", "2017_Attention_Vaswani")

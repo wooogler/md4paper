@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from md4paper import figure_fix
-from md4paper.workdir import WorkDir
+from narani import figure_fix
+from narani.workdir import WorkDir
 
 pdfium = pytest.importorskip("pypdfium2")
 
@@ -107,7 +107,7 @@ def test_where_falls_back_to_template_matching(wd, monkeypatch):
 def test_picture_rect_from_docling_prov():
     from types import SimpleNamespace as NS
 
-    from md4paper.extract.docling_backend import _picture_rect
+    from narani.extract.docling_backend import _picture_rect
 
     box = NS(l=50.0, r=250.0, t=700.0, b=500.0, coord_origin="BOTTOMLEFT")
     pic = NS(prov=[NS(page_no=3, bbox=box)])

@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from md4paper.ui import spa
+from narani.ui import spa
 
 
 class _Client:

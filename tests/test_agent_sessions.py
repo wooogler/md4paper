@@ -20,7 +20,7 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 from pydantic_ai.usage import RunUsage  # noqa: E402
 
-from md4paper.ui.agent import sessions  # noqa: E402
+from narani.ui.agent import sessions  # noqa: E402
 
 
 @pytest.fixture(autouse=True)

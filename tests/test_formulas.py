@@ -10,10 +10,10 @@ import json
 import pytest
 from pydantic import BaseModel
 
-from md4paper import formulas, pdfio
-from md4paper.extract import formulas as regions
-from md4paper.llm.base import FakeProvider
-from md4paper.workdir import WorkDir
+from narani import formulas, pdfio
+from narani.extract import formulas as regions
+from narani.llm.base import FakeProvider
+from narani.workdir import WorkDir
 
 
 # --- 이스케이프 손상 복구 ---------------------------------------------------
@@ -201,7 +201,7 @@ def test_run_without_formulas_is_a_noop(tmp_path):
 
 
 def test_pipeline_skips_without_provider(tmp_path):
-    from md4paper import pipeline
+    from narani import pipeline
 
     wd = _wd_with_formula(tmp_path)
     assert pipeline.run_formulas(wd, provider=None)["skipped"] is True

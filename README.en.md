@@ -1,4 +1,6 @@
-# md4paper
+# Narani
+
+*Narani* — Korean for "side by side": the original and its translation next to each other, so you can read any paper in your own language.
 
 *English · [한국어](README.md)*
 
@@ -62,7 +64,7 @@ following in mind.
   share.** If you only use extraction (PDF → Markdown), no text leaves your machine.
 - **API charges are real.** Typically $0.03–0.14 per paper (→ [Cost](#cost--what-does-one-paper-run-you)),
   and the cost is entirely yours. Extraction alone costs nothing.
-- **API keys are stored in plaintext** (`~/.config/md4paper/config.toml`, mode 0600 on POSIX). On a
+- **API keys are stored in plaintext** (`~/.config/narani/config.toml`, mode 0600 on POSIX). On a
   shared computer, use environment variables instead of the config file.
 - **Bug reports are welcome, but no support is promised.** Issues and PRs get looked at when there
   is time.
@@ -87,24 +89,24 @@ following in mind.
 
 ### One-line install — icon and all (recommended)
 
-Paste this into a terminal and it handles uv, Python, md4paper, and the app icon in one go.
+Paste this into a terminal and it handles uv, Python, Narani, and the app icon in one go.
 
 **macOS / Linux**:
 ```bash
-curl -LsSf https://raw.githubusercontent.com/wooogler/md4paper/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/wooogler/narani/main/install.sh | sh
 ```
 
 **Windows** (PowerShell):
 ```powershell
-irm https://raw.githubusercontent.com/wooogler/md4paper/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/wooogler/narani/main/install.ps1 | iex
 ```
 
-When it finishes you get an **md4paper icon** in Launchpad / the Start menu. Click it to open
+When it finishes you get a **Narani icon** in Launchpad / the Start menu. Click it to open
 (→ [Open it as an app](#open-it-as-an-app--register-an-icon-optional)). Running the same line again
 updates to the latest version.
 
 - **What it does** — installs uv (a package manager that also manages Python) if you don't have it,
-  installs md4paper with `uv tool install`, and registers the icon with `md4paper app`. The scripts
+  installs narani with `uv tool install`, and registers the icon with `narani app`. The scripts
   are right here in the repo — [install.sh](install.sh) · [install.ps1](install.ps1) — so read them
   before you run them (piping an unknown script into a shell is something to be careful about in
   general).
@@ -112,7 +114,11 @@ updates to the latest version.
 - **Why a script and not an installer (.dmg/.exe)** — the app is **assembled on your machine**, so
   no code signing or notarization is needed, and you don't get macOS's "unidentified developer"
   warning or the Windows SmartScreen prompt. You also don't download a 1.5GB installer.
-- Uninstall: `md4paper app --remove && uv tool uninstall md4paper`
+- Uninstall: `narani app --remove && uv tool uninstall narani`
+- **Coming from md4paper?** That was this app's old name. The old app's built-in updater can't make the
+  jump, so run the install line above once. On first launch it moves `~/.config/md4paper` (keys, collections,
+  Drive connection) and `~/md4paper` (papers) to `~/.config/narani` and `~/narani`, and removes the old icon
+  and `md4paper` command.
 
 ### Manual install — if you already use uv, or want to change the code
 
@@ -134,43 +140,43 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 Check it: `uv --version`
 
-#### Step 2 — install md4paper and start the web UI
+#### Step 2 — install Narani and start the web UI
 
 ##### Option A: clone it (recommended for development)
 
 **Windows** (PowerShell):
 ```powershell
-git clone https://github.com/wooogler/md4paper.git
-cd md4paper
+git clone https://github.com/wooogler/narani.git
+cd narani
 uv sync --extra ui
-uv run md4paper ui
+uv run narani ui
 ```
 
 **macOS / Linux**:
 ```bash
-git clone https://github.com/wooogler/md4paper.git
-cd md4paper
+git clone https://github.com/wooogler/narani.git
+cd narani
 uv sync --extra ui
-uv run md4paper ui
+uv run narani ui
 ```
 
 `--extra ui` pulls in the web UI (NiceGUI). The first dependency download takes a few minutes.
-To check the install, run `uv run md4paper doctor`.
+To check the install, run `uv run narani doctor`.
 
 ##### Option B: run it without cloning
 
 **Windows** (PowerShell):
 ```powershell
-uvx --from "md4paper[ui] @ git+https://github.com/wooogler/md4paper" md4paper ui
+uvx --from "narani[ui] @ git+https://github.com/wooogler/narani" narani ui
 ```
 
 **macOS / Linux**:
 ```bash
-uvx --from 'md4paper[ui] @ git+https://github.com/wooogler/md4paper' md4paper ui
+uvx --from 'narani[ui] @ git+https://github.com/wooogler/narani' narani ui
 ```
 
 The first run fetches dependencies, so it takes a few minutes. With this method the default work
-folder is `~/md4paper/output` (`C:\Users\<user>\md4paper\output` on Windows).
+folder is `~/narani/output` (`C:\Users\<user>\narani\output` on Windows).
 
 ---
 
@@ -181,34 +187,34 @@ If you used the [one-line install](#one-line-install--icon-and-all-recommended),
 
 ```bash
 uv sync --extra ui --extra native   # add the app-window dependency (pywebview)
-uv run md4paper app                 # register the icon
+uv run narani app                 # register the icon
 ```
 
 | OS | What gets created | Where it opens from |
 |---|---|---|
-| macOS | `~/Applications/md4paper.app` | Launchpad · Spotlight · Finder · Dock |
-| Windows | `md4paper` in the Start menu (add `--desktop` for a desktop shortcut too) | Start menu |
-| Linux | `~/.local/share/applications/md4paper.desktop` | Application menu |
+| macOS | `~/Applications/Narani.app` | Launchpad · Spotlight · Finder · Dock |
+| Windows | `narani` in the Start menu (add `--desktop` for a desktop shortcut too) | Start menu |
+| Linux | `~/.local/share/applications/Narani.desktop` | Application menu |
 
 Clicking the icon opens a **standalone app window** rather than a browser tab — the screens and
 features are identical to the web UI. The server still binds to 127.0.0.1 only, and closing the
 window shuts the server down. To get the same window from a terminal, run
-`uv run md4paper ui --native` (or plain `md4paper ui` to open it in a browser).
+`uv run narani ui --native` (or plain `narani ui` to open it in a browser).
 
 - **Downloading zips works in the app window too** — instead of a browser download you get the
   **OS save dialog** and pick the location.
 - **Environment variables are not inherited.** Launched from the icon, the app does not see a
   `OPENAI_API_KEY` you `export`ed in your shell. Save the key in **AI settings** on the left of the
-  home screen instead (`~/.config/md4paper/config.toml`).
-- **If nothing happens**, check the log — on macOS, `~/Library/Logs/md4paper.log`. If launching
+  home screen instead (`~/.config/narani/config.toml`).
+- **If nothing happens**, check the log — on macOS, `~/Library/Logs/narani.log`. If launching
   fails, the app tells you in a dialog.
-- **If you moved the repo or rebuilt the virtualenv**, run `md4paper app` again. The launcher has
+- **If you moved the repo or rebuilt the virtualenv**, run `narani app` again. The launcher has
   the interpreter path baked in. (With the one-line install the path stays the same across updates,
   so you don't need to.)
 - **In environments that can't open an app window** (Linux without WebKit2GTK or Qt, for example),
   the icon **falls back to opening a browser** rather than doing nothing. The reason is written to
   the launch log.
-- Uninstall: `md4paper app --remove`
+- Uninstall: `narani app --remove`
 
 > `uv sync --extra X` removes extras you don't list. For the app window, **always pass both**:
 > `uv sync --extra ui --extra native`.
@@ -217,11 +223,11 @@ window shuts the server down. To get the same window from a terminal, run
 
 ## Using the web UI
 
-Running `md4paper ui` prints `http://127.0.0.1:8080` in the terminal and opens a browser.
+Running `narani ui` prints `http://127.0.0.1:8080` in the terminal and opens a browser.
 (To use an app window instead → [Open it as an app](#open-it-as-an-app--register-an-icon-optional).)
 **The server binds to 127.0.0.1 (your machine) only, so it is not reachable from outside.** If the
 port is taken, it picks a free one and prints the actual address. (`--port 9000` to choose one,
-`--no-show` to skip opening the browser, `md4paper ui <name>.md4/` to open an existing job directly.)
+`--no-show` to skip opening the browser, `narani ui <name>.md4/` to open an existing job directly.)
 
 ### 1. Home — upload, and find things again
 
@@ -561,7 +567,7 @@ Expand **Override for this project** on a project row to set values that apply t
   maintaining settings in two places.
 - Turning something off is not the same as leaving it unset. Switch BibTeX **off** for a project
   and it stays off even when the global setting is on.
-- From the CLI: `md4paper project set NIRVANA export_target obsidian`, clear it with
+- From the CLI: `narani project set NIRVANA export_target obsidian`, clear it with
   `--unset`, or omit the KEY to see what's overridden.
 
 Translation register and extraction options stay global — duplicating the whole settings screen
@@ -613,7 +619,7 @@ instead of assembling an entry, **we fetch the publication record.**
 default; on a slow connection turn off *Enrich bibliography online after conversion* in the
 Library folders panel (it can also be set per project).
 
-For papers you converted earlier, press **Bibliographic enrichment** in the Library folders panel (or run `md4paper enrich`)
+For papers you converted earlier, press **Bibliographic enrichment** in the Library folders panel (or run `narani enrich`)
 and, for the papers **in the currently selected project**:
 
 1. **Ai2's Semantic Scholar** finds the paper by title — it still finds it when extraction
@@ -644,10 +650,10 @@ and, for the papers **in the currently selected project**:
 - **Only the title leaves your machine.** The body is never sent. The record is cached in the
   paper's `bib_source.json`, so re-exporting uses no network.
 - Papers no API has (old scans and the like) keep the values read from the PDF.
-- `md4paper bib` uses **no network** — it just rewrites the `.bib` from what has been fetched.
+- `narani bib` uses **no network** — it just rewrites the `.bib` from what has been fetched.
 - **Scope is the selected project** (the same filter as the home list), because you usually work on
   one group at a time and sweeping everything would hit the APIs for old projects too. Use
-  `md4paper enrich --all` for everything, or `--project <name>` for a different group.
+  `narani enrich --all` for everything, or `--project <name>` for a different group.
 - **Progress is shown and you can stop at any time.** A paper takes seconds to tens of seconds (about
   two minutes when it has 100 references). **Stop** finishes the current paper and halts; everything
   enriched up to that point is already saved. The CLI shows a progress bar and honours Ctrl+C.
@@ -702,25 +708,25 @@ and you can change it in the **Library folders** panel.
 The same settings from the terminal:
 
 ```bash
-uv run md4paper project                                   # list projects · which one is selected
-uv run md4paper project add "Tutor chatbot survey" --dir ~/Vault/Tutor
-uv run md4paper project use "Tutor chatbot survey"        # where new papers will go
-uv run md4paper project assign "Tutor chatbot" output/2017_.../2017_....md4
-uv run md4paper library                                   # show current library folders
-uv run md4paper library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF
-uv run md4paper library --root ~/Papers                   # common library as a single folder
-uv run md4paper library --export                          # export every converted paper
-uv run md4paper library --off all                         # turn it off
-uv run md4paper bib --all                                 # refill references.bib (queries paper APIs)
-uv run md4paper naming                                    # show the naming rule
-uv run md4paper naming "{author}{year}_{title}"           # change the rule
-uv run md4paper naming --apply                            # clean up existing paper and PDF names
+uv run narani project                                   # list projects · which one is selected
+uv run narani project add "Tutor chatbot survey" --dir ~/Vault/Tutor
+uv run narani project use "Tutor chatbot survey"        # where new papers will go
+uv run narani project assign "Tutor chatbot" output/2017_.../2017_....md4
+uv run narani library                                   # show current library folders
+uv run narani library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF
+uv run narani library --root ~/Papers                   # common library as a single folder
+uv run narani library --export                          # export every converted paper
+uv run narani library --off all                         # turn it off
+uv run narani bib --all                                 # refill references.bib (queries paper APIs)
+uv run narani naming                                    # show the naming rule
+uv run narani naming "{author}{year}_{title}"           # change the rule
+uv run narani naming --apply                            # clean up existing paper and PDF names
 ```
 
 ### Bibliographic enrichment (optional)
 
 Papers with a missing year or venue can be filled in from **public bibliographic APIs**: the
-**Enrich bibliography** button in the library panel, or `md4paper enrich --all`.
+**Enrich bibliography** button in the library panel, or `narani enrich --all`.
 
 - [OpenAlex](https://openalex.org) first; if only arXiv matches, [Crossref](https://www.crossref.org)
   fills in the published venue. Both are free and need no key.
@@ -730,7 +736,7 @@ Papers with a missing year or venue can be filled in from **public bibliographic
   regardless of similarity (observed: a query for a 2026 paper returned a 2010 book), so without this
   check a wrong year would slip in silently.
 - Put an email in `[enrich].mailto` to use the APIs' polite pool:
-  `md4paper enrich --all --mailto you@example.com`
+  `narani enrich --all --mailto you@example.com`
 
 
 ---
@@ -741,8 +747,8 @@ The simplest way is to paste the key into the **AI settings** panel on the web U
 press **test connection**. From a terminal:
 
 ```bash
-uv run md4paper keys set openai      # saved to ~/.config/md4paper/config.toml (mode 0600)
-uv run md4paper keys list            # check what's configured (values masked)
+uv run narani keys set openai      # saved to ~/.config/narani/config.toml (mode 0600)
+uv run narani keys list            # check what's configured (values masked)
 ```
 
 Or environment variables — recommended on a shared computer:
@@ -799,27 +805,27 @@ Guards against runaway spending:
 - **Scope selection** — translate only the sections you need.
 - **The chatbot prints its cost on every turn** — a long conversation stays visible as it adds up.
 
-> The measured figures are computed from the price table in [base.py](src/md4paper/llm/base.py) as of
+> The measured figures are computed from the price table in [base.py](src/narani/llm/base.py) as of
 > 2026-07. Vendor pricing changes, so run a short paper first and check the actual cost it prints.
 
 ## Where files live
 
 | Item | Path |
 |---|---|
-| Work folder (default) | run from the repo: `<repo>/output/` · run via `uvx`: `~/md4paper/output/` |
+| Work folder (default) | run from the repo: `<repo>/output/` · run via `uvx`: `~/narani/output/` |
 | Per-paper results | `<workfolder>/<name>/<name>.md4/` (extracted source, structure, translation, logs) |
 | Final Markdown | `<name>.md4/out/paper.en.md`, `paper.ko.md`, `out/images/` |
 | Library folders (optional) | a folder you choose, holding `<paper-name>.md` + `images/<paper-name>/` + `<paper-name>.pdf` — English, Korean, and PDF separately |
-| Project list | `~/.config/md4paper/projects.json` (project names and folders, plus the selected one) |
+| Project list | `~/.config/narani/projects.json` (project names and folders, plus the selected one) |
 | A paper's project | the `project` field in `<name>.md4/status.json` (a project id; empty means unfiled) |
-| Settings and API keys | `~/.config/md4paper/config.toml` (Windows: `C:\Users\<user>\.config\md4paper\config.toml`) |
-| Remembered heading decisions | `~/.config/md4paper/heading_prefs.json` |
+| Settings and API keys | `~/.config/narani/config.toml` (Windows: `C:\Users\<user>\.config\narani\config.toml`) |
+| Remembered heading decisions | `~/.config/narani/heading_prefs.json` |
 | Docling model cache | `~/.cache/huggingface` (Windows: `C:\Users\<user>\.cache\huggingface`) |
-| App launcher (optional) | macOS `~/Applications/md4paper.app` · Windows Start menu · Linux `~/.local/share/applications` |
-| App launch log | macOS `~/Library/Logs/md4paper.log` (when launched from the icon) |
+| App launcher (optional) | macOS `~/Applications/Narani.app` · Windows Start menu · Linux `~/.local/share/applications` |
+| App launch log | macOS `~/Library/Logs/narani.log` (when launched from the icon) |
 
 To change the work folder: **Library folders → Work folder → Change** on the home screen,
-`uv run md4paper workspace <path>`, or `md4paper ui --upload-dir <path>`.
+`uv run narani workspace <path>`, or `narani ui --upload-dir <path>`.
 
 The default **depends on how you launch it**, as the table shows, but the value at the time you first
 start the UI is written to the config file. So if you start with a clone and later switch to the icon
@@ -835,21 +841,21 @@ Most of what the web UI does is available in a terminal, which is handy for scri
 running on a server.
 
 ```bash
-uv run md4paper doctor                  # check the environment
-uv run md4paper convert paper.pdf       # PDF → paper.md4/out/paper.en.md
-uv run md4paper review paper.md4/       # open the section manifest in $EDITOR, then reassemble
-uv run md4paper cite paper.md4/         # parse references + link in-text citations (LLM)
-uv run md4paper glossary paper.md4/     # build the glossary before translating (LLM)
-uv run md4paper translate paper.md4/    # translate to Korean → paper.md4/out/paper.ko.md (LLM)
-uv run md4paper ui paper.md4/           # open this job in the web UI
-uv run md4paper workspace               # show / change the work folder
-uv run md4paper project                 # list projects; add · use · assign
-uv run md4paper library                 # show / change library folders (English, Korean, PDF); --root
-uv run md4paper bib --all               # refill references.bib (queries paper APIs)
-uv run md4paper naming                  # show / change the naming rule; --apply to clean up existing names
-uv run md4paper enrich --all            # fill empty years and venues from public bibliographic APIs
-uv run md4paper prefs list              # list remembered heading decisions
-uv run md4paper app                     # register the double-clickable app icon (--remove to undo)
+uv run narani doctor                  # check the environment
+uv run narani convert paper.pdf       # PDF → paper.md4/out/paper.en.md
+uv run narani review paper.md4/       # open the section manifest in $EDITOR, then reassemble
+uv run narani cite paper.md4/         # parse references + link in-text citations (LLM)
+uv run narani glossary paper.md4/     # build the glossary before translating (LLM)
+uv run narani translate paper.md4/    # translate to Korean → paper.md4/out/paper.ko.md (LLM)
+uv run narani ui paper.md4/           # open this job in the web UI
+uv run narani workspace               # show / change the work folder
+uv run narani project                 # list projects; add · use · assign
+uv run narani library                 # show / change library folders (English, Korean, PDF); --root
+uv run narani bib --all               # refill references.bib (queries paper APIs)
+uv run narani naming                  # show / change the naming rule; --apply to clean up existing names
+uv run narani enrich --all            # fill empty years and venues from public bibliographic APIs
+uv run narani prefs list              # list remembered heading decisions
+uv run narani app                     # register the double-clickable app icon (--remove to undo)
 ```
 
 Main options:
@@ -860,21 +866,21 @@ Main options:
 - `cite --style keep|authoryear|short` — citation style
 - `review` — opens the manifest in `$EDITOR` (Notepad on Windows if unset)
 
-If you installed with `uvx`, drop the `uv run` — just `md4paper convert paper.pdf`.
+If you installed with `uvx`, drop the `uv run` — just `narani convert paper.pdf`.
 
 ## Troubleshooting
 
 **General**
 
-- Run `md4paper doctor` first. If every required item is ✓, conversion will work. An LLM key showing
+- Run `narani doctor` first. If every required item is ✓, conversion will work. An LLM key showing
   as `-` is not a failure — it means "optional feature not configured".
 - Converted papers missing from the list → the files weren't deleted; **the work folder is pointing
   somewhere else**. When the list is empty, the home screen shows the folder path it's looking at, so
-  switch back to your old folder under **Library folders → Work folder** (`md4paper workspace <path>`
+  switch back to your old folder under **Library folders → Work folder** (`narani workspace <path>`
   does the same).
 - Clicked the app icon and no window appeared → check the launch log (macOS:
-  `~/Library/Logs/md4paper.log`). Usually you skipped `uv sync --extra ui --extra native`, or you
-  moved the repo and didn't re-run `md4paper app`.
+  `~/Library/Logs/narani.log`). Usually you skipped `uv sync --extra ui --extra native`, or you
+  moved the repo and didn't re-run `narani app`.
 - No AI key visible in the app window → icon launches don't inherit shell environment variables. Save
   the key under **AI settings** on the home screen.
 - First conversion is slow → it's downloading the Docling model (~1.1GB). It's fast from the second
@@ -889,7 +895,7 @@ If you installed with `uvx`, drop the `uv run` — just `md4paper convert paper.
   **Option B**, which needs no clone.
 - Execution policy error (`running scripts is disabled`) → check you didn't drop the
   `-ExecutionPolicy ByPass` part of the uv install command.
-- If install fails in a folder with a very long path, try a short one (e.g. `C:\dev\md4paper`).
+- If install fails in a folder with a very long path, try a short one (e.g. `C:\dev\narani`).
 
 **macOS**
 
@@ -904,7 +910,7 @@ If you installed with `uvx`, drop the `uv run` — just `md4paper convert paper.
   ```
 - On a headless server, run with `--no-show` and connect over an SSH port forward:
   ```bash
-  md4paper ui --no-show --port 8080
+  narani ui --no-show --port 8080
   ssh -L 8080:127.0.0.1:8080 <user>@<server>   # from your local machine
   ```
   The server binds to 127.0.0.1 only, so **don't expose it to the internet without authentication**

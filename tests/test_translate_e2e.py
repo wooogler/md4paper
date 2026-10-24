@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline
-from md4paper.ir import GlossaryEntry, GlossaryList
-from md4paper.llm import FakeProvider
-from md4paper.translate.apply import run_translate
-from md4paper.workdir import WorkDir
+from narani import pipeline
+from narani.ir import GlossaryEntry, GlossaryList
+from narani.llm import FakeProvider
+from narani.translate.apply import run_translate
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 
@@ -127,7 +127,7 @@ def test_parallel_preserves_order(converted):
 
 def test_references_not_translated_by_default(converted):
     # sample_cite.md에는 References 섹션이 있음 → 기본적으로 영어 원문 유지
-    from md4paper.review import manifest as manifest_io
+    from narani.review import manifest as manifest_io
 
     m = manifest_io.load(converted)
     assert m.translate_references is False  # 기본값
@@ -170,8 +170,8 @@ def test_passthrough_on_structure_break(converted):
 
 def test_section_selection_limits_translation(converted):
     """번역 단계 Tree Select — 고른 섹션만 번역되고 나머지는 영어 원문 유지."""
-    from md4paper.review import manifest as manifest_io
-    from md4paper.ui.controller import UIController
+    from narani.review import manifest as manifest_io
+    from narani.ui.controller import UIController
 
     ctrl = UIController(converted)
     # Introduction 만 번역 대상으로
@@ -196,7 +196,7 @@ def test_section_selection_limits_translation(converted):
 
 
 def test_section_tree_nesting(converted):
-    from md4paper.ui.controller import UIController
+    from narani.ui.controller import UIController
 
     tree = UIController(converted).section_tree()
     assert tree, "트리가 비어 있음"
@@ -205,8 +205,8 @@ def test_section_tree_nesting(converted):
 
 
 def test_glossary_block_hides_korean_for_keep_and_labels_policies():
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.translate.engine import _glossary_block
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.translate.engine import _glossary_block
 
     gl = GlossaryList(entries=[
         GlossaryEntry(term="human-in-the-loop", korean="인간 개입", policy="keep"),
@@ -221,8 +221,8 @@ def test_glossary_block_hides_korean_for_keep_and_labels_policies():
 
 
 def test_enforce_keep_reverts_translated_keep_terms():
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.translate.postprocess import enforce_keep
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.translate.postprocess import enforce_keep
 
     gloss = GlossaryList(entries=[
         GlossaryEntry(term="Data-Prompt Co-Evolution", korean="데이터-프롬프트 공진화", policy="keep"),
@@ -238,7 +238,7 @@ def test_enforce_keep_reverts_translated_keep_terms():
 
 def test_switching_model_retranslates_and_records_model(converted):
     """재번역 때 모델을 바꾸면 캐시를 쓰지 않고 다시 번역하고, status.json에 그 모델이 남는다."""
-    from md4paper.ui.controller import UIController
+    from narani.ui.controller import UIController
 
     calls = {"n": 0}
 
@@ -265,8 +265,8 @@ def test_switching_model_retranslates_and_records_model(converted):
 
 
 def test_translate_model_options_lists_keyed_providers(converted, monkeypatch):
-    from md4paper import config
-    from md4paper.ui.controller import UIController
+    from narani import config
+    from narani.ui.controller import UIController
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
     ctrl = UIController(converted)
@@ -280,8 +280,8 @@ def test_stale_sections_track_source_changes(converted):
     """원문이 바뀐 섹션만 '낡음'으로 — 번역 직후엔 비고, 한 섹션 본문을 고치면 그 섹션(만)이 잡힌다."""
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate.apply import stale_section_ids
+    from narani.review import manifest as manifest_io
+    from narani.translate.apply import stale_section_ids
 
     m = manifest_io.load(converted)
     assert stale_section_ids(converted, m) == set()  # 번역 전 — 낡을 번역이 없다
@@ -317,9 +317,9 @@ def test_stale_sections_track_source_changes(converted):
 
 def test_unticked_sections_keep_existing_translation(converted):
     """일부만 다시 번역하려고 나머지 체크를 풀어도, 이미 번역해 둔 섹션은 영어로 돌아가지 않는다."""
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate.apply import unticked_without_cache
-    from md4paper.ui.controller import UIController
+    from narani.review import manifest as manifest_io
+    from narani.translate.apply import unticked_without_cache
+    from narani.ui.controller import UIController
 
     def mark(system: str, user: str) -> str:  # 헤더가 아닌 본문 줄마다 표식 — 구조는 그대로
         return "\n".join(ln + " [KO]" if ln.strip() and not ln.startswith("#") else ln
@@ -364,7 +364,7 @@ def long_paper(tmp_path, monkeypatch):
     Recurrent Part: recurrence·attention, Encoder Part: encoder, Plain Part: 용어 없음.
     컬렉션 용어집 폴더가 테스트마다 비도록 CONFIG_DIR을 tmp로(projects.json은 conftest가 비운다).
     """
-    from md4paper import config, projects, workdir
+    from narani import config, projects, workdir
 
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / "cfg")
     md = ("# A Long Study\n\n## Recurrent Part\n\nWe revisit recurrence and attention here. " + _filler("first")
@@ -402,9 +402,9 @@ def _entry(term: str, korean: str, policy: str = "translate") -> GlossaryEntry:
 
 
 def test_collection_term_stales_only_units_that_use_it(long_paper):
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import glossary
-    from md4paper.translate.apply import stale_section_ids
+    from narani.review import manifest as manifest_io
+    from narani.translate import glossary
+    from narani.translate.apply import stale_section_ids
 
     wd, pid = long_paper
     calls, fake = _counting()
@@ -443,9 +443,9 @@ def _plain_chunks(wd) -> dict[str, str]:
     """지금 v3 캐시의 항목을 옛(v2·v1) 모양 — 평문 `hash_text(원문)` 해시 — 으로."""
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
-    from md4paper.workdir import hash_text
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
+    from narani.workdir import hash_text
 
     m = manifest_io.load(wd)
     stored = json.loads(wd.cache_json.read_text(encoding="utf-8"))
@@ -463,8 +463,8 @@ def _plant_v2_cache(wd) -> None:
     """지금 v3 캐시를 옛 v2 모양으로 — 논문 용어집으로 만든 v2 키 + 평문 해시 항목."""
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     m = manifest_io.load(wd)
     _v3, v2 = apply._cache_keys(m.korean_style, glossary.load(wd), "gpt-5.6-luna", m)
@@ -480,9 +480,9 @@ def _plant_v1_cache(wd, model: str = "gpt-5.6-luna") -> None:
     """
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, context, engine, glossary
-    from md4paper.workdir import hash_text
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, context, engine, glossary
+    from narani.workdir import hash_text
 
     m = manifest_io.load(wd)
     title, abstract = context.extract_context(wd, m)
@@ -497,8 +497,8 @@ def _plant_v1_cache(wd, model: str = "gpt-5.6-luna") -> None:
 def test_v2_cache_is_read_and_upgraded_when_paper_glossary_unchanged(long_paper):
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, _pid = long_paper
     calls, fake = _counting()
@@ -521,8 +521,8 @@ def test_v2_cache_is_read_and_upgraded_when_paper_glossary_unchanged(long_paper)
 
 
 def test_v2_cache_rejects_only_units_whose_terms_the_collection_overrides(long_paper):
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, pid = long_paper
     calls, fake = _counting()
@@ -544,8 +544,8 @@ def test_v2_cache_with_edited_paper_glossary_is_not_reused(long_paper):
     `glossary.save`는 저장 전에 캐시를 v3로 옮기므로, 여기서는 그 길을 거치지 않은 편집(파일을 직접
     고침)을 `glossary.dump`로 흉내 낸다.
     """
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, _pid = long_paper
     calls, fake = _counting()
@@ -561,8 +561,8 @@ def test_v2_cache_with_edited_paper_glossary_is_not_reused(long_paper):
 
 def test_retranslate_units_counts_full_retranslation_when_cache_is_unusable(long_paper):
     """캐시를 통째로 못 쓰면 stale_units는 빈 목록('원문 바뀜' 아님)이지만 retranslate_units는 전부·full."""
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, _pid = long_paper
     m = manifest_io.load(wd)
@@ -602,8 +602,8 @@ def test_v1_cache_is_read_and_upgraded_when_paper_glossary_unchanged(long_paper)
     """시스템 프롬프트 해시 키(v1) 캐시 — 논문 용어집이 그대로면 전부 적중하고 저장 뒤 v3가 된다."""
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply
 
     wd, _pid = long_paper
     calls, fake = _counting()
@@ -623,8 +623,8 @@ def test_v1_cache_is_read_and_upgraded_when_paper_glossary_unchanged(long_paper)
 
 
 def test_v1_cache_rejects_only_units_whose_terms_the_collection_overrides(long_paper):
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, pid = long_paper
     calls, fake = _counting()
@@ -644,8 +644,8 @@ def test_v1_cache_rejects_only_units_whose_terms_the_collection_overrides(long_p
 
 def test_stored_v1_cache_is_checked_against_the_recorded_model(long_paper):
     """모델 기록이 있으면 v1 키도 그 모델로 맞춰 본다 — 맞으면 옛 모드, 다른 모델의 캐시면 못 씀(full)."""
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply
 
     wd, _pid = long_paper
     _calls, fake = _counting()
@@ -669,8 +669,8 @@ def test_saving_paper_glossary_migrates_old_cache_first(long_paper, plant):
     """논문 용어집을 고쳐 저장하면 먼저 캐시가 v3로 옮겨져, 고친 용어가 나오는 유닛만 다시 번역된다."""
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, _pid = long_paper
     calls, fake = _counting()
@@ -695,9 +695,9 @@ def test_migrate_cache_without_model_record_uses_default_model(long_paper):
     """모델 기록도 input_hash도 없는 옛 번역은 뷰어 기본값과 같은 규칙(전역 기본 모델·manifest 문체)으로."""
     import json
 
-    from md4paper import config
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani import config
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, _pid = long_paper
     _calls, fake = _counting()
@@ -730,10 +730,10 @@ def test_model_is_recovered_from_input_hash_without_record(long_paper):
     """모델 기록이 없어도 input_hash(`문체:모델`)로 되찾아 옛 키를 맞춰 본다 — 판정·이행·기본 모델이 같은 모델로."""
     import json
 
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
-    from md4paper.ui import translate_job
-    from md4paper.ui.controller import UIController
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
+    from narani.ui import translate_job
+    from narani.ui.controller import UIController
 
     wd, pid = long_paper
     _calls, fake = _counting()
@@ -776,8 +776,8 @@ def test_recover_translate_model_misses_unknown_combinations(long_paper):
 
 def test_non_primary_member_is_left_out_of_impact(long_paper):
     """둘째 자리로만 속한 컬렉션의 용어집은 적용되지 않으니, 그 컬렉션의 영향 미리보기에도 안 든다."""
-    from md4paper import projects, workdir
-    from md4paper.translate import glossary
+    from narani import projects, workdir
+    from narani.translate import glossary
 
     wd, pid = long_paper
     ws = wd.root.parent
@@ -792,7 +792,7 @@ def test_non_primary_member_is_left_out_of_impact(long_paper):
 
 
 def test_relevant_lines_match_at_word_start_and_are_sorted():
-    from md4paper.translate.apply import relevant_lines, unit_hash
+    from narani.translate.apply import relevant_lines, unit_hash
 
     edge = GlossaryList(entries=[_entry("edge", "엣지")])
     assert relevant_lines(edge, "Prior knowledge matters.") == ""  # knowledge 안의 edge는 아니다
@@ -810,8 +810,8 @@ def test_relevant_lines_match_at_word_start_and_are_sorted():
 
 
 def test_unit_hash_is_plain_without_relevant_terms():
-    from md4paper.translate.apply import relevant_lines, unit_hash
-    from md4paper.workdir import hash_text
+    from narani.translate.apply import relevant_lines, unit_hash
+    from narani.workdir import hash_text
 
     gl = GlossaryList(entries=[_entry("Living Test Set", "살아 있는 테스트 세트"), _entry("encoder", "인코더")])
     plain = "Nothing relevant in this text."
@@ -826,7 +826,7 @@ def test_unit_hash_is_plain_without_relevant_terms():
 
 
 def test_impact_reports_stale_papers_and_rough_cost(long_paper):
-    from md4paper.translate import glossary
+    from narani.translate import glossary
 
     wd, pid = long_paper
     ws = wd.root.parent
@@ -851,7 +851,7 @@ def test_impact_reports_stale_papers_and_rough_cost(long_paper):
 
 
 def test_impact_marks_full_retranslation_when_cache_is_gone(long_paper):
-    from md4paper.translate import glossary
+    from narani.translate import glossary
 
     wd, pid = long_paper
     ws = wd.root.parent
@@ -879,8 +879,8 @@ def test_v1_legacy_key_is_golden(tmp_path, monkeypatch):
     """
     import json
 
-    from md4paper.ir import Manifest
-    from md4paper.translate import apply, context
+    from narani.ir import Manifest
+    from narani.translate import apply, context
 
     wd = WorkDir(tmp_path / "g.md4")
     wd.out.mkdir(parents=True)
@@ -902,9 +902,9 @@ def test_v1_legacy_key_is_golden(tmp_path, monkeypatch):
 def test_stored_cache_without_any_record_checks_key_with_default_model(long_paper):
     """모델 기록도 input_hash도 없으면 전역 기본 모델·manifest 문체로 옛 키를 맞춰 본다 — 키를 안 보고
     '쓸 수 있음'이라 하면, 용어집을 save 밖에서 고쳤을 때 표시(몇 유닛)와 실행(전부)이 어긋난다."""
-    from md4paper import config
-    from md4paper.review import manifest as manifest_io
-    from md4paper.translate import apply, glossary
+    from narani import config
+    from narani.review import manifest as manifest_io
+    from narani.translate import apply, glossary
 
     wd, _pid = long_paper
     _calls, fake = _counting()
@@ -930,7 +930,7 @@ def test_migrate_cache_write_failure_keeps_original(long_paper, monkeypatch, cap
     """이행 쓰기가 실패해도 원본 cache.json은 그대로, 임시 파일은 안 남고, 용어집 저장은 계속된다."""
     import logging
 
-    from md4paper.translate import apply, glossary
+    from narani.translate import apply, glossary
 
     wd, _pid = long_paper
     _calls, fake = _counting()
@@ -948,7 +948,7 @@ def test_migrate_cache_write_failure_keeps_original(long_paper, monkeypatch, cap
     assert not wd.cache_json.with_name(wd.cache_json.name + ".tmp").exists()
 
     new = GlossaryList(entries=[*glossary.load(wd).entries, _entry("inputs", "입력")])
-    with caplog.at_level(logging.WARNING, logger="md4paper.translate.glossary"):
+    with caplog.at_level(logging.WARNING, logger="narani.translate.glossary"):
         glossary.save(new, wd)
     assert "캐시 이행 실패" in caplog.text
     assert [e.term for e in glossary.load(wd).entries][-1] == "inputs"  # 저장은 됐다

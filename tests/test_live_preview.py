@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from md4paper.ui.live_preview import MAX_TEX, live_preview_js, mathml
+from narani.ui.live_preview import MAX_TEX, live_preview_js, mathml
 
 
 def test_mathml_converts_and_skips_bad_input():

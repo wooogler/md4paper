@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import json
 
-from md4paper.ui import annotations
-from md4paper.workdir import WorkDir
+from narani.ui import annotations
+from narani.workdir import WorkDir
 
 
 def _anchor(side: str = "en", **over) -> dict:

@@ -1,7 +1,7 @@
 """참고문헌 렌더 테스트 — 앵커, DOI/arXiv 링크, 단축명."""
 
-from md4paper.cite import render
-from md4paper.ir import RefEntry
+from narani.cite import render
+from narani.ir import RefEntry
 
 
 def test_arxiv_link():

@@ -3,8 +3,8 @@
 import asyncio
 from pathlib import Path
 
-from md4paper.ui import app as home
-from md4paper.workdir import WorkDir
+from narani.ui import app as home
+from narani.workdir import WorkDir
 
 
 def test_save_source_writes_to_stem_folder(tmp_path):
@@ -103,7 +103,7 @@ def test_queue_runs_cite_then_glossary_when_key_present(tmp_path, monkeypatch):
 
 def test_queue_exports_to_library_when_folder_set(tmp_path, monkeypatch):
     """변환이 끝나면 전역 '저장 위치' 폴더에 결과 마크다운이 쌓인다."""
-    from md4paper import config
+    from narani import config
 
     en_dir = tmp_path / "EN"
     config.set_library_dir("en", str(en_dir))
@@ -134,8 +134,8 @@ def test_worker_guard_skips_when_already_running(tmp_path, monkeypatch):
 
 
 def test_recent_workdirs_reads_paper_meta(tmp_path):
-    from md4paper import pipeline
-    from md4paper.workdir import recent_workdirs
+    from narani import pipeline
+    from narani.workdir import recent_workdirs
 
     corpus = Path(__file__).parent / "corpus" / "sample_arxiv.md"
     wd = WorkDir(tmp_path / "paper" / "paper.md4")
@@ -158,8 +158,8 @@ def test_garbled_warning_recorded(tmp_path, monkeypatch):
 
 def test_hidden_paper_leaves_files_and_can_be_restored(tmp_path):
     """'목록에서 숨기기'는 파일을 지우지 않고 표시만 없앤다 — 언제든 되돌릴 수 있다."""
-    from md4paper import pipeline
-    from md4paper.workdir import WorkDir, recent_workdirs, set_hidden
+    from narani import pipeline
+    from narani.workdir import WorkDir, recent_workdirs, set_hidden
 
     wd = WorkDir(tmp_path / "p" / "p.md4")
     pipeline.convert(Path(__file__).parent / "corpus" / "sample_arxiv.md", wd)
@@ -176,16 +176,16 @@ def test_hidden_paper_leaves_files_and_can_be_restored(tmp_path):
 
 
 def test_set_hidden_rejects_missing_workdir(tmp_path):
-    from md4paper.workdir import set_hidden
+    from narani.workdir import set_hidden
 
     assert set_hidden(tmp_path / "없는논문.md4") is False
 
 
 def test_recent_workdirs_opened_flag(tmp_path):
     """리뷰를 연 논문은 opened=True (status.json의 opened_at) — 미열람 표시용."""
-    from md4paper import pipeline
-    from md4paper.ui.app import _mark_opened
-    from md4paper.workdir import WorkDir, recent_workdirs
+    from narani import pipeline
+    from narani.ui.app import _mark_opened
+    from narani.workdir import WorkDir, recent_workdirs
 
     corpus = Path(__file__).parent / "corpus" / "sample_arxiv.md"
     wd = WorkDir(tmp_path / "p" / "p.md4")

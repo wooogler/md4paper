@@ -1,7 +1,7 @@
 """놓친 괘선 표 되살리기 — PDF 괘선 격자로 행·열 경계와 병합 셀을 찾는다 (LitPivot Table 1)."""
 
-from md4paper.extract import ruled_tables as R
-from md4paper.extract.ruled_tables import _Seg
+from narani.extract import ruled_tables as R
+from narani.extract.ruled_tables import _Seg
 
 
 def _box_grid(xs, ys, skip_v=()):
@@ -89,7 +89,7 @@ def test_block_spilling_out_of_the_grid_blocks_the_rebuild():
 
 def _glyphs(cells):
     """[(x, 위에서 잰 기준선, 글자)] → Glyph (공백은 텍스트 스트림 자리만 건너뛴다)."""
-    from md4paper.extract.inline_math import Glyph
+    from narani.extract.inline_math import Glyph
 
     out, idx = [], 0
     for x, base, text in cells:

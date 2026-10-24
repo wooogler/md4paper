@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from md4paper.ui import tabstore
+from narani.ui import tabstore
 
 
 def _paper(base: Path, name: str) -> Path:
@@ -34,7 +34,7 @@ def test_existing_duplicates_collapse_preferring_workspace(tmp_path, monkeypatch
     c1 = _paper(tmp_path / "s1", "2018_Peerception_AUTHORS")
     c2 = _paper(tmp_path / "s2", "2018_Peerception_AUTHORS")
     other = _paper(ws, "2026_Other")
-    monkeypatch.setattr("md4paper.config.resolve_workspace", lambda: ws)
+    monkeypatch.setattr("narani.config.resolve_workspace", lambda: ws)
     tabstore._write([str(c1.resolve()), str(other.resolve()), str(c2.resolve()), str(real.resolve())])
     tabs = tabstore.load()
     assert tabs == [real.resolve(), other.resolve()]

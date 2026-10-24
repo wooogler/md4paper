@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("markdown_it")
 
-from md4paper.ui.agent.cites import note_tag, render_html, resolve_citations, row_label  # noqa: E402
+from narani.ui.agent.cites import note_tag, render_html, resolve_citations, row_label  # noqa: E402
 
 CUR = "0123456789ab"
 OTHER = "fedcba987654"

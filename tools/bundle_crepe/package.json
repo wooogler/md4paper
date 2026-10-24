@@ -1,7 +1,7 @@
 {
-  "name": "md4paper-bundle-crepe",
+  "name": "narani-bundle-crepe",
   "private": true,
-  "description": "메모 패널 위지윅 편집기(Milkdown Crepe)를 src/md4paper/ui/assets/crepe/에 한 파일로 묶는다",
+  "description": "메모 패널 위지윅 편집기(Milkdown Crepe)를 src/narani/ui/assets/crepe/에 한 파일로 묶는다",
   "scripts": {
     "build": "node build.mjs"
   },

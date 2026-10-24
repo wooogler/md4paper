@@ -11,7 +11,7 @@ pytest.importorskip("pydantic_ai", reason="agent 의존성 미설치")
 
 from agent_support import EN, KO, item, make_wd, write_notes  # noqa: E402
 
-from md4paper.ui.agent import retrieval  # noqa: E402
+from narani.ui.agent import retrieval  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -22,7 +22,7 @@ def _fresh_cache():
 
 
 def test_build_chunks_matches_align_rows_and_marks_heading_rows():
-    from md4paper.ui.app import align_rows
+    from narani.ui.app import align_rows
 
     rows = align_rows(EN, KO)
     chunks = retrieval.build_chunks(EN, KO)
@@ -35,7 +35,7 @@ def test_build_chunks_matches_align_rows_and_marks_heading_rows():
 
 
 def test_build_chunks_falls_back_without_translation():
-    from md4paper.ui.app import _split_sections
+    from narani.ui.app import _split_sections
 
     chunks = retrieval.build_chunks(EN, None)
     assert len(chunks) == len(_split_sections(EN)) and all(c.ko is None for c in chunks)

@@ -4,11 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline
-from md4paper.cite.apply import run_cite
-from md4paper.ir import ReferenceList, RefEntry
-from md4paper.llm import FakeProvider
-from md4paper.workdir import WorkDir
+from narani import pipeline
+from narani.cite.apply import run_cite
+from narani.ir import ReferenceList, RefEntry
+from narani.llm import FakeProvider
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 
@@ -90,6 +90,6 @@ def test_rejects_hallucinated_entry(tmp_path):
                  raw="이 텍스트는 원문에 존재하지 않는다"),
     ])
     fake = FakeProvider(parse_fn=lambda s, u, schema: bad, model="fake-model")
-    from md4paper.cite.apply import CiteError
+    from narani.cite.apply import CiteError
     with pytest.raises(CiteError):  # 전부 검증 실패 → 유효 항목 없음
         run_cite(wd, fake, parts=["number"])

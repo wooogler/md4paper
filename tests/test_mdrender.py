@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from md4paper.ui import mdrender
+from narani.ui import mdrender
 
 
 def test_raw_html_anchors_survive():

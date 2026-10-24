@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline
-from md4paper.review import manifest as manifest_io
-from md4paper.structure import build
-from md4paper.workdir import WorkDir
+from narani import pipeline
+from narani.review import manifest as manifest_io
+from narani.structure import build
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 
@@ -69,8 +69,8 @@ def test_manifest_roundtrip(wd):
 def test_status_resume(wd):
     src = CORPUS / "sample_arxiv.md"
     pipeline.run_extract(src, wd)
-    from md4paper.extract import EXTRACT_VERSION
-    from md4paper.workdir import hash_text
+    from narani.extract import EXTRACT_VERSION
+    from narani.workdir import hash_text
 
     h = hash_text(f"{src}:docling:ocr=False:v{EXTRACT_VERSION}")
     assert wd.is_fresh("extract", h)
@@ -103,7 +103,7 @@ def test_drop_removes_section_and_body(wd):
     # "2 Background" 섹션을 drop → 헤더와 본문 모두 사라짐
     bg = next(s for s in manifest.sections if s.text == "2 Background")
     bg.level = "drop"
-    from md4paper.assemble.render import render_markdown
+    from narani.assemble.render import render_markdown
 
     raw = wd.raw_md.read_text(encoding="utf-8")
     text, _, _ = render_markdown(raw, manifest)
@@ -115,8 +115,8 @@ def test_drop_removes_section_and_body(wd):
 
 def test_bare_image_gets_images_prefix(wd):
     # 인라인(자기 줄이 아닌) 이미지는 figure 페어링을 못 받아 베어로 남음 → images/ 접두
-    from md4paper.assemble.render import render_markdown
-    from md4paper.ir import Manifest
+    from narani.assemble.render import render_markdown
+    from narani.ir import Manifest
 
     raw = "# Title\n\ntext with ![](_page_6_Diagram_2.jpeg) inline image\n"
     text, _, _ = render_markdown(raw, Manifest(sections=[]))
@@ -130,8 +130,8 @@ def test_bare_image_gets_images_prefix(wd):
 
 def test_references_reformatted_into_paragraphs(wd):
     # marker처럼 흘려 쓴 참고문헌([1]...[2]...)이 항목별로 분리되고 span 앵커가 제거되는지
-    from md4paper.assemble.render import render_markdown
-    from md4paper.ir import Manifest, ManifestSection
+    from narani.assemble.render import render_markdown
+    from narani.ir import Manifest, ManifestSection
 
     raw = (
         "# References\n\n"
@@ -151,8 +151,8 @@ def test_references_reformatted_into_paragraphs(wd):
 
 def test_runin_no_false_positive_on_prose(wd):
     # 소문자로 이어지는 일반 문장은 run-in 헤더로 오탐하면 안 됨
-    from md4paper.assemble.render import render_markdown
-    from md4paper.ir import Manifest
+    from narani.assemble.render import render_markdown
+    from narani.ir import Manifest
 
     raw = "# S\n\n3.2 shows the results clearly. We then analyze them.\n"
     text, _, _ = render_markdown(raw, Manifest(sections=[], runin_headings="header"))
@@ -162,7 +162,7 @@ def test_runin_no_false_positive_on_prose(wd):
 
 def test_repair_split_entities():
     # marker가 `<`를 `&lt;`로 뽑다가 `&`만 <sup>에 가둔 실제 패턴
-    from md4paper.extract.text_clean import clean_extracted, repair_entities
+    from narani.extract.text_clean import clean_extracted, repair_entities
 
     assert repair_entities("significant (<sup>&</sup>lt; 0.001)") == "significant (< 0.001)"
     assert repair_entities("a &lt; b &gt; c &amp; d") == "a < b > c & d"
@@ -172,7 +172,7 @@ def test_repair_split_entities():
 
 def test_normalize_math_letters():
     # 수학용 이탤릭 유니코드(𝑡 U+1D461, 𝑝 U+1D45D)를 ASCII로; 위첨자²는 보존
-    from md4paper.extract.text_clean import normalize_math_letters
+    from narani.extract.text_clean import normalize_math_letters
 
     assert normalize_math_letters("A paired \U0001d461-test (\U0001d45d < 0.001)") == "A paired t-test (p < 0.001)"
     assert normalize_math_letters("area m²") == "area m²"  # 위첨자는 그대로
@@ -193,7 +193,7 @@ def test_skip_and_merge_ops(wd):
     pipeline.run_extract(src, wd)
     manifest = pipeline.run_structure(wd)
     # 첫 섹션을 skip으로, 둘째를 merge-up으로 바꿔 렌더 동작 확인
-    from md4paper.assemble.render import render_markdown
+    from narani.assemble.render import render_markdown
 
     manifest.sections[1].level = "skip"
     manifest.sections[2].level = "merge-up"
@@ -223,7 +223,7 @@ def test_runin_detected_into_section_tree(wd):
 
 def test_runin_render_respects_level(wd):
     """트리에서 고른 레벨대로 렌더된다: 승격 / 이탤릭 / 본문 유지."""
-    from md4paper.assemble.render import render_markdown
+    from narani.assemble.render import render_markdown
 
     raw = "# 4 Workflow\n\n4.1.3 A Living Test Set. Each discovered case is preserved.\n"
     wd.ensure()
@@ -250,7 +250,7 @@ def test_runin_render_respects_level(wd):
 def test_recent_workdirs_lists_by_mtime(tmp_path):
     """홈 화면 '최근 작업' — 유효한 .md4만, 최근 수정순, 제목 추출."""
     import time as _t
-    from md4paper.workdir import recent_workdirs
+    from narani.workdir import recent_workdirs
 
     ws = tmp_path / "ws"
     a = WorkDir(ws / "PaperA.md4")
@@ -270,7 +270,7 @@ def test_recent_workdirs_lists_by_mtime(tmp_path):
 
 def test_runin_italic_option_renders(wd):
     """run-in 헤더에 italic 선택 → *제목.* 이탤릭 문단으로."""
-    from md4paper.assemble.render import render_markdown
+    from narani.assemble.render import render_markdown
 
     raw = "# 4 Workflow\n\n4.1.3 A Living Test Set. Each discovered case is preserved.\n"
     wd.ensure()
@@ -297,7 +297,7 @@ def test_first_unnumbered_is_title(wd):
 
 def test_docling_boilerplate_and_footnote_helpers():
     """저작권 boilerplate 탐지 + 각주 분리 로직 (docling 없이 순수 함수 테스트)."""
-    from md4paper.extract.docling_backend import _BOILERPLATE_RE, _EXCLUDE_LABELS
+    from narani.extract.docling_backend import _BOILERPLATE_RE, _EXCLUDE_LABELS
 
     assert _BOILERPLATE_RE.search("This work is licensed under a Creative Commons...")
     assert _BOILERPLATE_RE.search("ACM ISBN 979-8-4007-2278-3/2026/04")
@@ -309,7 +309,7 @@ def test_docling_boilerplate_and_footnote_helpers():
 
 
 def test_delete_workdir_safety(tmp_path):
-    from md4paper.workdir import delete_workdir
+    from narani.workdir import delete_workdir
 
     ws = tmp_path / "ws"
     wd = WorkDir(ws / "Paper" / "Paper.md4")  # 논문별 하위폴더 구조
@@ -335,7 +335,7 @@ def test_delete_workdir_safety(tmp_path):
 
 def test_delete_workdir_keeps_sibling_paper(tmp_path):
     # 부모 폴더에 다른 논문(.md4)이 있으면 폴더째 지우지 않는다 (안전)
-    from md4paper.workdir import delete_workdir
+    from narani.workdir import delete_workdir
 
     ws = tmp_path / "ws"
     a = WorkDir(ws / "shared" / "A.md4")
@@ -350,8 +350,8 @@ def test_delete_workdir_keeps_sibling_paper(tmp_path):
 
 def test_run_frontmatter_normalizes_and_caches(tmp_path):
     """run_frontmatter: 흩어진 저자 정리 후 raw.md 갱신 + 재호출 캐시 스킵."""
-    from md4paper import pipeline
-    from md4paper.workdir import WorkDir
+    from narani import pipeline
+    from narani.workdir import WorkDir
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.extract.mkdir(parents=True)
@@ -381,7 +381,7 @@ def _fm_wd(tmp_path, meta: dict | None):
     """SWAPPED 모양(밀려난 Abstract) raw.md + 선택적 extract/meta.json 을 갖춘 작업 폴더."""
     import json
 
-    from md4paper.workdir import WorkDir
+    from narani.workdir import WorkDir
 
     wd = WorkDir(tmp_path)
     wd.extract.mkdir(parents=True)
@@ -400,8 +400,8 @@ def _fm_wd(tmp_path, meta: dict | None):
 
 def _fm_provider():
     """블록 라벨을 고정으로 돌려주는 가짜 provider — Abstract(5,6)가 본문 뒤에 있다."""
-    from md4paper.ir import FrontMatterLayout
-    from md4paper.llm.base import FakeProvider
+    from narani.ir import FrontMatterLayout
+    from narani.llm.base import FakeProvider
 
     return FakeProvider(
         parse_fn=lambda system, user, schema: FrontMatterLayout(
@@ -415,7 +415,7 @@ def test_frontmatter_pull_is_gated_on_measured_inversion(tmp_path):
     meta.json에 reading_order_suspect가 없으면(정상 논문·이미 되돌린 논문) 이 복구는
     통째로 no-op이라 Abstract가 본문 뒤 제자리에 남는다 — 눈에 보이고 아무것도 잃지 않는다.
     """
-    from md4paper import pipeline
+    from narani import pipeline
 
     wd = _fm_wd(tmp_path / "off.md4", {"reordered_pages": [1], "reading_order_suspect": []})
     r = pipeline.run_frontmatter(wd, provider=_fm_provider())
@@ -425,7 +425,7 @@ def test_frontmatter_pull_is_gated_on_measured_inversion(tmp_path):
 
 
 def test_frontmatter_pull_runs_when_a_page_stayed_scrambled(tmp_path):
-    from md4paper import pipeline
+    from narani import pipeline
 
     wd = _fm_wd(tmp_path / "on.md4", {"reading_order_suspect": [1]})
     r = pipeline.run_frontmatter(wd, provider=_fm_provider())
@@ -437,7 +437,7 @@ def test_frontmatter_pull_runs_when_a_page_stayed_scrambled(tmp_path):
 
 def test_frontmatter_pull_is_off_without_meta(tmp_path):
     """meta.json이 없으면 보수적으로 끈다 — 신호 없이 본문을 옮기지 않는다."""
-    from md4paper import pipeline
+    from narani import pipeline
 
     wd = _fm_wd(tmp_path / "nometa.md4", None)
     r = pipeline.run_frontmatter(wd, provider=_fm_provider())
@@ -446,7 +446,7 @@ def test_frontmatter_pull_is_off_without_meta(tmp_path):
 
 def test_frontmatter_records_pull_ops_in_status(tmp_path):
     """무엇을 끌어올렸는지 status.json에 남긴다 — 조용한 이동이 되지 않게."""
-    from md4paper import pipeline
+    from narani import pipeline
 
     wd = _fm_wd(tmp_path / "ops.md4", {"reading_order_suspect": [1]})
     pipeline.run_frontmatter(wd, provider=_fm_provider())
@@ -458,8 +458,8 @@ def test_frontmatter_records_pull_ops_in_status(tmp_path):
 
 def test_author_note_anchor_never_reaches_the_output(tmp_path):
     """규칙 경로가 일찍 반환하는 문서에서도 앵커는 남지 않는다 (링크 대상이 없는 표시)."""
-    from md4paper import pipeline
-    from md4paper.workdir import WorkDir
+    from narani import pipeline
+    from narani.workdir import WorkDir
 
     wd = WorkDir(tmp_path / "note.md4")
     wd.extract.mkdir(parents=True)
@@ -475,7 +475,7 @@ def test_author_note_anchor_never_reaches_the_output(tmp_path):
 
 def test_sibling_runin_headers_share_level(tmp_path):
     """형제 무번호 run-in 소제목은 같은 레벨 — 4,5로 계단식으로 깊어지지 않는다."""
-    from md4paper import config
+    from narani import config
 
     config.set_section_value("structure", "runin_headings", "header")
     raw = (
@@ -500,9 +500,9 @@ def test_section_layout_classify_runins():
     """LLM run-in 판정 — 소제목/비소제목 분류 + 레벨 이상 제외."""
     import re as _re
 
-    from md4paper.ir import RuninDecision, SectionLayout
-    from md4paper.llm import FakeProvider
-    from md4paper.structure import section_layout
+    from narani.ir import RuninDecision, SectionLayout
+    from narani.llm import FakeProvider
+    from narani.structure import section_layout
 
     items = [
         {"index": 0, "text": "4 System Design", "level": 2},
@@ -528,9 +528,9 @@ def test_build_uses_llm_runin_decisions(tmp_path):
     """build가 LLM 판정을 따른다 — 소제목은 승격, '헤더 아님'은 본문(skip)."""
     import re as _re
 
-    from md4paper import config
-    from md4paper.ir import RuninDecision, SectionLayout
-    from md4paper.llm import FakeProvider
+    from narani import config
+    from narani.ir import RuninDecision, SectionLayout
+    from narani.llm import FakeProvider
 
     config.set_section_value("structure", "runin_headings", "header")
     raw = (
@@ -573,7 +573,7 @@ def test_cli_convert_runs_frontmatter_stage(tmp_path, monkeypatch):
     """
     from click.testing import CliRunner
 
-    from md4paper.cli import cli
+    from narani.cli import cli
 
     src = tmp_path / "paper.md"
     src.write_text(
@@ -600,7 +600,7 @@ def test_manifest_persists_author_parts(tmp_path):
     저장 안 하면 다시 열 때 config 기본값으로 되돌아가, UI 체크박스와 실제 raw.md 저자 블록이
     어긋난다(그 상태에서 토글하면 옛 블록을 못 찾아 조용히 무시됨).
     """
-    from md4paper.ir import Flavor, Manifest
+    from narani.ir import Flavor, Manifest
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.structure.mkdir(parents=True)
@@ -661,7 +661,7 @@ class _FakeDoc:
 
 def test_classify_first_page_footnotes():
     """번호 각주 / 저자 주석 / 출판사 boilerplate 를 라벨이 아니라 성격으로 가른다."""
-    from md4paper.extract.docling_backend import _classify_footnote as c
+    from narani.extract.docling_backend import _classify_footnote as c
 
     assert c("3 https://example.org/data", 1) == "body"          # 번호 각주 → 본문 각주
     assert c("∗ Sang Won Lee conducted this work while visiting.", 1) == "author"
@@ -681,7 +681,7 @@ def test_classify_first_page_footnotes():
 
 
 def test_place_author_notes_goes_to_front_matter():
-    from md4paper.extract.docling_backend import _place_author_notes
+    from narani.extract.docling_backend import _place_author_notes
 
     md = ("## Title\n\n**Alice**\n\n## Abstract\n\nAbstract body.\n\n"
           "## 1 Introduction\n\nBody text.\n")
@@ -719,7 +719,7 @@ def _runhead_doc():
 
 
 def test_drop_running_heads_catches_mislabelled_and_merged():
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     doc, merged, body = _runhead_doc()
     n = _drop_running_heads(doc)
@@ -731,7 +731,7 @@ def test_drop_running_heads_catches_mislabelled_and_merged():
 
 def test_drop_running_heads_keeps_unique_edge_text():
     """한 쪽에만 있는 가장자리 텍스트(반복 아님)는 러닝 헤더가 아니다."""
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     only_once = _FakeItem("A one-off note printed at the top of a single page.", 3, 729, 723)
     body = _FakeItem("Regular body paragraph in the middle of the page.", 3, 600, 500)
@@ -741,7 +741,7 @@ def test_drop_running_heads_keeps_unique_edge_text():
 
 
 def test_runhead_signature_ignores_page_numbers():
-    from md4paper.extract.docling_backend import _runhead_sig
+    from narani.extract.docling_backend import _runhead_sig
 
     assert _runhead_sig("Proceedings of CHI 2026, page 12") == _runhead_sig(
         "Proceedings   of CHI 2025, page 3")
@@ -749,7 +749,7 @@ def test_runhead_signature_ignores_page_numbers():
 
 def test_drop_running_heads_spares_repeated_section_headings():
     """페이지 맨 위에 반복해 오는 진짜 섹션 제목/캡션은 러닝 헤더로 지우지 않는다."""
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     heads = [_FakeItem("A.2 Survey Instrument (continued)", p, 729, 723, label="section_header")
              for p in (3, 4, 5)]
@@ -762,7 +762,7 @@ def test_drop_running_heads_spares_repeated_section_headings():
 
 def test_manifest_survives_unprintable_snippet(wd):
     """본문 스니펫 주석에 U+FFFF(깨진 합자)·줄바꿈이 섞여도 저장한 YAML을 다시 읽을 수 있다."""
-    from md4paper.ir import Manifest, ManifestSection
+    from narani.ir import Manifest, ManifestSection
 
     sec = ManifestSection(id="h_0000", text="1 Intro", line=0, level=1,
                           context="PrefAct \uffffrst builds\nan explicit model")
@@ -809,7 +809,7 @@ def test_acm_front_matter_labels_are_not_flagged_for_review(wd):
 
 def test_front_matter_labels_leave_toc_but_keep_body(wd):
     """CCS Concepts·Keywords는 목차·섹션 트리에 안 나오고, 라벨과 내용은 본문에 남는다."""
-    from md4paper.assemble.render import render_markdown
+    from narani.assemble.render import render_markdown
 
     raw = (
         "# A Paper Title\n\n"
@@ -838,8 +838,8 @@ def test_front_matter_labels_leave_toc_but_keep_body(wd):
 
 def test_old_manifest_front_matter_labels_upgrade_on_load(wd):
     """새 규칙 전에 만든 매니페스트도 다시 열면 앞부분 라벨이 섹션에서 빠진다 (손으로 준 레벨은 유지)."""
-    from md4paper import prefs
-    from md4paper.assemble.render import render_markdown
+    from narani import prefs
+    from narani.assemble.render import render_markdown
 
     raw = (
         "# A Paper Title\n\n## CCS Concepts\n\n· HCI.\n\n## Keywords\n\nwriting\n\n"

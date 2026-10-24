@@ -3,10 +3,10 @@
 
 import pytest
 
-from md4paper import prefs
-from md4paper.ir import ManifestSection
-from md4paper.structure import build
-from md4paper.workdir import WorkDir
+from narani import prefs
+from narani.ir import ManifestSection
+from narani.structure import build
+from narani.workdir import WorkDir
 
 
 @pytest.fixture(autouse=True)

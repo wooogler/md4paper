@@ -1,4 +1,4 @@
-// Milkdown Crepe → src/md4paper/ui/assets/crepe/{crepe.min.js, crepe.min.css, VERSION}
+// Milkdown Crepe → src/narani/ui/assets/crepe/{crepe.min.js, crepe.min.css, VERSION}
 // 앱은 오프라인·빌드 도구 없이 돌므로, 개발 시점에 한 번 묶어 결과물을 커밋한다.
 import { build } from 'esbuild';
 import { mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs';
@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const out = join(here, '..', '..', 'src', 'md4paper', 'ui', 'assets', 'crepe');
+const out = join(here, '..', '..', 'src', 'narani', 'ui', 'assets', 'crepe');
 const pkg = join(here, 'node_modules', '@milkdown', 'crepe');
 const theme = join(pkg, 'lib', 'theme');
 mkdirSync(out, { recursive: true });

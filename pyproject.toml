@@ -1,7 +1,7 @@
 [project]
-name = "md4paper"
+name = "narani"
 version = "0.1.0"
-description = "논문 PDF를 헤더 정렬 마크다운 + 한국어 번역 마크다운으로 변환하는 CLI"
+description = "논문 PDF를 구조가 정리된 마크다운으로 바꾸고, 모국어 번역과 나란히 읽게 하는 도구"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -42,17 +42,17 @@ dependencies = [
 # 에이전트 창이 UI 안에 있으므로 ui는 agent를 함께 끌어온다.
 ui = [
     "nicegui>=3.14", "watchfiles>=0.21", "latex2mathml>=3.77", "mdit-py-plugins>=0.4",
-    "md4paper[agent]",
+    "narani[agent]",
 ]
 # 참고문헌 enrichment
 enrich = ["httpx>=0.27"]
-# 데스크톱 앱 창 (pywebview) — `md4paper ui --native`, `md4paper app`가 만드는 런처가 쓴다
+# 데스크톱 앱 창 (pywebview) — `narani ui --native`, `narani app`가 만드는 런처가 쓴다
 native = ["pywebview>=5.4"]
 # 에이전트 창 하네스 — tool 승인(deferred tools)·스트리밍 이벤트·세 프로바이더 모델 래퍼
 agent = ["pydantic-ai-slim[openai,anthropic,google]>=2.59"]
 
 [project.scripts]
-md4paper = "md4paper.cli:main"
+narani = "narani.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8.0", "ruff>=0.6"]
@@ -62,7 +62,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/md4paper"]
+packages = ["src/narani"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

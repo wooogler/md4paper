@@ -11,7 +11,7 @@ import urllib.parse
 import httpx
 import pytest
 
-from md4paper.phone import gdrive
+from narani.phone import gdrive
 
 
 class FakeDrive:
@@ -118,7 +118,7 @@ def test_push_to_drive(drive, tmp_path):
     pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
     from test_phone import _wd
 
-    from md4paper.phone import bundle, sync
+    from narani.phone import bundle, sync
 
     fake, store = drive
     wd = _wd(tmp_path, "bots")

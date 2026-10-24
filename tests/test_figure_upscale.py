@@ -6,8 +6,8 @@ import json
 import pytest
 from PIL import Image, ImageDraw
 
-from md4paper import figure_upscale, pdfio
-from md4paper.workdir import WorkDir
+from narani import figure_upscale, pdfio
+from narani.workdir import WorkDir
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def paper(tmp_path):
 
 
 def test_upscale_finds_each_figure_by_color(paper, monkeypatch):
-    from md4paper import library
+    from narani import library
 
     monkeypatch.setattr(library, "dir_for", lambda *a, **k: None)  # 실제 저장 위치를 건드리지 않게
     wd, pdf, rects = paper

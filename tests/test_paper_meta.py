@@ -2,10 +2,10 @@
 
 import json
 
-from md4paper import paper_meta
-from md4paper.ir import PaperMeta
-from md4paper.llm import FakeProvider
-from md4paper.workdir import WorkDir, rename_workdir
+from narani import paper_meta
+from narani.ir import PaperMeta
+from narani.llm import FakeProvider
+from narani.workdir import WorkDir, rename_workdir
 
 
 def test_authors_short():
@@ -84,7 +84,7 @@ def test_folder_base_collapses_separators_from_missing_pieces():
 
 
 def test_folder_base_reads_template_from_config():
-    from md4paper import config
+    from narani import config
 
     config.set_section_value("output", "naming", "{title}--{year}")
     assert paper_meta.folder_base(_META) == "Attention--2017"
@@ -96,7 +96,7 @@ def test_folder_base_strips_unsafe_chars_from_literal():
 
 
 def test_naming_template_validation_and_fallback():
-    from md4paper import config
+    from narani import config
 
     assert config.naming_template_error("{year}_{title}") is None
     assert config.naming_template_error("논문") is not None  # 자리표시자 없음
@@ -172,7 +172,7 @@ def test_rename_workdir_absorbs_unconverted_stub(tmp_path):
 # --- 연도 오인식: 오래된 논문의 재배포 PDF (생성일 2025 ≠ 출판 1986) ---
 def test_front_text_includes_pdf_page1_header(tmp_path, monkeypatch):
     """저널 머리말(연도·venue)을 추출기가 버려도 PDF 1페이지에서 가져와 LLM에 넣는다."""
-    from md4paper import pdfio
+    from narani import pdfio
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.extract.mkdir(parents=True)
@@ -197,7 +197,7 @@ def test_front_text_without_pdf_is_unchanged(tmp_path):
 
 def test_pdf_year_prefers_copyright_over_creation_date(monkeypatch):
     """재배포본은 생성일이 출판연도와 무관 — 1페이지 저작권 연도를 먼저 믿는다."""
-    from md4paper import pdfio
+    from narani import pdfio
 
     monkeypatch.setattr(pdfio, "first_page_text",
                         lambda s: "Psychological Bulletin\nCopyright 1986 by the APA, Inc.")
@@ -206,7 +206,7 @@ def test_pdf_year_prefers_copyright_over_creation_date(monkeypatch):
 
 
 def test_pdf_year_falls_back_to_creation_date(monkeypatch):
-    from md4paper import pdfio
+    from narani import pdfio
 
     monkeypatch.setattr(pdfio, "first_page_text", lambda s: "arXiv preprint, no copyright line")
     monkeypatch.setattr(pdfio, "metadata", lambda s: {"CreationDate": "D:20240412010101"})

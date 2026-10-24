@@ -6,23 +6,23 @@ import json
 
 import httpx
 
-from md4paper import updater
+from narani import updater
 
 OLD = "a" * 40
 NEW = "b" * 40
 
 
 def _direct_url(**vcs) -> str:
-    return json.dumps({"url": "https://github.com/wooogler/md4paper",
+    return json.dumps({"url": "https://github.com/wooogler/narani",
                        "vcs_info": {"vcs": "git", "commit_id": OLD, **vcs}})
 
 
 def test_source_from_direct_url():
     src = updater.source_from_direct_url(_direct_url())
-    assert (src.owner, src.repo, src.commit, src.ref) == ("wooogler", "md4paper", OLD, None)
-    assert src.spec == "md4paper[ui,native] @ git+https://github.com/wooogler/md4paper"
+    assert (src.owner, src.repo, src.commit, src.ref) == ("wooogler", "narani", OLD, None)
+    assert src.spec == "narani[ui,native] @ git+https://github.com/wooogler/narani"
     branch = updater.source_from_direct_url(_direct_url(requested_revision="dev"))
-    assert branch.spec.endswith("md4paper@dev")
+    assert branch.spec.endswith("narani@dev")
 
 
 def test_source_ignores_non_git_installs():
@@ -72,22 +72,22 @@ def test_posix_script_waits_reinstalls_relaunches(tmp_path):
     src = updater.source_from_direct_url(_direct_url())
     s = updater.posix_script(src, "/u/uv", 4242, tmp_path / "log", relaunch=True)
     assert "kill -0 4242" in s
-    assert "/u/uv tool install --force 'md4paper[ui,native] @ git+https://github.com/wooogler/md4paper'" in s
+    assert "/u/uv tool install --force 'narani[ui,native] @ git+https://github.com/wooogler/narani'" in s
     assert s.index("kill -0") < s.index("tool install") < s.index(" app ||")
 
 
 def test_version_label_has_version():
-    from md4paper import __version__
+    from narani import __version__
 
     assert updater.version_label().startswith(f"v{__version__}")
 
 
 def test_env_root_follows_app_bundle_symlink(tmp_path, monkeypatch):
     """맥 앱 번들로 띄우면 sys.prefix가 번들이다 — pyvenv.cfg 링크를 따라 실제 uv tool 폴더로."""
-    tool = tmp_path / "tools" / "md4paper"
+    tool = tmp_path / "tools" / "narani"
     tool.mkdir(parents=True)
     (tool / "pyvenv.cfg").write_text("home = /x\n")
-    contents = tmp_path / "md4paper.app" / "Contents"
+    contents = tmp_path / "narani.app" / "Contents"
     contents.mkdir(parents=True)
     (contents / "pyvenv.cfg").symlink_to(tool / "pyvenv.cfg")
     monkeypatch.setattr(updater.sys, "prefix", str(contents))

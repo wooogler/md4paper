@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from md4paper.ui import reanchor, sentpair
+from narani.ui import reanchor, sentpair
 
 NODE = shutil.which("node")
 pytestmark = pytest.mark.skipif(NODE is None, reason="node 없음")

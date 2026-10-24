@@ -8,8 +8,8 @@ pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
 
 from agent_support import make_wd  # noqa: E402
 
-from md4paper.ui import term_examples as te  # noqa: E402
-from md4paper.ui.agent import retrieval  # noqa: E402
+from narani.ui import term_examples as te  # noqa: E402
+from narani.ui.agent import retrieval  # noqa: E402
 
 EN = """# Mental Models in Code
 

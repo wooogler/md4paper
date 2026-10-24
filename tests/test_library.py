@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import config, library
-from md4paper.workdir import WorkDir
+from narani import config, library
+from narani.workdir import WorkDir
 
 
 def _wd(tmp_path: Path, name: str = "2017_Attention_Vaswani",
@@ -203,7 +203,7 @@ def _exported(tmp_path: Path):
 
 def test_delete_workdir_also_clears_library_copies(tmp_path):
     """기본값 — 사본까지 지운다. 안 지우면 사용자 볼트에 고아 파일이 남는다."""
-    from md4paper.workdir import delete_workdir
+    from narani.workdir import delete_workdir
 
     wd, ws = _exported(tmp_path)
     assert delete_workdir(wd.root, ws) is True
@@ -215,7 +215,7 @@ def test_delete_workdir_also_clears_library_copies(tmp_path):
 
 def test_delete_workdir_can_keep_library_copies(tmp_path):
     """체크박스를 끈 경우 — 작업 폴더만 지우고 볼트는 건드리지 않는다."""
-    from md4paper.workdir import delete_workdir
+    from narani.workdir import delete_workdir
 
     wd, ws = _exported(tmp_path)
     assert delete_workdir(wd.root, ws, with_library=False) is True
@@ -226,7 +226,7 @@ def test_delete_workdir_can_keep_library_copies(tmp_path):
 
 def test_delete_workdir_rejected_leaves_library_alone(tmp_path):
     """안전 검사에 걸려 거부되면 사본도 그대로 — 삭제는 검사를 통과한 뒤에만 일어난다."""
-    from md4paper.workdir import delete_workdir
+    from narani.workdir import delete_workdir
 
     wd, _ = _exported(tmp_path)
     assert delete_workdir(wd.root, tmp_path / "other-ws") is False  # 작업 폴더 밖
@@ -238,8 +238,8 @@ def test_delete_workdir_rejected_leaves_library_alone(tmp_path):
 def test_apply_naming_renames_folder_pdf_and_library(tmp_path):
     import json
 
-    from md4paper import paper_meta
-    from md4paper.ir import PaperMeta
+    from narani import paper_meta
+    from narani.ir import PaperMeta
 
     ws = tmp_path / "ws"
     wd = _wd(tmp_path, "2412.01234v2", ko=None)  # arXiv 다운로드명 같은 원래 이름
@@ -279,8 +279,8 @@ def test_apply_naming_takes_name_held_by_upload_stub(tmp_path):
     실사용에서 40편을 올린 뒤 변환 전에 중단 → 재업로드했더니 PDF만 든 껍데기가 이름을 막아
     변환 결과가 전부 '<이름> (2)'가 됐다. 그 상황을 그대로 재현한 회귀 테스트.
     """
-    from md4paper import paper_meta
-    from md4paper.ir import PaperMeta
+    from narani import paper_meta
+    from narani.ir import PaperMeta
 
     ws = tmp_path / "ws"
     stub = ws / "2017_Attention_Vaswani"  # 중단된 업로드가 남긴 껍데기 (PDF만)
@@ -306,7 +306,7 @@ def test_apply_naming_takes_name_held_by_upload_stub(tmp_path):
 
 def test_rename_keeps_suffix_when_real_paper_holds_the_name(tmp_path):
     """진짜 논문이 그 이름을 쓰고 있으면 (2)는 그대로 — 같은 논문을 두 번 변환한 정상 케이스."""
-    from md4paper.workdir import rename_workdir
+    from narani.workdir import rename_workdir
 
     ws = tmp_path / "ws"
     taken = ws / "2017_Attention_Vaswani"
@@ -318,7 +318,7 @@ def test_rename_keeps_suffix_when_real_paper_holds_the_name(tmp_path):
 
 
 def test_apply_naming_skips_papers_without_meta(tmp_path):
-    from md4paper import paper_meta
+    from narani import paper_meta
 
     ws = tmp_path / "ws"
     wd = _wd(tmp_path, "no-meta-paper", ko=None)
