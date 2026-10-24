@@ -976,5 +976,21 @@
  "나중에": "Más tarde",
  "업데이트하고 다시 시작": "Actualizar y reiniciar",
  "{label} · 개발본 {sha}": "{label} · versión de desarrollo {sha}",
- "메뉴·단추·안내문의 언어입니다. 창을 새로 열면 바뀝니다.": "Idioma de menús, botones y textos de ayuda. Se aplica al volver a abrir la ventana."
+ "메뉴·단추·안내문의 언어입니다. 창을 새로 열면 바뀝니다.": "Idioma de menús, botones y textos de ayuda. Se aplica al volver a abrir la ventana.",
+ "올린 논문이 없어요. 데스크톱 앱에서 폰으로 보내 주세요.": "Aún no hay artículos. Envíalos desde la app de escritorio.",
+ "{date}에 올린 목록": "Lista enviada el {date}",
+ "오프라인 {n}/{m}편": "{n}/{m} sin conexión",
+ "새로 고침": "Actualizar",
+ "모두 오프라인에 저장": "Guardar todo sin conexión",
+ "{n}편은 받지 못했어요": "No se pudieron descargar {n}",
+ "저장 중… {n}/{m}": "Guardando… {n}/{m}",
+ "연결된 저장소가 없어요.": "No hay almacenamiento conectado.",
+ "오프라인 — 받아 둔 목록이에요": "Sin conexión — mostrando la lista guardada",
+ "목록을 불러오지 못했어요. 인터넷 연결을 확인하세요.": "No se pudo cargar la lista. Revisa tu conexión a internet.",
+ "이 논문을 받지 못했어요. 인터넷에 연결된 뒤 다시 열어 보세요.": "No se pudo descargar este artículo. Ábrelo de nuevo cuando tengas conexión.",
+ "Google Drive에 연결해 데스크톱에서 보낸 논문을 받아요.": "Conecta Google Drive para recibir los artículos que enviaste desde el escritorio.",
+ "Google Drive 연결이 만료됐어요.": "La conexión con Google Drive caducó.",
+ "Google Drive 연결": "Conectar Google Drive",
+ "다시 연결": "Volver a conectar",
+ "Drive에 Narani 폴더가 없어요. 데스크톱 앱에서 먼저 폰으로 보내 주세요.": "Aún no hay una carpeta Narani en tu Drive. Envía artículos primero desde la app de escritorio."
 }
