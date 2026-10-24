@@ -1378,13 +1378,23 @@ def phone_site_cmd(out_dir: Path, google_client_id: str) -> None:
 @phone_group.command("preview")
 @click.option("--dir", "data_dir", type=click.Path(file_okay=False, path_type=Path), default=None,
               help="로컬 저장소 폴더 (기본: ~/.config/md4paper/phone)")
-@click.option("--port", default=8765, show_default=True, help="포트 (127.0.0.1에만 붙는다)")
-def phone_preview_cmd(data_dir: Path | None, port: int) -> None:
-    """폰 리더를 이 컴퓨터에서 띄워 본다 — 로컬 저장소 폴더를 저장소로 쓴다(시험용)."""
+@click.option("--port", default=8765, show_default=True, help="포트")
+@click.option("--host", default="127.0.0.1", show_default=True,
+              help="붙을 주소. 0.0.0.0이면 같은 Wi-Fi의 폰에서 열어 볼 수 있다 — 인증 없이 논문이 그 망에 열린다")
+def phone_preview_cmd(data_dir: Path | None, port: int, host: str) -> None:
+    """폰 리더를 이 컴퓨터에서 띄워 본다 — 로컬 저장소 폴더를 저장소로 쓴다(시험용).
+
+    --host 0.0.0.0으로 띄우고 폰에서 http://<이 컴퓨터 IP>:<포트>를 열면 실제 폰 화면을 볼 수 있다.
+    다만 http라서 폰 브라우저는 서비스 워커·캐시를 막는다(보안 출처가 아님) — 오프라인 저장은 안 되고
+    읽기 화면만 확인된다.
+    """
     from md4paper.phone import web
 
-    srv = web.make_server(data_dir or _phone_dir(), port)
-    click.echo(f"폰 리더 미리보기: http://127.0.0.1:{srv.server_address[1]}  (Ctrl+C로 종료)")
+    srv = web.make_server(data_dir or _phone_dir(), port, host)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        click.echo(click.style(f"주의: {host}에 붙었습니다 — 같은 망의 누구나 인증 없이 이 논문들을 볼 수 있습니다.",
+                               fg="yellow"))
+    click.echo(f"폰 리더 미리보기: http://{host}:{srv.server_address[1]}  (Ctrl+C로 종료)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

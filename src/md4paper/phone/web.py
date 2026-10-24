@@ -435,7 +435,7 @@ def write_site(out: Path, **kw: object) -> list[Path]:
 
 
 def make_server(data_dir: Path, port: int = 0, host: str = "127.0.0.1") -> ThreadingHTTPServer:
-    """미리보기 서버 — 웹앱 + `data/`에 로컬 저장소 폴더. 127.0.0.1에만 붙는다(시험용)."""
+    """미리보기 서버 — 웹앱 + `data/`에 로컬 저장소 폴더. 기본은 127.0.0.1에만 붙는다(시험용)."""
     files = site_files(local=True)
     root = Path(data_dir).resolve()
 
