@@ -104,7 +104,102 @@ _APP_JS = r"""
       });
     }};
   }
-  var source = CFG.local ? localSource() : null;
+  // Google Drive — 데스크톱이 만든 `Narani` 폴더(같은 Cloud 프로젝트라 drive.file로 보인다)를 읽는다.
+  // 로그인은 팝업 대신 **리디렉트**(OAuth 클라이언트 측 흐름) — iOS 홈 화면 앱에선 팝업이 막히거나
+  // 다른 창으로 열린다. 돌아온 주소의 #access_token을 읽고 원래 화면(#!…)으로 되돌린다.
+  // access token은 한 시간짜리다. 끊기면 읽던 것(캐시)은 그대로 열리고, 새로 받을 때만 다시 연결한다.
+  var GSCOPE = 'https://www.googleapis.com/auth/drive.file', GAPI = 'https://www.googleapis.com/drive/v3';
+  var authError = '';
+  function qs(o){ return Object.keys(o).map(function(k){ return encodeURIComponent(k) + '=' + encodeURIComponent(o[k]); }).join('&'); }
+  function takeRedirect(){
+    var h = location.hash.replace(/^#/, '');
+    if (!/(^|&)(access_token|error)=/.test(h)) return;
+    var p = {}, saved = null;
+    h.split('&').forEach(function(kv){ var i = kv.indexOf('='); if (i > 0) p[decodeURIComponent(kv.slice(0, i))] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, ' ')); });
+    try { saved = JSON.parse(sessionStorage.getItem('narani:gstate') || 'null'); sessionStorage.removeItem('narani:gstate'); } catch (e) {}
+    history.replaceState(null, '', location.pathname + location.search + ((saved && saved.back) || ''));
+    if (!saved || saved.s !== p.state) return;
+    if (p.access_token){
+      try {
+        localStorage.setItem('narani:gtok', JSON.stringify({at: p.access_token, exp: Date.now() + (+p.expires_in || 3600) * 1000}));
+        localStorage.setItem('narani:gconn', '1');
+      } catch (e) {}
+    } else authError = p.error || 'error';
+  }
+  function gToken(){
+    try { var t = JSON.parse(localStorage.getItem('narani:gtok') || 'null'); return t && t.exp > Date.now() + 60000 ? t.at : null; }
+    catch (e) { return null; }
+  }
+  function gSignIn(){
+    var st = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem('narani:gstate', JSON.stringify({s: st, back: location.hash})); } catch (e) {}
+    var o = {client_id: CFG.google_client_id, redirect_uri: location.origin + location.pathname, response_type: 'token',
+             scope: GSCOPE, include_granted_scopes: 'true', state: st};
+    location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + qs(o);
+  }
+  function driveSource(){
+    var folder = null, ids = null;
+    function fail(kind){ var e = new Error(kind); e.kind = kind; return e; }
+    function api(url){
+      var t = gToken();
+      if (!t) return Promise.reject(fail('auth'));
+      return fetch(url, {headers: {Authorization: 'Bearer ' + t}}).then(function(r){
+        if (r.status === 401){ try { localStorage.removeItem('narani:gtok'); } catch (e) {} throw fail('auth'); }
+        if (!r.ok) throw fail('http ' + r.status);
+        return r;
+      });
+    }
+    function list(q){
+      var out = [];
+      function page(tok){
+        var u = GAPI + '/files?' + qs({q: q, fields: 'nextPageToken,files(id,name,modifiedTime)', pageSize: 1000,
+                                       spaces: 'drive', orderBy: 'modifiedTime desc'}) + (tok ? '&pageToken=' + encodeURIComponent(tok) : '');
+        return api(u).then(function(r){ return r.json(); }).then(function(d){
+          out = out.concat(d.files || []);
+          return d.nextPageToken ? page(d.nextPageToken) : out;
+        });
+      }
+      return page(null);
+    }
+    function findFolder(){
+      if (folder) return Promise.resolve(folder);
+      return list("mimeType = 'application/vnd.google-apps.folder' and trashed = false and appProperties has { key='narani' and value='store' }")
+        .then(function(fs){
+          if (!fs.length) throw fail('nofolder');
+          folder = fs[0].id; return folder;
+        });
+    }
+    function loadIds(){
+      return findFolder().then(function(f){ return list("'" + f + "' in parents and trashed = false"); }).then(function(fs){
+        ids = {}; fs.forEach(function(x){ if (!(x.name in ids)) ids[x.name] = x.id; }); return ids;
+      });
+    }
+    return {
+      drive: true,
+      get: function(name){
+        // 목록을 받을 때마다 이름표를 새로 받는다 — 데스크톱이 그사이 새 번들을 올렸을 수 있다
+        var p = (name === 'index.json' || !ids) ? loadIds() : Promise.resolve(ids);
+        return p.then(function(m){
+          if (!m[name]) throw fail(name === 'index.json' ? 'nofolder' : 'missing');
+          return api(GAPI + '/files/' + m[name] + '?alt=media').then(function(r){ return r.json(); });
+        });
+      }
+    };
+  }
+  takeRedirect();
+  var source = CFG.local ? localSource() : (CFG.google_client_id ? driveSource() : null);
+  function sourceProblem(err){
+    // 저장소 오류 → 목록 위에 보일 안내와 단추
+    var kind = err && err.kind;
+    if (source && source.drive && (kind === 'auth' || authError)){
+      var first = true;
+      try { first = !localStorage.getItem('narani:gconn'); } catch (e) {}
+      return {text: first ? md4T('Google Drive에 연결해 데스크톱에서 보낸 논문을 받아요.') : md4T('Google Drive 연결이 만료됐어요.'),
+              button: first ? md4T('Google Drive 연결') : md4T('다시 연결'), act: function(){ gSignIn(); }};
+    }
+    if (kind === 'nofolder') return {text: md4T('Drive에 Narani 폴더가 없어요. 데스크톱 앱에서 먼저 폰으로 보내 주세요.')};
+    return {text: md4T('목록을 불러오지 못했어요. 인터넷 연결을 확인하세요.')};
+  }
 
   // ---- 오프라인 캐시 (받은 목록·번들) ----
   function cacheGet(name){
@@ -204,8 +299,12 @@ _APP_JS = r"""
       });
     })();
   }
-  function showIndex(ix, note){
-    INDEX = ix; renderLib(note);
+  function addAct(pr){
+    if (!pr || !pr.button) return;
+    var b = el('button', '', pr.button); b.onclick = pr.act; libBar.appendChild(b);
+  }
+  function showIndex(ix, note, pr){
+    INDEX = ix; renderLib(note); addAct(pr);
     if (!routed){ routed = true; route(); }
   }
   function loadIndex(force){
@@ -218,9 +317,10 @@ _APP_JS = r"""
       }
       return source.get('index.json').then(function(ix){
         cachePut('index.json', ix); setUiLang(ix.ui_lang); pruneCache(ix); showIndex(ix);
-      }, function(){
-        if (cached) showIndex(cached, md4T('오프라인 — 받아 둔 목록이에요'));
-        else libBar.textContent = md4T('목록을 불러오지 못했어요. 인터넷 연결을 확인하세요.');
+      }, function(err){
+        var pr = sourceProblem(err), offline = !pr.button && err && !err.kind;
+        if (cached) showIndex(cached, offline ? md4T('오프라인 — 받아 둔 목록이에요') : pr.text, pr);
+        else { libBar.innerHTML = ''; libBar.appendChild(el('span', 'grow', pr.text)); addAct(pr); }
       });
     });
   }
@@ -258,9 +358,13 @@ _APP_JS = r"""
       if (seq !== loadSeq) return;
       loading.style.display = 'none'; mount(b, target);
       if (INDEX) renderLib();
-    }, function(){
+    }, function(err){
       if (seq !== loadSeq) return;
-      loading.textContent = md4T('이 논문을 받지 못했어요. 인터넷에 연결된 뒤 다시 열어 보세요.');
+      if (err && err.kind === 'auth'){
+        loading.textContent = md4T('Google Drive 연결이 만료됐어요.') + ' ';
+        var b = el('button', '', md4T('다시 연결')); b.onclick = function(){ gSignIn(); };
+        loading.appendChild(b);
+      } else loading.textContent = md4T('이 논문을 받지 못했어요. 인터넷에 연결된 뒤 다시 열어 보세요.');
     });
     return true;
   }
@@ -434,9 +538,11 @@ def write_site(out: Path, **kw: object) -> list[Path]:
     return written
 
 
-def make_server(data_dir: Path, port: int = 0, host: str = "127.0.0.1") -> ThreadingHTTPServer:
+def make_server(data_dir: Path, port: int = 0, host: str = "127.0.0.1",
+                google_client_id: str = "") -> ThreadingHTTPServer:
     """미리보기 서버 — 웹앱 + `data/`에 로컬 저장소 폴더. 기본은 127.0.0.1에만 붙는다(시험용)."""
-    files = site_files(local=True)
+    # Google 클라이언트가 있으면 Drive가 저장소다(로컬 data/는 그대로 두지만 앱은 쓰지 않는다)
+    files = site_files(local=not google_client_id, google_client_id=google_client_id)
     root = Path(data_dir).resolve()
 
     class Handler(BaseHTTPRequestHandler):

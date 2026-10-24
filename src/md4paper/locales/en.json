@@ -987,5 +987,10 @@
  "연결된 저장소가 없어요.": "No storage connected.",
  "오프라인 — 받아 둔 목록이에요": "Offline — showing the saved list",
  "목록을 불러오지 못했어요. 인터넷 연결을 확인하세요.": "Couldn't load the list. Check your internet connection.",
- "이 논문을 받지 못했어요. 인터넷에 연결된 뒤 다시 열어 보세요.": "Couldn't download this paper. Open it again once you're online."
+ "이 논문을 받지 못했어요. 인터넷에 연결된 뒤 다시 열어 보세요.": "Couldn't download this paper. Open it again once you're online.",
+ "Google Drive에 연결해 데스크톱에서 보낸 논문을 받아요.": "Connect Google Drive to get the papers you sent from the desktop.",
+ "Google Drive 연결이 만료됐어요.": "Your Google Drive connection expired.",
+ "Google Drive 연결": "Connect Google Drive",
+ "다시 연결": "Reconnect",
+ "Drive에 Narani 폴더가 없어요. 데스크톱 앱에서 먼저 폰으로 보내 주세요.": "There's no Narani folder in your Drive yet. Send papers from the desktop app first."
 }

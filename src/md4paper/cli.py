@@ -1333,7 +1333,8 @@ def phone_group() -> None:
 @click.option("--collection", "--project", "project_ref", default=None, help="이 컬렉션의 논문 전부 ('none' = 미분류)")
 @click.option("--to", "to_dir", type=click.Path(file_okay=False, path_type=Path), default=None,
               help="로컬 저장소 폴더 (기본: ~/.config/md4paper/phone)")
-def phone_push_cmd(workdirs: tuple[Path, ...], project_ref: str | None, to_dir: Path | None) -> None:
+@click.option("--drive", "to_drive", is_flag=True, help="연결한 Google Drive(Narani 폴더)에 올린다")
+def phone_push_cmd(workdirs: tuple[Path, ...], project_ref: str | None, to_dir: Path | None, to_drive: bool) -> None:
     """논문들을 저장소에 올린다 — 바뀐 논문만 다시 굽는다.
 
     논문을 고르지 않으면 작업 폴더에서 번역이 있는 논문 전부로 목록을 맞춘다(빠진 논문은 지운다).
@@ -1353,15 +1354,64 @@ def phone_push_cmd(workdirs: tuple[Path, ...], project_ref: str | None, to_dir: 
     if not roots:
         raise click.ClickException("올릴 논문이 없습니다 — 번역한 논문이 없거나 고른 논문이 없습니다.")
     extra = {r["name"]: {"pinned": r["pinned"]} for r in rows}
-    target = to_dir or _phone_dir()
+    if to_drive:
+        from md4paper.phone import gdrive
+
+        try:
+            store = gdrive.open_store()
+        except gdrive.DriveError as e:
+            raise click.ClickException(str(e)) from e
+        target: object = "Google Drive/" + gdrive.FOLDER_NAME
+    else:
+        target = to_dir or _phone_dir()
+        store = LocalStore(target)
 
     def progress(n: int, total: int, key: str) -> None:
         if key:
             click.echo(f"  [{n + 1}/{total}] {key}")
 
-    s = sync.push(roots, LocalStore(target), prune=prune, extra=extra, on_progress=progress)
+    try:
+        s = sync.push(roots, store, prune=prune, extra=extra, on_progress=progress)
+    except Exception as e:  # DriveError 등 — 목록(index.json)은 마지막에 쓰므로 폰은 예전 목록을 그대로 본다
+        if not to_drive:
+            raise
+        raise click.ClickException(str(e)) from e
     click.echo(f"새로 올림 {s['uploaded']}편 · 그대로 {s['skipped']}편 · 지움 {s['removed']}편 "
                f"({s['bytes'] / 1e6:.1f}MB) → {target}")
+
+
+@phone_group.command("connect")
+def phone_connect_cmd() -> None:
+    """Google Drive에 연결한다 — 브라우저에서 로그인·동의하면 Drive에 Narani 폴더가 생긴다.
+
+    config.toml [phone]에 google_desktop_client_id·google_desktop_client_secret이 있어야 한다.
+    """
+    from md4paper.phone import gdrive
+
+    ids = gdrive.client_ids()
+
+    def show(url: str) -> None:
+        import webbrowser
+
+        click.echo("브라우저에서 Google 로그인을 마치세요. 창이 안 뜨면 이 주소를 여세요:\n  " + url)
+        webbrowser.open(url)
+
+    try:
+        gdrive.authorize(ids["google_desktop_client_id"], ids["google_desktop_client_secret"], open_url=show)
+        store = gdrive.open_store()
+        store.folder_id()
+        who = store.account()
+    except gdrive.DriveError as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"연결됨: {who or '(계정 확인 못 함)'} — Drive의 '{gdrive.FOLDER_NAME}' 폴더에 올립니다.")
+
+
+@phone_group.command("disconnect")
+def phone_disconnect_cmd() -> None:
+    """Google Drive 연결을 끊는다 (Drive에 올린 파일은 그대로)."""
+    from md4paper.phone import gdrive
+
+    click.echo("연결을 끊었습니다." if gdrive.forget() else "연결돼 있지 않습니다.")
 
 
 @phone_group.command("site")
@@ -1381,7 +1431,9 @@ def phone_site_cmd(out_dir: Path, google_client_id: str) -> None:
 @click.option("--port", default=8765, show_default=True, help="포트")
 @click.option("--host", default="127.0.0.1", show_default=True,
               help="붙을 주소. 0.0.0.0이면 같은 Wi-Fi의 폰에서 열어 볼 수 있다 — 인증 없이 논문이 그 망에 열린다")
-def phone_preview_cmd(data_dir: Path | None, port: int, host: str) -> None:
+@click.option("--drive", "use_drive", is_flag=True,
+              help="로컬 폴더 대신 Google Drive를 저장소로 (웹 클라이언트에 http://localhost:<포트>를 등록해 둘 것)")
+def phone_preview_cmd(data_dir: Path | None, port: int, host: str, use_drive: bool) -> None:
     """폰 리더를 이 컴퓨터에서 띄워 본다 — 로컬 저장소 폴더를 저장소로 쓴다(시험용).
 
     --host 0.0.0.0으로 띄우고 폰에서 http://<이 컴퓨터 IP>:<포트>를 열면 실제 폰 화면을 볼 수 있다.
@@ -1390,11 +1442,19 @@ def phone_preview_cmd(data_dir: Path | None, port: int, host: str) -> None:
     """
     from md4paper.phone import web
 
-    srv = web.make_server(data_dir or _phone_dir(), port, host)
+    gid = ""
+    if use_drive:
+        from md4paper.phone import gdrive
+
+        gid = gdrive.client_ids()["google_web_client_id"]
+        if not gid:
+            raise click.ClickException("config.toml [phone]에 google_web_client_id가 없습니다.")
+    srv = web.make_server(data_dir or _phone_dir(), port, host, google_client_id=gid)
     if host not in ("127.0.0.1", "localhost", "::1"):
         click.echo(click.style(f"주의: {host}에 붙었습니다 — 같은 망의 누구나 인증 없이 이 논문들을 볼 수 있습니다.",
                                fg="yellow"))
-    click.echo(f"폰 리더 미리보기: http://{host}:{srv.server_address[1]}  (Ctrl+C로 종료)")
+    shown = "localhost" if (use_drive and host == "127.0.0.1") else host  # Google에 등록한 원본과 같아야 한다
+    click.echo(f"폰 리더 미리보기: http://{shown}:{srv.server_address[1]}  (Ctrl+C로 종료)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
