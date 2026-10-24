@@ -1043,7 +1043,7 @@ _ANNO_HTML = """
     if (!ghost) return false;
     var parts = ghost.querySelectorAll('[data-pair="' + id + '"]'), txt = '', i;
     for (i = 0; i < parts.length; i++) txt += parts[i].textContent;
-    txt = txt.replace(/\s+/g, ' ').trim();
+    txt = txt.replace(/\\s+/g, ' ').trim();
     if (!txt) return false;
     stip.innerHTML = '<span class="st-side">' + (ghost.getAttribute('data-side') === 'ko' ? md4T('번역') : md4T('원문')) + '</span>';
     stip.appendChild(document.createTextNode(txt));
@@ -1337,7 +1337,7 @@ _EXTLINK_HTML = """
     var a = e.target.closest ? e.target.closest('a[href]') : null;
     if (!a) return;
     var href = a.getAttribute('href') || '';
-    if (!/^(https?:)?\/\//i.test(href) && !/^mailto:/i.test(href)) return;
+    if (!/^(https?:)?\\/\\//i.test(href) && !/^mailto:/i.test(href)) return;
     var u; try { u = new URL(a.href, location.href); } catch (err) { return; }
     if (u.origin === location.origin) return;
     a.target = '_blank'; a.rel = 'noopener noreferrer';
@@ -1454,7 +1454,7 @@ _IMG_ZOOM_HTML = """
   function hidpi(root){
     var imgs = root.querySelectorAll ? root.querySelectorAll('.md-preview img[src*="#mdw="]') : [];
     for (var i = 0; i < imgs.length; i++){
-      var m = /#mdw=(\d+)/.exec(imgs[i].getAttribute('src') || '');
+      var m = /#mdw=(\\d+)/.exec(imgs[i].getAttribute('src') || '');
       if (m && !imgs[i].style.width) imgs[i].style.width = m[1] + 'px';
     }
   }
@@ -3786,8 +3786,8 @@ def build(ctrl: UIController, state: dict | None = None) -> None:
               var d = ed.state.doc, out = [], fence = false;
               for (var n = 1; n <= d.lines; n++){
                 var t = d.line(n).text;
-                if (/^\s*(```|~~~)/.test(t)){ fence = !fence; continue; }
-                if (!fence && /^#{1,6}\s/.test(t)) out.push(n - 1);
+                if (/^\\s*(```|~~~)/.test(t)){ fence = !fence; continue; }
+                if (!fence && /^#{1,6}\\s/.test(t)) out.push(n - 1);
               }
               heads = out; headsDoc = d;
               return out;
