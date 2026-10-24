@@ -1,6 +1,6 @@
 
 // 앱 껍데기 캐시 — 먼저 캐시로 띄우고 뒤에서 새로 받아 둔다. 데이터(data/·__data/)는 앱이 직접 캐시한다.
-var V = '9778bc9a8a48', SHELL = 'narani-shell-' + V;
+var V = '8d33467fc3ce', SHELL = 'narani-shell-' + V;
 var FILES = ['./', 'index.html', 'app.js', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', function(e){
   e.waitUntil(caches.open(SHELL).then(function(c){ return c.addAll(FILES); }).then(function(){ return self.skipWaiting(); }));
