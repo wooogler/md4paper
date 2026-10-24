@@ -397,7 +397,7 @@ def _convert_panel(ui, save_global, export_target):  # noqa: ANN001, ANN202 — 
     _ui = i18n.ui_lang()
     ui.select({c: langs.get(c).native if c != "en" else "English" for c in i18n.available()}, value=_ui,
               label=t("화면 언어"), on_change=pick_ui_lang).props("dense outlined").classes("w-full")
-    ui.label(t("메뉴·단추의 언어입니다. 아직 일부 화면만 옮겨져 있어 나머지는 한국어로 보입니다.")) \
+    ui.label(t("메뉴·단추·안내문의 언어입니다. 창을 새로 열면 바뀝니다.")) \
         .classes("text-xs text-gray-400")
     _lang = config.resolve_target_lang()
     ui.select(langs.language_options(_lang), value=_lang, label=t("번역 언어 (모국어)"), on_change=pick_lang) \

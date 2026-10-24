@@ -1,6 +1,7 @@
 """화면 언어 — t()·카탈로그·JS 주입·문구 수집."""
 
 import json
+from pathlib import Path
 
 from md4paper import config, i18n
 from md4paper.i18n import t
@@ -22,8 +23,10 @@ def test_english_screen_uses_catalog_and_falls_back_to_korean():
 
 
 def test_screen_language_follows_translation_language_when_unset():
-    config.set_section_value("translate", "target_lang", "ja")  # 일본어 카탈로그는 아직 없다 → 영어
+    config.set_section_value("translate", "target_lang", "fr")  # 프랑스어 카탈로그는 없다 → 영어
     assert i18n.ui_lang() == "en"
+    config.set_section_value("translate", "target_lang", "ja")  # 카탈로그가 있는 언어면 그 언어
+    assert i18n.ui_lang() == "ja"
     config.set_section_value("translate", "target_lang", "ko")
     assert i18n.ui_lang() == "ko"
     config.set_section_value("ui", "language", "xx")  # 카탈로그 없는 값은 무시
@@ -112,3 +115,30 @@ def test_collect_joins_implicitly_concatenated_literals(tmp_path):
     pkg.mkdir()
     (pkg / "a.py").write_text('x = t("첫 줄 "\n      "둘째 줄", n=1)\ny = N_("상수")\n', encoding="utf-8")
     assert set(i18n.collect(pkg)) == {"첫 줄 둘째 줄", "상수"}
+
+
+def test_fill_drops_translations_with_wrong_placeholders(tmp_path, monkeypatch):
+    """tools/i18n_catalog.py fill — 가짜 LLM으로: 자리표시가 틀린 번역은 버리고 빈 채로 둔다, 영어 참고를 함께 보낸다."""
+    import importlib.util
+
+    from md4paper.llm import FakeProvider
+
+    spec = importlib.util.spec_from_file_location("i18n_catalog", Path(__file__).parents[1] / "tools" / "i18n_catalog.py")
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    monkeypatch.setattr(i18n, "LOCALES", tmp_path)
+    (tmp_path / "en.json").write_text(json.dumps({"닫기": "Close", "{n}편": "{n} papers"}), encoding="utf-8")
+    monkeypatch.setattr(i18n, "collect", lambda root=None: {"닫기": [], "{n}편": [], "저장": []})
+    seen = []
+
+    def parse(system, user, schema):
+        items = json.loads(user)
+        seen.extend(items)
+        tr = {"닫기": "閉じる", "{n}편": "{m}本", "저장": "保存"}  # {n}편의 자리표시가 틀렸다
+        return schema.model_validate({"items": [{"ko": it["ko"], "tr": tr[it["ko"]]} for it in items]})
+
+    monkeypatch.setattr(config, "build_provider", lambda p, m: FakeProvider(parse_fn=parse, model="fake"))
+    assert tool._fill("ja") == 0
+    data = json.loads((tmp_path / "ja.json").read_text(encoding="utf-8"))
+    assert data == {"닫기": "閉じる", "{n}편": "", "저장": "保存"}
+    assert {"ko": "닫기", "en": "Close"} in seen and {"ko": "저장"} in seen
