@@ -992,5 +992,10 @@
  "Google Drive 연결이 만료됐어요.": "La conexión con Google Drive caducó.",
  "Google Drive 연결": "Conectar Google Drive",
  "다시 연결": "Volver a conectar",
- "Drive에 Narani 폴더가 없어요. 데스크톱 앱에서 먼저 폰으로 보내 주세요.": "Aún no hay una carpeta Narani en tu Drive. Envía artículos primero desde la app de escritorio."
+ "Drive에 Narani 폴더가 없어요. 데스크톱 앱에서 먼저 폰으로 보내 주세요.": "Aún no hay una carpeta Narani en tu Drive. Envía artículos primero desde la app de escritorio.",
+ "하이라이트·메모 {n}개": "Resaltados y notas: {n}",
+ "올릴 기록 {n}개": "{n} cambios por sincronizar",
+ "(본문에서 위치를 찾지 못했어요)": "(no se encontró su lugar en el texto)",
+ "메모 고치기": "Editar nota",
+ "메모를 적으세요": "Escribe una nota"
 }

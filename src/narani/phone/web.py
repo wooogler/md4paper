@@ -40,6 +40,26 @@ _PWA_CSS = """
 .li-title .dl { color: var(--muted); font-weight: 400; font-size: .8em; margin-left: 4px; }
 #loading { color: var(--muted); text-align: center; margin: 30vh 0 0; font-size: .95em; }
 #lib .empty { color: var(--muted); font-size: .9em; padding: 12px 2px; }
+
+/* 하이라이트 — 데스크톱 뷰어와 같은 색. 글자는 형광 위라 늘 어둡게 */
+mark.anno { color: #24211c; border-radius: 2px; padding: 0; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.c-yellow { background: #ffe08a; } .c-green { background: #b5e7b8; } .c-blue { background: #a9d8f5; }
+.c-pink { background: #f9bcd4; } .c-purple { background: #d8c6f5; }
+mark.anno.note-end::after { content: "✎"; font-size: .75em; margin-left: 2px; color: #6b5a2a; }
+.anno-dots { display: flex; gap: 12px; margin: 12px 0 2px; }
+.anno-dots .dot { width: 32px; height: 32px; border-radius: 50%; border: 2px solid rgba(0,0,0,.12); padding: 0; }
+.anno-dots .dot.on { border-color: var(--fg); box-shadow: 0 0 0 2px var(--sheet) inset; }
+.anno-note { margin-top: 10px; padding: 8px 10px; background: var(--card); border: 1px solid var(--line);
+  border-radius: 8px; font-size: .9em; white-space: pre-wrap; }
+.anno-ta { width: 100%; font: inherit; font-size: 16px; color: var(--fg); background: var(--card);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; }
+.anno-head ol li { cursor: pointer; }
+.anno-head .aq { display: block; border-radius: 3px; padding: 0 3px; color: #24211c; }
+.anno-head .an { display: block; color: var(--muted); font-size: .9em; margin: 2px 0 0 4px; white-space: pre-wrap; }
+.anno-head .al { display: block; color: var(--muted); font-size: .8em; }
+.anno-pend { color: var(--muted); font-weight: 400; }
+.anno-reconnect { margin: 0 12px 10px; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+  border-radius: 9px; font: inherit; font-size: .85em; padding: 6px 10px; }
 """
 
 # 화면 언어 고르기 + md4T — 읽기 동작(CORE_JS)이 돌기 전에 있어야 한다
@@ -103,13 +123,19 @@ _APP_JS = r"""
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       });
+    }, put: function(name, obj){   // 미리보기 서버는 mobile/ 아래만 받아 준다
+      return fetch('data/' + name, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify(obj)}).then(function(r){
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      });
     }};
   }
   // Google Drive — 데스크톱이 만든 `Narani` 폴더(같은 Cloud 프로젝트라 drive.file로 보인다)를 읽는다.
   // 로그인은 팝업 대신 **리디렉트**(OAuth 클라이언트 측 흐름) — iOS 홈 화면 앱에선 팝업이 막히거나
   // 다른 창으로 열린다. 돌아온 주소의 #access_token을 읽고 원래 화면(#!…)으로 되돌린다.
   // access token은 한 시간짜리다. 끊기면 읽던 것(캐시)은 그대로 열리고, 새로 받을 때만 다시 연결한다.
-  var GSCOPE = 'https://www.googleapis.com/auth/drive.file', GAPI = 'https://www.googleapis.com/drive/v3';
+  var GSCOPE = 'https://www.googleapis.com/auth/drive.file', GAPI = 'https://www.googleapis.com/drive/v3',
+      GUP = 'https://www.googleapis.com/upload/drive/v3';
   var authError = '';
   function qs(o){ return Object.keys(o).map(function(k){ return encodeURIComponent(k) + '=' + encodeURIComponent(o[k]); }).join('&'); }
   function takeRedirect(){
@@ -141,10 +167,12 @@ _APP_JS = r"""
   function driveSource(){
     var folder = null, ids = null;
     function fail(kind){ var e = new Error(kind); e.kind = kind; return e; }
-    function api(url){
+    function api(url, opt){
       var t = gToken();
       if (!t) return Promise.reject(fail('auth'));
-      return fetch(url, {headers: {Authorization: 'Bearer ' + t}}).then(function(r){
+      opt = opt || {};
+      var h = opt.headers || {}; h.Authorization = 'Bearer ' + t; opt.headers = h;
+      return fetch(url, opt).then(function(r){
         if (r.status === 401){ try { localStorage.removeItem('narani:gtok'); } catch (e) {} throw fail('auth'); }
         if (!r.ok) throw fail('http ' + r.status);
         return r;
@@ -183,6 +211,21 @@ _APP_JS = r"""
         return p.then(function(m){
           if (!m[name]) throw fail(name === 'index.json' ? 'nofolder' : 'missing');
           return api(GAPI + '/files/' + m[name] + '?alt=media').then(function(r){ return r.json(); });
+        });
+      },
+      // 폰이 쓰는 파일(mobile/…)만 — 있으면 내용만 바꾸고, 없으면 앱 폴더에 새로 만든다
+      put: function(name, obj){
+        var body = JSON.stringify(obj);
+        return (ids ? Promise.resolve(ids) : loadIds()).then(function(m){
+          if (m[name]) return api(GUP + '/files/' + m[name] + '?uploadType=media',
+                                  {method: 'PATCH', headers: {'Content-Type': 'application/json'}, body: body});
+          var b = 'narani' + Math.random().toString(36).slice(2);
+          var meta = JSON.stringify({name: name, parents: [folder], mimeType: 'application/json'});
+          return api(GUP + '/files?uploadType=multipart&fields=id', {method: 'POST',
+            headers: {'Content-Type': 'multipart/related; boundary=' + b},
+            body: '--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + meta +
+                  '\r\n--' + b + '\r\nContent-Type: application/json\r\n\r\n' + body + '\r\n--' + b + '--'})
+            .then(function(r){ return r.json(); }).then(function(d){ ids[name] = d.id; });
         });
       }
     };
@@ -317,7 +360,7 @@ _APP_JS = r"""
         return;
       }
       return source.get('index.json').then(function(ix){
-        cachePut('index.json', ix); setUiLang(ix.ui_lang); pruneCache(ix); showIndex(ix);
+        cachePut('index.json', ix); setUiLang(ix.ui_lang); pruneCache(ix); showIndex(ix); flushPending();
       }, function(err){
         var pr = sourceProblem(err), offline = !pr.button && err && !err.kind;
         if (cached) showIndex(cached, offline ? md4T('오프라인 — 받아 둔 목록이에요') : pr.text, pr);
@@ -358,6 +401,7 @@ _APP_JS = r"""
     getPaper(e).then(function(b){
       if (seq !== loadSeq) return;
       loading.style.display = 'none'; mount(b, target);
+      notesOpen(e, b);
       if (INDEX) renderLib();
     }, function(err){
       if (seq !== loadSeq) return;
@@ -399,6 +443,284 @@ _APP_JS = r"""
   loadIndex(false);
 """
 
+# 하이라이트·메모 — 문장을 누르면 아래 시트에 색과 메모 단추(데스크톱 뷰어의 '문장 통째로' 표시와 같은 모양:
+# 원문·번역 짝 문장에 앵커 둘). 폰은 자기가 한 일만 기록(ops)으로 남겨 mobile/<id>.json에 올리고, 데스크톱이
+# 올린 notes/<id>.json(annotations.json 그대로 + applied)을 받아 그 위에 기록을 얹어 보여 준다(§phone.notes).
+# 기록은 이 폰(localStorage)에 먼저 남으므로 오프라인에서도 쓰고, 연결되면 올린다.
+_NOTES_JS = r"""
+  var COLORS = ['yellow', 'green', 'blue', 'pink', 'purple'], ACTX = 40;
+  var NOTE = {key: null, fid: null, base: [], applied: 0};
+  function lsGet(k, d){ try { var v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } }
+  function lsSet(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+  function ops(key){ return lsGet('narani:ops:' + key, []); }
+  function upTs(key){ return lsGet('narani:opsup:' + key, 0); }
+  function lastTs(list){ return list.length ? list[list.length - 1].ts : 0; }
+  function pendingCount(key){ var t = upTs(key); return ops(key).filter(function(o){ return o.ts > t; }).length; }
+
+  function items(){   // 데스크톱 것 위에 아직 합쳐지지 않은 폰 기록을 얹는다
+    var map = {}, order = [];
+    NOTE.base.forEach(function(it){ map[it.id] = it; order.push(it.id); });
+    ops(NOTE.key).forEach(function(o){
+      if (o.ts <= NOTE.applied) return;
+      if (o.op === 'del'){ delete map[o.id]; return; }
+      if (!(o.item.id in map)) order.push(o.item.id);
+      map[o.item.id] = o.item;
+    });
+    return order.filter(function(id){ return map[id]; }).map(function(id){ return map[id]; });
+  }
+
+  // ---- 위치 찾기 (데스크톱 뷰어의 resolve와 같은 순서: 제자리 → 앞뒤 문맥째 → 가장 가까운 같은 문구) ----
+  function resolve(txt, a){
+    var q = a.quote || '';
+    if (!q) return null;
+    if (txt.substr(a.start, q.length) === q) return [a.start, a.start + q.length];
+    var probe = (a.prefix || '') + q + (a.suffix || ''), i = txt.indexOf(probe);
+    if (i >= 0) return [i + (a.prefix || '').length, i + (a.prefix || '').length + q.length];
+    var best = -1, bd = Infinity, from = 0, j;
+    while ((j = txt.indexOf(q, from)) >= 0){ var d = Math.abs(j - a.start); if (d < bd){ bd = d; best = j; } from = j + 1; }
+    return best >= 0 ? [best, best + q.length] : null;
+  }
+  function cellAt(row, side){
+    var r = doc.getElementById(PID + '-r' + row);
+    return r ? (r.querySelector('.cell.' + side) || r.querySelector('.cell.same')) : null;
+  }
+  var TXT = null;   // 칠하는 동안만 쓰는 셀 평문 표 (셀마다 textContent를 거듭 세지 않게)
+  function textOf(c){
+    if (!TXT) return c.textContent;
+    for (var i = 0; i < TXT.length; i++) if (TXT[i].c === c) return TXT[i].t;
+    return c.textContent;
+  }
+  function locate(a){
+    for (var d = 0; d <= 3; d++){        // 행이 조금 밀렸으면 이웃 행에서
+      var rows = d ? [a.row - d, a.row + d] : [a.row];
+      for (var k = 0; k < rows.length; k++){
+        var c = cellAt(rows[k], a.side);
+        if (!c) continue;
+        var hit = resolve(textOf(c), a);
+        if (hit) return {cell: c, s: hit[0], e: hit[1]};
+      }
+    }
+    // 그래도 없으면 같은 쪽 셀 전체에서 문구로 — 다시 번역·조립해 행이 크게 밀렸거나, 원문·번역 절 수가
+    // 달라 나란히 맞추지 못한 논문(번역 셀이 원문 뒤에 따로 붙는다). 원래 행에 가장 가까운 것.
+    if (!cur || !a.quote) return null;
+    var cells = cur.querySelectorAll('.cell.' + a.side + ', .cell.same'), best = null, bd = Infinity;
+    for (var i = 0; i < cells.length; i++){
+      var t = textOf(cells[i]), probe = (a.prefix || '') + a.quote + (a.suffix || ''), j = t.indexOf(probe), s;
+      if (j >= 0) s = j + (a.prefix || '').length;
+      else if ((j = t.indexOf(a.quote)) >= 0) s = j;
+      else continue;
+      var rn = +cells[i].parentElement.id.replace(/^p\d+-r/, ''), dd = Math.abs(rn - a.row) + (j === s ? 0 : 0.5);
+      if (dd < bd){ bd = dd; best = {cell: cells[i], s: s, e: s + a.quote.length}; }
+    }
+    return best;
+  }
+
+  // ---- 칠하기 ----
+  function unpaint(){
+    if (!cur) return;
+    var ms = cur.querySelectorAll('mark.anno'), parents = [];
+    for (var i = 0; i < ms.length; i++){
+      var m = ms[i], p = m.parentNode;
+      while (m.firstChild) p.insertBefore(m.firstChild, m);
+      p.removeChild(m);
+      if (parents.indexOf(p) < 0) parents.push(p);
+    }
+    parents.forEach(function(p){ p.normalize(); });
+  }
+  function paint(){
+    if (!cur || !NOTE.key) return;
+    unpaint();
+    TXT = [].map.call(cur.querySelectorAll('.cell'), function(c){ return {c: c, t: c.textContent}; });
+    var list = items(), groups = [], lost = [];
+    list.forEach(function(it){
+      var placed = false;
+      (it.anchors || []).forEach(function(a){
+        var h = locate(a);
+        if (!h) return;
+        var g = null;
+        for (var i = 0; i < groups.length; i++) if (groups[i].cell === h.cell){ g = groups[i]; break; }
+        if (!g){ g = {cell: h.cell, segs: []}; groups.push(g); }
+        // 겹치는 표시는 먼저 온 것만 칠한다 (겹쳐 감싸면 마크가 엉킨다)
+        for (i = 0; i < g.segs.length; i++) if (g.segs[i].s < h.e && h.s < g.segs[i].e) return;
+        g.segs.push({s: h.s, e: h.e, it: it});
+        placed = true;
+      });
+      if (!placed) lost.push(it);
+    });
+    TXT = null;
+    groups.forEach(function(g){
+      wrapRanges(g.cell, g.segs, function(seg){
+        var m = doc.createElement('mark');
+        m.className = 'anno c-' + (COLORS.indexOf(seg.it.color) >= 0 ? seg.it.color : 'yellow');
+        m.setAttribute('data-aid', seg.it.id);
+        return m;
+      });
+    });
+    list.forEach(function(it){    // 메모가 있으면 셀(원문·번역)마다 마지막 조각 뒤에 ✎ — 보기 모드에 따라 한쪽만 보이므로
+      if (!it.note) return;
+      var ms = cur.querySelectorAll('mark.anno[data-aid="' + it.id + '"]'), last = [];
+      for (var i = 0; i < ms.length; i++){
+        var c = ms[i].closest('.cell'), k;
+        for (k = 0; k < last.length; k++) if (last[k].c === c) break;
+        if (k < last.length) last[k].m = ms[i]; else last.push({c: c, m: ms[i]});
+      }
+      last.forEach(function(x){ x.m.classList.add('note-end'); });
+    });
+    noteHead(list, lost);
+  }
+
+  // ---- 논문 머리의 메모 목록 ----
+  function noteHead(list, lost){
+    var head = cur && cur.querySelector('header.ph');
+    if (!head) return;
+    var box = head.querySelector('.anno-head');
+    if (!box){ box = el('details', 'anno-head toc'); head.appendChild(box); }
+    var pend = pendingCount(NOTE.key);
+    box.style.display = (list.length || pend) ? '' : 'none';
+    box.innerHTML = '';
+    var sum = el('summary', '', md4T('하이라이트·메모 {n}개', {n: list.length}));
+    if (pend) sum.appendChild(el('span', 'anno-pend', ' · ' + md4T('올릴 기록 {n}개', {n: pend})));
+    box.appendChild(sum);
+    if (pend && source && source.drive && !gToken()){   // 연결이 끊겨 못 올린 기록 — 다시 연결하면 올라간다
+      var rc = button(md4T('다시 연결'), function(){ gSignIn(); });
+      rc.className = 'anno-reconnect'; box.appendChild(rc);
+    }
+    var ol = el('ol');
+    list.forEach(function(it){
+      var li = el('li'), a = (it.anchors || [])[0] || {};
+      var q = el('span', 'aq c-' + it.color, (a.quote || '').slice(0, 120));
+      li.appendChild(q);
+      if (it.note) li.appendChild(el('span', 'an', it.note));
+      if (lost.indexOf(it) >= 0) li.appendChild(el('span', 'al', md4T('(본문에서 위치를 찾지 못했어요)')));
+      else li.onclick = function(){
+        var m = cur.querySelector('mark.anno[data-aid="' + it.id + '"]');
+        if (m) m.scrollIntoView({block: 'center'});
+      };
+      ol.appendChild(li);
+    });
+    box.appendChild(ol);
+  }
+
+  // ---- 열기 · 받기 ----
+  function notesOpen(e, b){
+    NOTE = {key: b.key, fid: fileId(e), base: [], applied: 0};
+    paint();
+    var key = b.key, name = 'notes/' + NOTE.fid + '.json';
+    if (!e.notes_hash) return;
+    cacheGet(name).then(function(c){
+      if (c && c.__h === e.notes_hash) return c;
+      if (!source) return c;
+      return source.get(name).then(function(n){ n.__h = e.notes_hash; cachePut(name, n); return n; },
+                                   function(){ return c; });
+    }).then(function(n){
+      if (!n || NOTE.key !== key) return;
+      NOTE.base = n.items || []; NOTE.applied = +n.applied || 0;
+      var mine = ops(key), left = mine.filter(function(o){ return o.ts > NOTE.applied; });
+      if (left.length !== mine.length) lsSet('narani:ops:' + key, left);   // 데스크톱이 합친 기록은 지운다
+      paint();
+    });
+  }
+
+  // ---- 기록 남기기 · 올리기 ----
+  function record(op){
+    var list = ops(NOTE.key), t = Date.now() / 1000;
+    op.ts = Math.max(t, lastTs(list) + 0.001);
+    list.push(op);
+    lsSet('narani:ops:' + NOTE.key, list);
+    var keys = lsGet('narani:opskeys', {}); keys[NOTE.key] = NOTE.fid; lsSet('narani:opskeys', keys);
+    paint();
+    upload(NOTE.key, NOTE.fid);
+  }
+  var uploading = {};
+  function upload(key, fid){
+    if (!source || !source.put || uploading[key]) return;
+    var list = ops(key);
+    if (!list.length || lastTs(list) <= upTs(key)) return;
+    uploading[key] = true;
+    var top = lastTs(list);
+    source.put('mobile/' + fid + '.json', {format: 1, key: key, ops: list}).then(function(){
+      lsSet('narani:opsup:' + key, top);
+    }, function(){}).then(function(){
+      uploading[key] = false;
+      if (NOTE.key === key && cur) noteHead(items(), []);
+      if (lastTs(ops(key)) > upTs(key) && lastTs(ops(key)) > top) upload(key, fid);   // 올리는 사이 새로 적은 것
+    });
+  }
+  function flushPending(){   // 오프라인일 때 적어 둔 기록 — 목록을 새로 받으면(연결되면) 올린다
+    var keys = lsGet('narani:opskeys', {});
+    for (var k in keys) upload(k, keys[k]);
+  }
+  window.addEventListener('online', flushPending);
+
+  // ---- 문장 시트의 동작 (CORE_JS의 onSentence가 부른다) ----
+  function spanOf(list, idx){
+    if (!idx || !idx.length) return null;
+    var s = list[idx[0]].s, e = list[idx[0]].e;
+    for (var i = 1; i < idx.length; i++){ s = Math.min(s, list[idx[i]].s); e = Math.max(e, list[idx[i]].e); }
+    return [s, e];
+  }
+  function anchorOf(cell, row, side, sp){
+    var txt = cell.textContent;
+    return {side: side, row: row, start: sp[0], end: sp[1], quote: txt.slice(sp[0], sp[1]),
+            prefix: txt.slice(Math.max(0, sp[0] - ACTX), sp[0]), suffix: txt.slice(sp[1], sp[1] + ACTX)};
+  }
+  function itemAt(row, side, sp){
+    var list = items();
+    for (var i = 0; i < list.length; i++){
+      var an = list[i].anchors || [];
+      for (var k = 0; k < an.length; k++){
+        if (an[k].side !== side) continue;
+        var h = locate(an[k]);
+        if (h && h.cell === cellAt(row, side) && h.s < sp[1] && sp[0] < h.e) return list[i];
+      }
+    }
+    return null;
+  }
+  function sentenceActs(rowEl, pi, pr, side){
+    if (!source || !source.put || !NOTE.key) return null;
+    var row = +rowEl.id.replace(/^p\d+-r/, '');
+    var spans = {en: spanOf(pr.en, pr.pairs[pi][0]), ko: spanOf(pr.ko, pr.pairs[pi][1])};
+    if (!spans[side]) return null;
+    var it = itemAt(row, side, spans[side]);
+    function fresh(color, note){
+      var an = [];
+      ['en', 'ko'].forEach(function(s){
+        var c = rowEl.querySelector('.cell.' + s);
+        if (c && spans[s]) an.push(anchorOf(c, row, s, spans[s]));
+      });
+      return {id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), color: color,
+              note: note || '', anchors: an, created: Date.now() / 1000};
+    }
+    var nodes = [], dots = el('div', 'anno-dots');
+    if (it && it.note) nodes.push(para(it.note, 'anno-note'));
+    COLORS.forEach(function(c){
+      var b = el('button', 'dot c-' + c + (it && it.color === c ? ' on' : ''));
+      b.setAttribute('aria-label', c);
+      b.onclick = function(){
+        record({op: 'put', item: it ? Object.assign({}, it, {color: c}) : fresh(c)});
+        clearSent(); closeSheet();
+      };
+      dots.appendChild(b);
+    });
+    nodes.push(dots);
+    var buttons = [button(it && it.note ? md4T('메모 고치기') : md4T('메모 달기'), function(){ editNote(it, fresh); })];
+    if (it) buttons.push(button(md4T('지우기'), function(){ record({op: 'del', id: it.id}); clearSent(); closeSheet(); }));
+    return {nodes: nodes, buttons: buttons};
+  }
+  function editNote(it, fresh){
+    var ta = el('textarea', 'anno-ta');
+    ta.value = (it && it.note) || ''; ta.rows = 4; ta.placeholder = md4T('메모를 적으세요');
+    var save = button(md4T('저장'), function(){
+      var note = ta.value.replace(/\s+$/, '');
+      if (it) record({op: 'put', item: Object.assign({}, it, {note: note})});
+      else if (note) record({op: 'put', item: fresh('yellow', note)});
+      clearSent(); closeSheet();
+    });
+    openSheet(md4T('메모'), [ta], [save]);
+    setTimeout(function(){ ta.focus(); }, 50);
+  }
+"""
+
 _SW_JS = r"""
 // 앱 껍데기 캐시 — 먼저 캐시로 띄우고 뒤에서 새로 받아 둔다. 데이터(data/·__data/)는 앱이 직접 캐시한다.
 var V = '%(version)s', SHELL = 'narani-shell-' + V;
@@ -435,7 +757,7 @@ def _js_strings(*codes: str) -> set[str]:
 
 def _catalogs() -> dict[str, dict[str, str]]:
     """화면 언어별 카탈로그 — 리더 JS가 쓰는 문구만 (전부 실으면 index.html이 커진다)."""
-    used = _js_strings(mobile.CORE_JS, _APP_JS)
+    used = _js_strings(mobile.CORE_JS, _APP_JS, _NOTES_JS)
     out: dict[str, dict[str, str]] = {}
     for lang in i18n.available():
         if lang == i18n.SOURCE:
@@ -505,7 +827,7 @@ def site_files(*, local: bool = False, google_client_id: str = "") -> dict[str, 
     """웹앱 파일들 → {이름: (바이트, MIME)}. local=True면 같은 주소의 `data/`를 저장소로 쓴다(미리보기)."""
     cfg = {"app_name": APP_NAME, "source_lang": i18n.SOURCE, "fallback_lang": "en", "local": local,
            "google_client_id": google_client_id, "catalogs": _catalogs()}
-    app_js = _PRELUDE_JS + "(function(){\n" + sentpair.JS + mobile.CORE_JS + _APP_JS + "})();\n"
+    app_js = _PRELUDE_JS + "(function(){\n" + sentpair.JS + mobile.CORE_JS + _APP_JS + _NOTES_JS + "})();\n"
     manifest = {
         "name": APP_NAME, "short_name": APP_NAME, "start_url": "./", "scope": "./", "display": "standalone",
         "background_color": "#fbfaf7", "theme_color": "#fbfaf7",
@@ -573,6 +895,24 @@ def make_server(data_dir: Path, port: int = 0, host: str = "127.0.0.1",
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(body)
+
+        def do_PUT(self) -> None:  # noqa: N802 — 폰이 쓰는 기록(mobile/…)만 받는다
+            path = self.path.split("?", 1)[0].lstrip("/")
+            target = (root / path[5:]).resolve() if path.startswith("data/mobile/") else None
+            size = int(self.headers.get("Content-Length") or 0)
+            if target is None or (root / "mobile") not in target.parents or not 0 < size <= 2_000_000:
+                self.send_error(403)
+                return
+            data = self.rfile.read(size)
+            try:
+                json.loads(data)
+            except ValueError:
+                self.send_error(400)
+                return
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            self.send_response(204)
+            self.end_headers()
 
     return ThreadingHTTPServer((host, port), Handler)
 

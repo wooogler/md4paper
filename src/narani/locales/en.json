@@ -992,5 +992,10 @@
  "Google Drive 연결이 만료됐어요.": "Your Google Drive connection expired.",
  "Google Drive 연결": "Connect Google Drive",
  "다시 연결": "Reconnect",
- "Drive에 Narani 폴더가 없어요. 데스크톱 앱에서 먼저 폰으로 보내 주세요.": "There's no Narani folder in your Drive yet. Send papers from the desktop app first."
+ "Drive에 Narani 폴더가 없어요. 데스크톱 앱에서 먼저 폰으로 보내 주세요.": "There's no Narani folder in your Drive yet. Send papers from the desktop app first.",
+ "하이라이트·메모 {n}개": "Highlights & notes: {n}",
+ "올릴 기록 {n}개": "{n} changes to sync",
+ "(본문에서 위치를 찾지 못했어요)": "(couldn't find its place in the text)",
+ "메모 고치기": "Edit note",
+ "메모를 적으세요": "Write a note"
 }

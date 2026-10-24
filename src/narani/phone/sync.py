@@ -5,6 +5,9 @@
 
 prune=True면 목록을 고른 논문들로 **맞춘다**(빠진 논문의 번들은 지운다). False면 고른 논문을 더하거나
 고치기만 한다.
+
+하이라이트·메모(§phone.notes)도 여기서 오간다 — 논문마다 폰 기록을 먼저 annotations.json에 합치고,
+바뀌었으면 notes/를 다시 올린다. 본문 번들을 다시 굽지 않아도 메모는 따로 오간다.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from pathlib import Path
 
 from narani import i18n
 from narani.phone import bundle as bmod
+from narani.phone import notes as nmod
 from narani.phone.store import Store
 
 INDEX = "index.json"
@@ -37,13 +41,13 @@ def push(roots: Iterable[Path], store: Store, *, prune: bool = False, extra: dic
          on_progress: Callable[[int, int, str], None] | None = None) -> dict:
     """논문들 → 저장소. extra는 논문 키 → 목록 줄에 덧붙일 값(고정·컬렉션 …).
 
-    반환: {uploaded, skipped, removed, bytes, papers}.
+    반환: {uploaded, skipped, removed, bytes, papers, merged(합친 폰 기록 수), notes(다시 올린 메모 파일 수)}.
     """
     roots = list(dict.fromkeys(Path(r) for r in roots))
     old = {e.get("key"): e for e in read_index(store)["papers"] if isinstance(e, dict)}
     code = bmod._code_stamp()
     entries: list[dict] = []
-    uploaded = skipped = sent = 0
+    uploaded = skipped = sent = merged = notes_sent = 0
     for n, root in enumerate(roots):
         key = root.stem
         if on_progress:
@@ -51,6 +55,10 @@ def push(roots: Iterable[Path], store: Store, *, prune: bool = False, extra: dic
         digest = bmod.content_hash(root, code)
         prev = old.get(key)
         more = (extra or {}).get(key, {})
+        ns = nmod.sync_paper(store, root, (prev or {}).get("notes_hash", ""))
+        merged += ns["merged"]
+        notes_sent += ns["wrote"]
+        more = {**more, "notes_hash": ns["notes_hash"]}
         if prev and prev.get("hash") == digest and prev.get("format", bmod.FORMAT) == bmod.FORMAT:
             entries.append({**prev, **more})
             skipped += 1
@@ -67,6 +75,9 @@ def push(roots: Iterable[Path], store: Store, *, prune: bool = False, extra: dic
         for k, e in old.items():
             if k not in keys and e.get("file"):
                 store.delete(e["file"])
+                if e.get("notes_hash"):
+                    store.delete(nmod.notes_name(k))
+                store.delete(nmod.mobile_name(k))
                 removed += 1
     else:  # 고르지 않은 예전 논문은 목록에 그대로 둔다
         entries += [e for k, e in old.items() if k not in keys]
@@ -74,4 +85,5 @@ def push(roots: Iterable[Path], store: Store, *, prune: bool = False, extra: dic
     store.write(INDEX, bmod.dumps(index))
     if on_progress:
         on_progress(len(roots), len(roots), "")
-    return {"uploaded": uploaded, "skipped": skipped, "removed": removed, "bytes": sent, "papers": len(entries)}
+    return {"uploaded": uploaded, "skipped": skipped, "removed": removed, "bytes": sent, "papers": len(entries),
+            "merged": merged, "notes": notes_sent}
