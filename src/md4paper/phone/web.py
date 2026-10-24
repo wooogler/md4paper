@@ -134,7 +134,7 @@ _APP_JS = r"""
   function gSignIn(){
     var st = Math.random().toString(36).slice(2) + Date.now().toString(36);
     try { sessionStorage.setItem('narani:gstate', JSON.stringify({s: st, back: location.hash})); } catch (e) {}
-    var o = {client_id: CFG.google_client_id, redirect_uri: location.origin + location.pathname, response_type: 'token',
+    var o = {client_id: CFG.google_client_id, redirect_uri: location.origin + location.pathname.replace(/index\.html$/, ''), response_type: 'token',
              scope: GSCOPE, include_granted_scopes: 'true', state: st};
     location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + qs(o);
   }
@@ -536,6 +536,9 @@ def write_site(out: Path, **kw: object) -> list[Path]:
     for name, (data, _mime) in site_files(**kw).items():  # type: ignore[arg-type]
         (out / name).write_bytes(data)
         written.append(out / name)
+    # GitHub Pages가 Jekyll로 다시 굽지 않고 파일 그대로 내보내게
+    (out / ".nojekyll").write_bytes(b"")
+    written.append(out / ".nojekyll")
     return written
 
 

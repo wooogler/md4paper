@@ -1416,10 +1416,20 @@ def phone_disconnect_cmd() -> None:
 
 @phone_group.command("site")
 @click.argument("out_dir", type=click.Path(file_okay=False, path_type=Path))
-@click.option("--google-client-id", default="", help="Google Drive 저장소용 OAuth 웹 클라이언트 ID")
-def phone_site_cmd(out_dir: Path, google_client_id: str) -> None:
-    """폰 리더 웹앱 파일을 폴더에 쓴다 — 정적 호스팅(GitHub Pages 등)에 그대로 올린다."""
-    from md4paper.phone import web
+@click.option("--google-client-id", default=None,
+              help="Google Drive용 OAuth 웹 클라이언트 ID (기본: config.toml [phone].google_web_client_id)")
+def phone_site_cmd(out_dir: Path, google_client_id: str | None) -> None:
+    """폰 리더 웹앱 파일을 폴더에 쓴다 — 정적 호스팅(GitHub Pages 등)에 그대로 올린다.
+
+    올린 주소(예: https://<user>.github.io/<repo>/)를 Google 웹 클라이언트의 승인된 JavaScript 원본
+    (https://<user>.github.io)과 리디렉션 URI(주소 그대로, 끝의 / 포함)에 넣어야 로그인이 된다.
+    """
+    from md4paper.phone import gdrive, web
+
+    if google_client_id is None:
+        google_client_id = gdrive.client_ids()["google_web_client_id"]
+    if not google_client_id:
+        click.echo(click.style("주의: 웹 클라이언트 ID가 없어 Drive에 연결하지 못하는 웹앱입니다.", fg="yellow"))
 
     files = web.write_site(out_dir, google_client_id=google_client_id)
     click.echo(f"웹앱 파일 {len(files)}개 → {out_dir}")
