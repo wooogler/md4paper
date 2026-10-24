@@ -393,6 +393,9 @@ main { max-width: 720px; margin: 0 auto; padding: 0 16px 45vh; }
 .cell pre { overflow-x: auto; font-size: .82em; background: var(--card); padding: 10px; border-radius: 8px; }
 .cell code { font-size: .9em; }
 .cell math[display=block] { display: block; overflow-x: auto; overflow-y: hidden; margin: .6em 0; }
+/* 인라인 수식은 줄을 바꾸지 못한다 — 화면보다 길면 페이지 전체가 가로로 늘어나 아래 시트까지 잘린다 */
+.cell math:not([display=block]) { display: inline-block; max-width: 100%; overflow-x: auto; overflow-y: hidden;
+  vertical-align: middle; }
 .cell ul, .cell ol { padding-left: 1.3em; margin: 0 0 .9em; }
 .cell a[href*="-ref-"], .cell sup a { text-decoration: none; border-bottom: 1px dotted currentColor; }
 .cell sup { line-height: 0; }
@@ -438,8 +441,10 @@ main { max-width: 720px; margin: 0 auto; padding: 0 16px 45vh; }
   border-radius: 9px; padding: 7px 12px; font: inherit; font-size: .85em; text-decoration: none; }
 """
 
-# 문장 짝 함수들(§sentpair)을 이 IIFE 안에 그대로 끼워 지역 함수로 쓴다.
-_JS = "(function(){\n" + sentpair.JS + r"""
+# 읽기 화면의 공통 동작 — 보기 모드·글자 크기·아래 시트·문장 짝·인용/각주. 목록↔논문 전환(_ROUTE_JS)은
+# 쓰는 쪽이 따로 붙인다: 이 파일(논문 전부가 한 문서에)과 폰 리더(§phone.web, 논문을 하나씩 불러옴).
+# 붙이는 쪽이 `cur`(연 논문 article)를 채우고 `showLib(push)`·`openPaper(id, push, target)`·`DATA`를 둔다.
+CORE_JS = r"""
   var doc = document, body = doc.body;
   body.classList.add('js');
   var sheet = doc.getElementById('sheet');
@@ -476,7 +481,7 @@ _JS = "(function(){\n" + sentpair.JS + r"""
   doc.getElementById('fs-dn').onclick = function(){ var a = topRow(); setFs(fs - 1); if (a) a.scrollIntoView({block: 'start'}); };
   doc.getElementById('fs-up').onclick = function(){ var a = topRow(); setFs(fs + 1); if (a) a.scrollIntoView({block: 'start'}); };
 
-  // ---- 목록 ↔ 논문 ----
+  // ---- 화면 맨 위 문단 ----
   function topRow(){
     if (!cur) return null;
     var rows = cur.querySelectorAll('.row'), y = 70, i;
@@ -486,50 +491,6 @@ _JS = "(function(){\n" + sentpair.JS + r"""
     }
     return null;
   }
-  function showLib(push){
-    if (cur) cur.classList.remove('on');
-    cur = null; lib.classList.remove('off'); topTitle.textContent = 'md4paper';
-    closeSheet(); window.scrollTo(0, 0);
-    if (push) history.pushState(null, '', '#!lib');
-  }
-  function openPaper(id, push, target){
-    var art = doc.getElementById(id);
-    if (!art || !art.classList.contains('paper')) return false;
-    if (cur && cur !== art) cur.classList.remove('on');
-    cur = art; art.classList.add('on'); lib.classList.add('off');
-    topTitle.textContent = (DATA[id] || {}).title || '';
-    closeSheet();
-    if (push) history.pushState(null, '', '#!' + id);
-    var el = target ? doc.getElementById(target) : null;
-    var off = 0;
-    if (!el){   // 저장해 둔 '행:행 안에서 내려간 px'
-      var saved = load('pos:' + art.getAttribute('data-key'), '').split(':');
-      el = saved[0] ? doc.getElementById(id + '-' + saved[0]) : null; off = +saved[1] || 0;
-    }
-    if (el){ el.scrollIntoView({block: 'start'}); if (off) window.scrollBy(0, off); } else window.scrollTo(0, 0);
-    return true;
-  }
-  try { history.scrollRestoration = 'manual'; } catch (e) {}   // 다시 열 때의 자리는 우리가 정한다
-  // 주소는 `#!p1` — `#p1`이면 그 id(논문 article)가 있어 Safari가 로드 직후 그리로 스크롤해
-  // 읽던 위치 복원을 덮어쓴다. JS 없는 미리보기에서 온 `#p1`·`#p1-ko-ref-3`도 받아 준다.
-  function route(){
-    var h = location.hash.replace(/^#!?/, ''), m = /^(p\d+)(?:-|$)/.exec(h);
-    if (m && openPaper(m[1], false, h === m[1] ? null : h)) return;
-    showLib(false);
-  }
-  doc.getElementById('back').onclick = function(){ showLib(true); };
-  window.addEventListener('popstate', route);
-  var saveTimer = null;
-  window.addEventListener('scroll', function(){
-    if (!cur || saveTimer) return;
-    saveTimer = setTimeout(function(){
-      saveTimer = null;
-      var r = topRow(); if (!r || !cur) return;
-      var into = Math.max(0, Math.round(64 - r.getBoundingClientRect().top));   // scroll-margin-top과 같은 기준
-      store('pos:' + cur.getAttribute('data-key'), r.id.replace(/^p\d+-/, '') + ':' + into);
-    }, 400);
-  }, {passive: true});
-
   // ---- 아래 시트 ----
   function closeSheet(){ sheet.classList.remove('open'); tapped = null; }
   function openSheet(label, nodes, acts){
@@ -656,6 +617,56 @@ _JS = "(function(){\n" + sentpair.JS + r"""
   });
   doc.addEventListener('keydown', function(e){ if (e.key === 'Escape'){ clearSent(); closeSheet(); } });
 
-  route();
-})();
 """
+
+_ROUTE_JS = r"""
+  // ---- 목록 ↔ 논문 ----
+  function showLib(push){
+    if (cur) cur.classList.remove('on');
+    cur = null; lib.classList.remove('off'); topTitle.textContent = 'md4paper';
+    closeSheet(); window.scrollTo(0, 0);
+    if (push) history.pushState(null, '', '#!lib');
+  }
+  function openPaper(id, push, target){
+    var art = doc.getElementById(id);
+    if (!art || !art.classList.contains('paper')) return false;
+    if (cur && cur !== art) cur.classList.remove('on');
+    cur = art; art.classList.add('on'); lib.classList.add('off');
+    topTitle.textContent = (DATA[id] || {}).title || '';
+    closeSheet();
+    if (push) history.pushState(null, '', '#!' + id);
+    var el = target ? doc.getElementById(target) : null;
+    var off = 0;
+    if (!el){   // 저장해 둔 '행:행 안에서 내려간 px'
+      var saved = load('pos:' + art.getAttribute('data-key'), '').split(':');
+      el = saved[0] ? doc.getElementById(id + '-' + saved[0]) : null; off = +saved[1] || 0;
+    }
+    if (el){ el.scrollIntoView({block: 'start'}); if (off) window.scrollBy(0, off); } else window.scrollTo(0, 0);
+    return true;
+  }
+  try { history.scrollRestoration = 'manual'; } catch (e) {}   // 다시 열 때의 자리는 우리가 정한다
+  // 주소는 `#!p1` — `#p1`이면 그 id(논문 article)가 있어 Safari가 로드 직후 그리로 스크롤해
+  // 읽던 위치 복원을 덮어쓴다. JS 없는 미리보기에서 온 `#p1`·`#p1-ko-ref-3`도 받아 준다.
+  function route(){
+    var h = location.hash.replace(/^#!?/, ''), m = /^(p\d+)(?:-|$)/.exec(h);
+    if (m && openPaper(m[1], false, h === m[1] ? null : h)) return;
+    showLib(false);
+  }
+  doc.getElementById('back').onclick = function(){ showLib(true); };
+  window.addEventListener('popstate', route);
+  var saveTimer = null;
+  window.addEventListener('scroll', function(){
+    if (!cur || saveTimer) return;
+    saveTimer = setTimeout(function(){
+      saveTimer = null;
+      var r = topRow(); if (!r || !cur) return;
+      var into = Math.max(0, Math.round(64 - r.getBoundingClientRect().top));   // scroll-margin-top과 같은 기준
+      store('pos:' + cur.getAttribute('data-key'), r.id.replace(/^p\d+-/, '') + ':' + into);
+    }, 400);
+  }, {passive: true});
+
+  route();
+"""
+
+# 문장 짝 함수들(§sentpair)을 이 IIFE 안에 그대로 끼워 지역 함수로 쓴다.
+_JS = "(function(){\n" + sentpair.JS + CORE_JS + _ROUTE_JS + "})();\n"

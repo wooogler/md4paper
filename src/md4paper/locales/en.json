@@ -976,5 +976,16 @@
  "영어 원문 없음": "No English source",
  "구조(sections.yaml)를 읽지 못함": "Couldn't read the structure (sections.yaml)",
  "저장을 취소했습니다.": "Save cancelled.",
- "저장됨: {target}": "Saved: {target}"
+ "저장됨: {target}": "Saved: {target}",
+ "올린 논문이 없어요. 데스크톱 앱에서 폰으로 보내 주세요.": "No papers yet. Send some from the desktop app.",
+ "{date}에 올린 목록": "List sent {date}",
+ "오프라인 {n}/{m}편": "{n}/{m} offline",
+ "새로 고침": "Refresh",
+ "모두 오프라인에 저장": "Save all offline",
+ "{n}편은 받지 못했어요": "Couldn't download {n}",
+ "저장 중… {n}/{m}": "Saving… {n}/{m}",
+ "연결된 저장소가 없어요.": "No storage connected.",
+ "오프라인 — 받아 둔 목록이에요": "Offline — showing the saved list",
+ "목록을 불러오지 못했어요. 인터넷 연결을 확인하세요.": "Couldn't load the list. Check your internet connection.",
+ "이 논문을 받지 못했어요. 인터넷에 연결된 뒤 다시 열어 보세요.": "Couldn't download this paper. Open it again once you're online."
 }
