@@ -26,15 +26,15 @@ from agent_support import Registry, scripted_model  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from md4paper import pipeline  # noqa: E402
-from md4paper.ir import GlossaryEntry, GlossaryList  # noqa: E402
-from md4paper.llm import FakeProvider  # noqa: E402
-from md4paper.translate.apply import run_translate  # noqa: E402
-from md4paper.ui import agent_panel, jobs  # noqa: E402
-from md4paper.ui.agent import jobtools, retrieval, routes, sessions  # noqa: E402
-from md4paper.ui.agent.agent import job_notice, make_agent  # noqa: E402
-from md4paper.ui.agent.tools import Deps, outline  # noqa: E402
-from md4paper.workdir import WorkDir  # noqa: E402
+from narani import pipeline  # noqa: E402
+from narani.ir import GlossaryEntry, GlossaryList  # noqa: E402
+from narani.llm import FakeProvider  # noqa: E402
+from narani.translate.apply import run_translate  # noqa: E402
+from narani.ui import agent_panel, jobs  # noqa: E402
+from narani.ui.agent import jobtools, retrieval, routes, sessions  # noqa: E402
+from narani.ui.agent.agent import job_notice, make_agent  # noqa: E402
+from narani.ui.agent.tools import Deps, outline  # noqa: E402
+from narani.workdir import WorkDir  # noqa: E402
 
 GLOSS = GlossaryList(entries=[GlossaryEntry(term="attention", korean="어텐션", policy="transliterate"),
                               GlossaryEntry(term="encoder", korean="인코더", policy="translate")])
@@ -170,7 +170,7 @@ def test_invalidate_merged_unit_retranslates_it(tmp_path):
 
 def test_plan_refuses_unknown_unticked_and_untranslated(paper, tmp_path):
     assert "없는 섹션 id" in jobtools.plan_retranslate(paper, ["h_9999"])
-    from md4paper.review import manifest as manifest_io
+    from narani.review import manifest as manifest_io
 
     man = manifest_io.load(paper)
     method = _sid_of(paper, "2 Method")
@@ -330,7 +330,7 @@ def test_missing_key_returns_guidance(paper):
 
 def test_default_provider_uses_viewer_translate_model(paper, monkeypatch):
     """대화 모델([chat])이 아니라 이 논문을 지난번에 번역한 모델 — 전역 기본이 달라도 캐시를 지킨다."""
-    from md4paper import config
+    from narani import config
 
     got = {}
 
@@ -371,7 +371,7 @@ def test_sync_marks_lost_jobs_and_adds_cost_once(tmp_path):
 
 
 def test_job_cost_counts_toward_session_cap(paper, monkeypatch):
-    from md4paper import config
+    from narani import config
 
     monkeypatch.setattr(config, "resolve_agent_cost_cap", lambda: 0.4)
     s = sessions.create()
@@ -451,7 +451,7 @@ def test_cost_tools_have_names_icons_and_are_in_agent():
 
 def test_translate_figures_round_trip(paper, monkeypatch):
     """그림 속 글자 번역 tool — 승인 카드(장 수·비용) → 승인 → 'figures' 작업 → 끝남 → 다음 턴 지시문에 한 번."""
-    from md4paper import figure_translate
+    from narani import figure_translate
 
     paper.out_images.mkdir(parents=True, exist_ok=True)
     (paper.out_images / "figure-2.png").write_bytes(b"\x89PNG fig")

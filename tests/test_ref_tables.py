@@ -1,6 +1,6 @@
 """표로 잡힌 참고문헌 목록 → 항목 목록 (NIRVANA [63]–[70])."""
 
-from md4paper.extract import ref_tables
+from narani.extract import ref_tables
 
 
 def _doc(rows, heading="References", caption=None):

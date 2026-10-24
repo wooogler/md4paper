@@ -2,7 +2,7 @@
 
 import pytest
 
-from md4paper import enrich
+from narani import enrich
 
 TITLE = "Designing a Meta-Reflective Dashboard for Instructor Insight into Student-AI Interactions"
 
@@ -141,9 +141,9 @@ def test_enrich_meta_noop_when_complete():
 
 
 def test_enrich_workdir_saves(tmp_path):
-    from md4paper import paper_meta
-    from md4paper.ir import PaperMeta
-    from md4paper.workdir import WorkDir
+    from narani import paper_meta
+    from narani.ir import PaperMeta
+    from narani.workdir import WorkDir
 
     wd = WorkDir(tmp_path / "p.md4")
     wd.root.mkdir(parents=True)

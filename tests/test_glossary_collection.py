@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import config, projects, workdir
-from md4paper.ir import GlossaryEntry, GlossaryList
-from md4paper.translate import glossary
-from md4paper.workdir import WorkDir
+from narani import config, projects, workdir
+from narani.ir import GlossaryEntry, GlossaryList
+from narani.translate import glossary
+from narani.workdir import WorkDir
 
 
 @pytest.fixture(autouse=True)

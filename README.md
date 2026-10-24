@@ -1,4 +1,6 @@
-# md4paper
+# Narani
+
+*나란히* — 원문과 번역을 나란히 놓고, 어떤 언어로 쓰인 논문이든 내 말로 읽습니다.
 
 *[English](README.en.md) · 한국어*
 
@@ -50,7 +52,7 @@ PDF를 통째로 LLM에 던지고 "번역해줘" 하는 방식과의 차이는, 
   사용하지 마세요. 추출(PDF→마크다운)만 쓰면 네트워크로 나가는 텍스트는 없습니다.
 - **API 요금이 실제로 청구됩니다.** 논문 한 편에 보통 $0.03-0.14 수준이며(→ [비용](#비용--논문-한-편에-얼마나-드나)),
   비용은 전적으로 사용자 부담입니다. 추출만 쓰면 요금은 들지 않습니다.
-- **API 키는 평문으로 저장됩니다** (`~/.config/md4paper/config.toml`, POSIX에서는 권한 0600).
+- **API 키는 평문으로 저장됩니다** (`~/.config/narani/config.toml`, POSIX에서는 권한 0600).
   공용 컴퓨터에서는 파일 저장 대신 환경 변수를 쓰세요.
 - **버그 리포트는 환영하지만, 지원을 약속하지 않습니다.** 이슈/PR은 여유 있을 때만 봅니다.
 
@@ -74,32 +76,35 @@ PDF를 통째로 LLM에 던지고 "번역해줘" 하는 방식과의 차이는, 
 
 ### 한 줄 설치 — 아이콘까지 한 번에 (권장)
 
-터미널에 이 줄을 붙여넣으면 uv·파이썬·md4paper·앱 아이콘까지 한 번에 끝납니다.
+터미널에 이 줄을 붙여넣으면 uv·파이썬·Narani·앱 아이콘까지 한 번에 끝납니다.
 
 **macOS / Linux**:
 ```bash
-curl -LsSf https://raw.githubusercontent.com/wooogler/md4paper/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/wooogler/narani/main/install.sh | sh
 ```
 
 **Windows** (PowerShell):
 ```powershell
-irm https://raw.githubusercontent.com/wooogler/md4paper/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/wooogler/narani/main/install.ps1 | iex
 ```
 
-끝나면 Launchpad·시작 메뉴에 **md4paper 아이콘**이 생깁니다. 눌러서 여세요
+끝나면 Launchpad·시작 메뉴에 **Narani 아이콘**이 생깁니다. 눌러서 여세요
 (→ [앱으로 열기](#앱으로-열기--아이콘-등록-선택)). 같은 줄을 다시 실행하면 최신 버전으로 업데이트됩니다.
 앱을 켤 때마다 GitHub에 새 커밋이 있는지 확인해 오른쪽 아래에 알려 주고, **업데이트하고 다시 시작**을 누르면
-앱이 닫혔다가 새 버전으로 다시 열립니다(터미널에서는 `md4paper update`, 끄려면 `MD4PAPER_NO_UPDATE_CHECK=1`).
+앱이 닫혔다가 새 버전으로 다시 열립니다(터미널에서는 `narani update`, 끄려면 `NARANI_NO_UPDATE_CHECK=1`).
 
 - **무엇을 하나** — uv(파이썬까지 관리하는 패키지 관리자)가 없으면 설치하고, `uv tool install`로
-  md4paper를 넣고, `md4paper app`으로 아이콘을 등록합니다. 스크립트는 [install.sh](install.sh) ·
+  narani를 넣고, `narani app`으로 아이콘을 등록합니다. 스크립트는 [install.sh](install.sh) ·
   [install.ps1](install.ps1)에 그대로 있으니 실행 전에 읽어 보세요(모르는 스크립트를 파이프로
   실행하는 건 원래 조심할 일입니다).
 - 의존성 약 1.3GB를 받으므로 처음에는 몇 분 걸립니다.
 - **설치 파일(.dmg·.exe)이 아니라 스크립트인 이유** — 앱을 **사용자 컴퓨터에서 조립**하기 때문에
   코드 서명·공증이 필요 없고, macOS의 "확인되지 않은 개발자" 경고나 Windows SmartScreen 경고도
   뜨지 않습니다. 1.5GB짜리 설치 파일을 내려받을 일도 없습니다.
-- 제거: `md4paper app --remove && uv tool uninstall md4paper`
+- 제거: `narani app --remove && uv tool uninstall narani`
+- **md4paper를 쓰고 있었다면** — 이 앱의 옛 이름입니다. 옛 앱의 자동 업데이트로는 넘어오지 못하니 위 설치 줄을
+  한 번 실행하세요. 처음 켤 때 `~/.config/md4paper`(키·컬렉션·Drive 연결)와 `~/md4paper`(논문)를
+  `~/.config/narani`·`~/narani`로 옮기고, 옛 아이콘과 `md4paper` 명령은 지웁니다.
 
 ### 직접 설치 — uv를 이미 쓰거나, 코드를 고칠 사람
 
@@ -121,43 +126,43 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 확인: `uv --version`
 
-#### 2단계 — md4paper 설치하고 웹 UI 켜기
+#### 2단계 — Narani 설치하고 웹 UI 켜기
 
 ##### 방법 A: 클론해서 쓰기 (개발용 권장)
 
 **Windows** (PowerShell):
 ```powershell
-git clone https://github.com/wooogler/md4paper.git
-cd md4paper
+git clone https://github.com/wooogler/narani.git
+cd narani
 uv sync --extra ui
-uv run md4paper ui
+uv run narani ui
 ```
 
 **macOS / Linux**:
 ```bash
-git clone https://github.com/wooogler/md4paper.git
-cd md4paper
+git clone https://github.com/wooogler/narani.git
+cd narani
 uv sync --extra ui
-uv run md4paper ui
+uv run narani ui
 ```
 
 `--extra ui`가 웹 UI(NiceGUI)를 포함합니다. 의존성 내려받는 데 처음 몇 분 걸립니다.
-설치가 잘 됐는지 보려면 `uv run md4paper doctor`.
+설치가 잘 됐는지 보려면 `uv run narani doctor`.
 
 ##### 방법 B: 클론 없이 바로 실행
 
 **Windows** (PowerShell):
 ```powershell
-uvx --from "md4paper[ui] @ git+https://github.com/wooogler/md4paper" md4paper ui
+uvx --from "narani[ui] @ git+https://github.com/wooogler/narani" narani ui
 ```
 
 **macOS / Linux**:
 ```bash
-uvx --from 'md4paper[ui] @ git+https://github.com/wooogler/md4paper' md4paper ui
+uvx --from 'narani[ui] @ git+https://github.com/wooogler/narani' narani ui
 ```
 
-첫 실행은 의존성을 받으므로 몇 분 걸립니다. 이 방식에서 작업 폴더 기본값은 `~/md4paper/output`
-(Windows는 `C:\Users\<사용자>\md4paper\output`)입니다.
+첫 실행은 의존성을 받으므로 몇 분 걸립니다. 이 방식에서 작업 폴더 기본값은 `~/narani/output`
+(Windows는 `C:\Users\<사용자>\narani\output`)입니다.
 
 ---
 
@@ -168,31 +173,31 @@ uvx --from 'md4paper[ui] @ git+https://github.com/wooogler/md4paper' md4paper ui
 
 ```bash
 uv sync --extra ui --extra native   # 앱 창 의존성(pywebview) 추가
-uv run md4paper app                 # 아이콘 등록
+uv run narani app                 # 아이콘 등록
 ```
 
 | OS | 만들어지는 것 | 어디서 열리나 |
 |---|---|---|
-| macOS | `~/Applications/md4paper.app` | Launchpad · Spotlight · Finder · Dock |
-| Windows | 시작 메뉴의 `md4paper` (`--desktop`을 주면 바탕화면에도) | 시작 메뉴 |
-| Linux | `~/.local/share/applications/md4paper.desktop` | 앱 메뉴 |
+| macOS | `~/Applications/Narani.app` | Launchpad · Spotlight · Finder · Dock |
+| Windows | 시작 메뉴의 `narani` (`--desktop`을 주면 바탕화면에도) | 시작 메뉴 |
+| Linux | `~/.local/share/applications/Narani.desktop` | 앱 메뉴 |
 
 아이콘을 누르면 브라우저 탭이 아니라 **독립 앱 창**이 뜹니다 — 화면과 기능은 웹 UI와 똑같습니다.
 서버는 여전히 127.0.0.1에만 붙고, 창을 닫으면 서버도 함께 내려갑니다. 터미널에서 같은 창을 띄우려면
-`uv run md4paper ui --native`입니다(브라우저로 열고 싶으면 그냥 `md4paper ui`).
+`uv run narani ui --native`입니다(브라우저로 열고 싶으면 그냥 `narani ui`).
 
 - **zip 내려받기**는 앱 창에서도 됩니다 — 브라우저 다운로드 대신 **OS 저장 대화상자**가 떠서 위치를
   고릅니다.
 - **환경변수는 상속되지 않습니다.** 아이콘으로 띄우면 셸에서 `export` 한 `OPENAI_API_KEY` 같은 값이
-  보이지 않습니다. 홈 사이드바 바닥 **⚙ 설정 → AI**에 키를 저장해 두세요(`~/.config/md4paper/config.toml`).
-- **아무 일도 일어나지 않으면** 로그를 보세요 — macOS는 `~/Library/Logs/md4paper.log`. 실행에
+  보이지 않습니다. 홈 사이드바 바닥 **⚙ 설정 → AI**에 키를 저장해 두세요(`~/.config/narani/config.toml`).
+- **아무 일도 일어나지 않으면** 로그를 보세요 — macOS는 `~/Library/Logs/narani.log`. 실행에
   실패하면 앱이 알림창으로 알려 줍니다.
-- **저장소를 옮기거나 가상환경을 다시 만들었다면** `md4paper app`을 다시 실행하세요.
+- **저장소를 옮기거나 가상환경을 다시 만들었다면** `narani app`을 다시 실행하세요.
   런처에 인터프리터 경로가 박혀 있습니다. (한 줄 설치로 넣었다면 업데이트해도 경로가 그대로라
   다시 할 필요가 없습니다.)
 - **앱 창을 못 띄우는 환경**(리눅스에 WebKit2GTK·Qt가 없는 경우 등)에서는 아이콘이 먹통이 되는 대신
   **브라우저로 엽니다**. 이유는 실행 로그에 적힙니다.
-- 제거: `md4paper app --remove`
+- 제거: `narani app --remove`
 
 > `uv sync --extra X`는 지정하지 않은 extra를 제거합니다. 앱 창을 쓰려면 **항상 두 개를 같이**
 > 주세요: `uv sync --extra ui --extra native`.
@@ -201,11 +206,11 @@ uv run md4paper app                 # 아이콘 등록
 
 ## 웹 UI 사용법
 
-`md4paper ui`를 실행하면 터미널에 `http://127.0.0.1:8080` 주소가 찍히고 브라우저가 열립니다.
+`narani ui`를 실행하면 터미널에 `http://127.0.0.1:8080` 주소가 찍히고 브라우저가 열립니다.
 (브라우저 대신 앱 창으로 쓰고 싶으면 → [앱으로 열기](#앱으로-열기--아이콘-등록-선택))
 **서버는 127.0.0.1(내 컴퓨터)에만 바인딩되므로 외부에서 접속할 수 없습니다.** 포트가 사용 중이면
 빈 포트를 자동으로 골라 실제 주소를 출력합니다. (`--port 9000`으로 지정, `--no-show`로 브라우저
-자동 열기 끄기, `md4paper ui <이름>.md4/`로 기존 작업 바로 열기)
+자동 열기 끄기, `narani ui <이름>.md4/`로 기존 작업 바로 열기)
 
 ### 1. 홈 — 올리고, 다시 찾기
 
@@ -583,8 +588,8 @@ Obsidian 문법으로 바꿉니다 — 이미지는 위키 임베드 `![[<논문
   전역 설정을 고치면 따로 정하지 않은 컬렉션들은 저절로 따라옵니다 — 설정을 두 군데서
   관리하지 않아도 됩니다.
 - 끈 것과 안 정한 것은 다릅니다. 컬렉션에서 BibTeX를 **끄면** 전역이 켜져 있어도 꺼진 채입니다.
-- CLI로도 됩니다: `md4paper collection set NIRVANA export_target obsidian` ·
-  해제는 `md4paper collection set NIRVANA export_target --unset` · 조회는 KEY 없이.
+- CLI로도 됩니다: `narani collection set NIRVANA export_target obsidian` ·
+  해제는 `narani collection set NIRVANA export_target --unset` · 조회는 KEY 없이.
 
 번역 문체나 추출 설정 같은 건 전역에만 둡니다 — 컬렉션 설정 화면이 전역 설정을 통째로
 복제하면 지금 보는 값이 어디서 온 건지 헷갈리기 때문입니다.
@@ -630,7 +635,7 @@ PDF 1페이지에 없는 것은 우리도 만들어 낼 수 없습니다 — 학
 정확합니다. 나중에 손볼 필요가 없도록 기본으로 켜 뒀고, 네트워크가 느리면 저장 위치 패널의
 *변환이 끝나면 서지를 온라인에서 보강* 스위치로 끕니다(컬렉션별로도 정할 수 있습니다).
 
-이미 변환해 둔 논문은 **⚙ 설정 → 고급**의 **서지 정보 보강** 버튼(또는 `md4paper enrich`)으로
+이미 변환해 둔 논문은 **⚙ 설정 → 고급**의 **서지 정보 보강** 버튼(또는 `narani enrich`)으로
 **지금 고른 컬렉션의** 논문에 대해 같은 일을 합니다:
 
 1. **Ai2의 Semantic Scholar**가 제목으로 그 논문을 찾습니다. 추출이 `Effect`를 `Efect`로
@@ -659,10 +664,10 @@ PDF 1페이지에 없는 것은 우리도 만들어 낼 수 없습니다 — 학
 - **전송되는 건 논문 제목뿐입니다.** 본문은 나가지 않습니다. 받은 기록은 논문 폴더의
   `bib_source.json`에 저장돼, 다시 내보낼 때는 네트워크를 쓰지 않습니다.
 - 어느 API에도 없는 논문(오래된 스캔본 등)은 PDF에서 읽은 값 그대로 남습니다.
-- `md4paper bib`는 **네트워크를 쓰지 않습니다** — 받아 둔 기록으로 `.bib`만 다시 씁니다.
+- `narani bib`는 **네트워크를 쓰지 않습니다** — 받아 둔 기록으로 `.bib`만 다시 씁니다.
 - **범위는 지금 고른 컬렉션**입니다(홈의 컬렉션 필터와 같습니다). 한 번에 한 묶음을 손보는 게
   보통인데 전체를 훑으면 예전 컬렉션까지 API를 두드리게 되기 때문입니다. 전체를 돌리려면
-  `md4paper enrich --all`, 다른 묶음은 `--collection <이름>`.
+  `narani enrich --all`, 다른 묶음은 `--collection <이름>`.
 - **진행률이 보이고 언제든 멈출 수 있습니다.** 논문 한 편에 몇 초에서 몇십 초가 걸립니다(참고문헌이
   100건이면 2분쯤). **중지**를 누르면 지금 논문까지만 마치고 멈추며, 그때까지 보강한 내용은
   이미 저장돼 있습니다. CLI는 진행 막대 + Ctrl+C.
@@ -713,31 +718,31 @@ Papers/PDF/2017_Attention_Vaswani.pdf        ← 원본 PDF도 같은 이름 →
 터미널에서도 같은 설정을 만집니다:
 
 ```bash
-uv run md4paper collection                                # 컬렉션 목록 · 지금 고른 컬렉션
-uv run md4paper collection add "튜터 챗봇 서베이" --dir ~/Vault/Tutor
-uv run md4paper collection use "튜터 챗봇 서베이"         # 새 논문이 들어갈 컬렉션
-uv run md4paper collection assign "튜터 챗봇" output/2017_.../2017_....md4
-uv run md4paper library                                   # 현재 저장 위치 확인
-uv run md4paper library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF
-uv run md4paper library --root ~/Papers                   # 공통 저장 위치를 폴더 하나로
-uv run md4paper library --export                          # 이미 변환한 논문 전부 내보내기
-uv run md4paper library --off all                         # 해제
-uv run md4paper bib --all                                 # references.bib 다시 채우기 (논문 API 조회)
-uv run md4paper naming                                    # 이름 규칙 확인
-uv run md4paper naming "{author}{year}_{title}"           # 규칙 변경
-uv run md4paper naming --apply                            # 기존 논문·PDF 이름 정리
+uv run narani collection                                # 컬렉션 목록 · 지금 고른 컬렉션
+uv run narani collection add "튜터 챗봇 서베이" --dir ~/Vault/Tutor
+uv run narani collection use "튜터 챗봇 서베이"         # 새 논문이 들어갈 컬렉션
+uv run narani collection assign "튜터 챗봇" output/2017_.../2017_....md4
+uv run narani library                                   # 현재 저장 위치 확인
+uv run narani library --en ~/Papers/EN --ko ~/Papers/KO --pdf ~/Papers/PDF
+uv run narani library --root ~/Papers                   # 공통 저장 위치를 폴더 하나로
+uv run narani library --export                          # 이미 변환한 논문 전부 내보내기
+uv run narani library --off all                         # 해제
+uv run narani bib --all                                 # references.bib 다시 채우기 (논문 API 조회)
+uv run narani naming                                    # 이름 규칙 확인
+uv run narani naming "{author}{year}_{title}"           # 규칙 변경
+uv run narani naming --apply                            # 기존 논문·PDF 이름 정리
 ```
 
 ### 서지 정보 보강 (선택)
 
 연도나 학회가 비어 있는 논문은 **공개 서지 API**에서 찾아 채울 수 있습니다. **⚙ 설정 → 고급**의
-**서지 정보 보강** 버튼 또는 `md4paper enrich --all`입니다.
+**서지 정보 보강** 버튼 또는 `narani enrich --all`입니다.
 
 - 1차 [OpenAlex](https://openalex.org), arXiv만 잡히면 [Crossref](https://www.crossref.org)로 출판 학회를 보강합니다. 둘 다 무료·키 불필요.
 - **논문 제목만 전송**합니다(본문은 나가지 않습니다). PDF에서 읽은 값은 **덮어쓰지 않고**, 비어 있는 칸만 채웁니다.
 - 조회 결과의 제목이 우리 제목과 충분히 일치할 때만 채택합니다. Crossref는 유사도와 무관하게 1등을
   돌려주기 때문에(실측: 2026년 논문 질의에 2010년 책 반환) 이 검증이 없으면 엉뚱한 연도가 조용히 들어옵니다.
-- `[enrich].mailto`에 이메일을 넣으면 API의 polite pool을 씁니다: `md4paper enrich --all --mailto you@example.com`
+- `[enrich].mailto`에 이메일을 넣으면 API의 polite pool을 씁니다: `narani enrich --all --mailto you@example.com`
 
 
 ---
@@ -748,8 +753,8 @@ uv run md4paper naming --apply                            # 기존 논문·PDF �
 터미널을 쓰려면:
 
 ```bash
-uv run md4paper keys set openai      # ~/.config/md4paper/config.toml 에 저장 (권한 0600)
-uv run md4paper keys list            # 설정 여부 확인 (값은 마스킹)
+uv run narani keys set openai      # ~/.config/narani/config.toml 에 저장 (권한 0600)
+uv run narani keys list            # 설정 여부 확인 (값은 마스킹)
 ```
 
 또는 환경 변수 — 공용 컴퓨터에서 권장:
@@ -803,27 +808,27 @@ uv run md4paper keys list            # 설정 여부 확인 (값은 마스킹)
 - **번역 범위 선택** — 필요한 섹션만 골라 번역할 수 있습니다.
 - **에이전트 창은 턴마다 실비용을 답변에 붙이고 세션 누적을 머리에 보입니다** — 대화가 길어져도 얼마 썼는지 그때그때 보입니다.
 
-> 실측치는 2026-07 기준 [base.py](src/md4paper/llm/base.py)의 가격표로 계산됩니다. 각 사 가격
+> 실측치는 2026-07 기준 [base.py](src/narani/llm/base.py)의 가격표로 계산됩니다. 각 사 가격
 > 정책이 바뀌면 달라지니, 처음에는 짧은 논문으로 한 번 돌려 출력되는 실비용을 확인해 보세요.
 
 ## 파일이 저장되는 곳
 
 | 항목 | 경로 |
 |---|---|
-| 작업 폴더(기본) | 저장소에서 실행: `<저장소>/output/` · `uvx` 실행: `~/md4paper/output/` |
+| 작업 폴더(기본) | 저장소에서 실행: `<저장소>/output/` · `uvx` 실행: `~/narani/output/` |
 | 논문별 결과 | `<작업폴더>/<이름>/<이름>.md4/` (추출 원문·구조·번역·로그) |
 | 최종 마크다운 | `<이름>.md4/out/paper.en.md`, `paper.ko.md`, `out/images/` |
 | 저장 위치(선택) | 직접 고른 폴더에 `<논문이름>.md` + `images/<논문이름>/` + `<논문이름>.pdf` — 영어·한국어·PDF 따로 |
-| 컬렉션 목록 | `~/.config/md4paper/projects.json` (컬렉션 이름·폴더, 지금 고른 컬렉션) |
+| 컬렉션 목록 | `~/.config/narani/projects.json` (컬렉션 이름·폴더, 지금 고른 컬렉션) |
 | 논문의 소속 | `<이름>.md4/status.json`의 `projects` 필드 (컬렉션 id 목록, 첫 항목이 주 컬렉션 · 비어 있으면 미분류. 옛 앱용으로 `project`에 첫 항목도 함께) |
-| 설정·API 키 | `~/.config/md4paper/config.toml` (Windows: `C:\Users\<사용자>\.config\md4paper\config.toml`) |
-| 헤더 처리 기억 | `~/.config/md4paper/heading_prefs.json` |
+| 설정·API 키 | `~/.config/narani/config.toml` (Windows: `C:\Users\<사용자>\.config\narani\config.toml`) |
+| 헤더 처리 기억 | `~/.config/narani/heading_prefs.json` |
 | Docling 모델 캐시 | `~/.cache/huggingface` (Windows: `C:\Users\<사용자>\.cache\huggingface`) |
-| 앱 런처(선택) | macOS `~/Applications/md4paper.app` · Windows 시작 메뉴 · Linux `~/.local/share/applications` |
-| 앱 실행 로그 | macOS `~/Library/Logs/md4paper.log` (아이콘으로 띄웠을 때) |
+| 앱 런처(선택) | macOS `~/Applications/Narani.app` · Windows 시작 메뉴 · Linux `~/.local/share/applications` |
+| 앱 실행 로그 | macOS `~/Library/Logs/narani.log` (아이콘으로 띄웠을 때) |
 
-작업 폴더 변경: 홈의 **⚙ 설정 → 저장 위치 → 작업 폴더**, `uv run md4paper workspace <경로>`,
-또는 `md4paper ui --upload-dir <경로>`.
+작업 폴더 변경: 홈의 **⚙ 설정 → 저장 위치 → 작업 폴더**, `uv run narani workspace <경로>`,
+또는 `narani ui --upload-dir <경로>`.
 
 기본값은 위 표처럼 **실행 방식에 따라 다르지만**, UI를 처음 켤 때 그때의 값이 설정 파일에
 기록됩니다. 그래서 클론으로 쓰다가 아이콘(한 줄 설치본)으로 갈아타도 **같은 폴더를 계속 봅니다**
@@ -838,21 +843,21 @@ uv run md4paper keys list            # 설정 여부 확인 (값은 마스킹)
 쓸 때 편합니다.
 
 ```bash
-uv run md4paper doctor                  # 환경 점검
-uv run md4paper convert paper.pdf       # PDF → paper.md4/out/paper.en.md
-uv run md4paper review paper.md4/       # 섹션 매니페스트를 $EDITOR로 열어 교정 후 재조립
-uv run md4paper cite paper.md4/         # 참고문헌 파싱 + 본문 인용 링크 (LLM)
-uv run md4paper glossary paper.md4/     # 번역 전 용어집 생성 (LLM)
-uv run md4paper translate paper.md4/    # 한국어 번역 → paper.md4/out/paper.ko.md (LLM)
-uv run md4paper ui paper.md4/           # 이 작업을 웹 UI로 열기
-uv run md4paper workspace               # 작업 폴더 조회 / 변경
-uv run md4paper collection              # 컬렉션 목록 / add · use · assign
-uv run md4paper library                 # 저장 위치(영어·한국어·PDF 폴더) 조회 / 변경 / --root
-uv run md4paper bib --all               # 저장 위치의 references.bib 다시 채우기 (논문 API 조회)
-uv run md4paper naming                  # 파일 이름 규칙 조회 / 변경 / --apply 일괄 정리
-uv run md4paper enrich --all            # 빈 연도·학회를 공개 서지 API로 보강
-uv run md4paper prefs list              # 기억된 헤더 처리 목록
-uv run md4paper app                     # 더블클릭용 앱 아이콘 등록 (--remove로 제거)
+uv run narani doctor                  # 환경 점검
+uv run narani convert paper.pdf       # PDF → paper.md4/out/paper.en.md
+uv run narani review paper.md4/       # 섹션 매니페스트를 $EDITOR로 열어 교정 후 재조립
+uv run narani cite paper.md4/         # 참고문헌 파싱 + 본문 인용 링크 (LLM)
+uv run narani glossary paper.md4/     # 번역 전 용어집 생성 (LLM)
+uv run narani translate paper.md4/    # 한국어 번역 → paper.md4/out/paper.ko.md (LLM)
+uv run narani ui paper.md4/           # 이 작업을 웹 UI로 열기
+uv run narani workspace               # 작업 폴더 조회 / 변경
+uv run narani collection              # 컬렉션 목록 / add · use · assign
+uv run narani library                 # 저장 위치(영어·한국어·PDF 폴더) 조회 / 변경 / --root
+uv run narani bib --all               # 저장 위치의 references.bib 다시 채우기 (논문 API 조회)
+uv run narani naming                  # 파일 이름 규칙 조회 / 변경 / --apply 일괄 정리
+uv run narani enrich --all            # 빈 연도·학회를 공개 서지 API로 보강
+uv run narani prefs list              # 기억된 헤더 처리 목록
+uv run narani app                     # 더블클릭용 앱 아이콘 등록 (--remove로 제거)
 ```
 
 주요 옵션:
@@ -863,19 +868,19 @@ uv run md4paper app                     # 더블클릭용 앱 아이콘 등록 (
 - `cite --style keep|authoryear|short` — 인용 표기
 - `review` — `$EDITOR`(Windows는 미설정 시 메모장)로 매니페스트를 엽니다
 
-`uvx`로 설치했다면 `uv run` 없이 `md4paper convert paper.pdf`처럼 씁니다.
+`uvx`로 설치했다면 `uv run` 없이 `narani convert paper.pdf`처럼 씁니다.
 
 ## 문제 해결
 
 **공통**
 
-- `md4paper doctor`를 먼저 실행하세요. 필수 항목이 모두 ✓면 변환은 됩니다.
+- `narani doctor`를 먼저 실행하세요. 필수 항목이 모두 ✓면 변환은 됩니다.
   LLM 키가 `-`로 표시되는 건 실패가 아니라 "선택 기능 미설정"입니다.
 - 변환해 둔 논문이 목록에 안 보임 → 파일이 지워진 게 아니라 **작업 폴더가 다른 곳을 가리키는** 것입니다.
   목록이 비어 있으면 홈에 지금 보고 있는 폴더 경로가 표시되니, **⚙ 설정 → 저장 위치 → 작업 폴더**에서 예전
-  폴더로 바꾸세요(`md4paper workspace <경로>`도 같습니다).
-- 앱 아이콘을 눌렀는데 아무 창도 안 뜸 → 실행 로그(macOS `~/Library/Logs/md4paper.log`)를 보세요.
-  대개 `uv sync --extra ui --extra native`를 안 했거나, 저장소를 옮긴 뒤 `md4paper app`을
+  폴더로 바꾸세요(`narani workspace <경로>`도 같습니다).
+- 앱 아이콘을 눌렀는데 아무 창도 안 뜸 → 실행 로그(macOS `~/Library/Logs/narani.log`)를 보세요.
+  대개 `uv sync --extra ui --extra native`를 안 했거나, 저장소를 옮긴 뒤 `narani app`을
   다시 실행하지 않은 경우입니다.
 - 앱 창에 AI 키가 안 보임 → 아이콘 실행은 셸 환경변수를 물려받지 않습니다. 홈의 **⚙ 설정 → AI**에
   키를 저장하세요.
@@ -890,7 +895,7 @@ uv run md4paper app                     # 더블클릭용 앱 아이콘 등록 (
   **방법 B**를 쓰세요.
 - 실행 정책 오류(`running scripts is disabled`) → uv 설치 명령의 `-ExecutionPolicy ByPass` 부분을
   빠뜨리지 않았는지 확인하세요.
-- 경로가 아주 긴 폴더에서 설치가 실패하면 짧은 경로(예: `C:\dev\md4paper`)로 옮겨 보세요.
+- 경로가 아주 긴 폴더에서 설치가 실패하면 짧은 경로(예: `C:\dev\narani`)로 옮겨 보세요.
 
 **macOS**
 
@@ -905,7 +910,7 @@ uv run md4paper app                     # 더블클릭용 앱 아이콘 등록 (
   ```
 - 헤드리스 서버에서는 `--no-show`로 실행하고 SSH 포트 포워딩으로 접속하세요:
   ```bash
-  md4paper ui --no-show --port 8080
+  narani ui --no-show --port 8080
   ssh -L 8080:127.0.0.1:8080 <사용자>@<서버>   # 로컬에서
   ```
   서버는 127.0.0.1에만 바인딩하므로 **인증 없이 외부에 열지 마세요**(그럴 의도로 만들지 않았습니다).

@@ -1,7 +1,7 @@
 """인라인 수식 복원 — PDF 글꼴·기준선으로 첨자를 되살려 $LaTeX$로."""
 
-from md4paper.extract import inline_math as im
-from md4paper.extract.inline_math import Glyph, Island
+from narani.extract import inline_math as im
+from narani.extract.inline_math import Glyph, Island
 
 MI, MI7, RM, SY = "LibertineMathMI", "LibertineMathMI7", "LinLibertineT", "txsys"
 

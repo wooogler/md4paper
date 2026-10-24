@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
 
-from md4paper.ui import agent_panel  # noqa: E402
+from narani.ui import agent_panel  # noqa: E402
 
 CSS, HTML, JS = agent_panel.CSS, agent_panel.HTML, agent_panel.JS
 
@@ -75,7 +75,7 @@ def test_nav_event_name_matches_and_is_guarded(monkeypatch):
 
 def test_citation_chip_selectors_match_backend_markup():
     """칩 마크업은 서버(cites.render_html)가 만든다 — 클래스·data 속성 이름이 어긋나면 칩이 죽는다."""
-    from md4paper.ui.agent.cites import render_html
+    from narani.ui.agent.cites import render_html
 
     html = render_html("a [[r3]] b [[aa1]]", [("abc123def456", 3), "aa1"],
                        {"aa1": {"id": "a1", "row": 3, "token": "abc123def456"}},
@@ -100,7 +100,7 @@ def test_routes_used_by_panel_exist():
     """창이 부르는 주소가 백엔드 라우트와 같은 모양이다."""
     from fastapi import FastAPI
 
-    from md4paper.ui.agent import routes
+    from narani.ui.agent import routes
 
     app = FastAPI()
     routes.register_routes(app, lambda t: None, lambda w: "")
@@ -116,7 +116,7 @@ def test_routes_used_by_panel_exist():
 
 def test_context_snapshot_fields_match_backend_model():
     """__md4Context가 보내는 필드 이름이 ScreenContext 필드와 같다(extra는 조용히 버려지므로)."""
-    from md4paper.ui.agent.context import ScreenContext
+    from narani.ui.agent.context import ScreenContext
 
     body = _js_block(JS, "function ctxNow(")
     sent = set(re.findall(r"^\s+(\w+):", body, re.M))
@@ -258,7 +258,7 @@ def test_jump_back_constants_are_single_sourced():
 
 def test_jump_back_z_index_between_find_bar_and_drawers():
     """알약은 본문 층 위, 서랍·찾기 바 아래여야 한다."""
-    from md4paper.ui import find_bar
+    from narani.ui import find_bar
 
     find_z = max(int(v) for v in re.findall(r"z-index:\s*(\d+)", find_bar.CSS))
     assert 100 < agent_panel.JUMP_BACK_Z < min(agent_panel.PANEL_Z, find_z)
@@ -374,7 +374,7 @@ def test_approval_flow_matches_backend_contract():
     """세션 상세는 pending을 싣고, turns는 approvals 키를 받는다(백엔드와 한 이름)."""
     import inspect
 
-    from md4paper.ui.agent import routes
+    from narani.ui.agent import routes
 
     src = inspect.getsource(routes)
     assert '"pending"' in src and 'body.get("approvals")' in src
@@ -414,7 +414,7 @@ def test_notes_refresh_handler_guards_and_defers_to_conflict_path():
     """옛 화면의 핸들러가 쌓여도 지금 논문·살아 있는 편집기에만, 그리고 capture()로 기존 충돌 안내를 탄다."""
     import inspect
 
-    from md4paper.ui import app
+    from narani.ui import app
 
     src = inspect.getsource(app.build)
     body = src.split("async def on_agent_refresh(", 1)[1].split("ui.on(agent_panel.NOTES_REFRESH_EVENT", 1)[0]

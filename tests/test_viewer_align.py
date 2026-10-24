@@ -4,7 +4,7 @@ import pytest
 
 pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
 
-from md4paper.ui.app import (  # noqa: E402
+from narani.ui.app import (  # noqa: E402
     _heading_of,
     _split_paragraphs,
     _split_sections,

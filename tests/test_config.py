@@ -1,6 +1,6 @@
 """config 키 저장·마스킹·삭제 (테스트용 임시 CONFIG_DIR은 conftest가 지정)."""
 
-from md4paper import config
+from narani import config
 
 
 def test_key_save_preview_and_delete(monkeypatch):

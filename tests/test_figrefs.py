@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from md4paper.ui import figrefs
+from narani.ui import figrefs
 
 
 def test_labeled_image_and_caption() -> None:

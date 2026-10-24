@@ -14,10 +14,10 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import figure_fix, pdfio
-from md4paper import figure_translate as ft
-from md4paper.llm import FakeProvider
-from md4paper.workdir import WorkDir
+from narani import figure_fix, pdfio
+from narani import figure_translate as ft
+from narani.llm import FakeProvider
+from narani.workdir import WorkDir
 
 pytest.importorskip("pypdfium2")
 np = pytest.importorskip("numpy")
@@ -146,8 +146,8 @@ def test_translate_changes_only_text_pixels_and_links_ko_md(wd):
 
 def test_glossary_terms_go_into_the_prompt(wd, monkeypatch):
     _font_or_skip()
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.translate import glossary
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.translate import glossary
 
     monkeypatch.setattr(glossary, "effective", lambda w, pid=None: (GlossaryList(entries=[
         GlossaryEntry(term="accuracy", korean="정확도"), GlossaryEntry(term="encoder", korean="인코더")]), {}))
@@ -294,8 +294,8 @@ def test_vertical_axis_title_is_drawn_rotated(wd):
 
 
 def test_apply_writes_ko_md_with_translated_figures(tmp_path, monkeypatch):
-    from md4paper import pipeline
-    from md4paper.translate.apply import run_translate
+    from narani import pipeline
+    from narani.translate.apply import run_translate
 
     w = WorkDir(tmp_path / "paper.md4")
     pipeline.convert(Path(__file__).parent / "corpus" / "sample_arxiv.md", w)
@@ -324,8 +324,8 @@ def client(wd, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from md4paper import library
-    from md4paper.ui import figure_ko, translate_job
+    from narani import library
+    from narani.ui import figure_ko, translate_job
 
     monkeypatch.setattr(translate_job, "provider_for", lambda w, choice=None: _fake())
     monkeypatch.setattr(translate_job, "default_model", lambda w: "openai/gpt-6-luna")
@@ -355,7 +355,7 @@ def test_routes_run_view_edit_remove(client, wd):
 
 
 def test_route_reports_errors_instead_of_500(client, monkeypatch):
-    from md4paper.ui import translate_job
+    from narani.ui import translate_job
 
     def nokey(w, choice=None):
         raise RuntimeError("openai API 키가 없습니다")
@@ -373,7 +373,7 @@ def test_route_reports_errors_instead_of_500(client, monkeypatch):
 def test_translate_job_runs_figures_after_text_when_asked(tmp_path, monkeypatch):
     import asyncio
 
-    from md4paper.ui import controller, translate_job
+    from narani.ui import controller, translate_job
 
     class FakeCtrl:
         def __init__(self, w):
@@ -405,7 +405,7 @@ def test_translate_job_runs_figures_after_text_when_asked(tmp_path, monkeypatch)
 
 def test_agent_figure_names_and_approval_card(wd, monkeypatch):
     pytest.importorskip("pydantic_ai")
-    from md4paper.ui.agent import jobtools
+    from narani.ui.agent import jobtools
 
     monkeypatch.setattr(jobtools, "translate_choice", lambda w: ("openai", "gpt-6-luna"))
     wd.en_md.write_text(wd.en_md.read_text(encoding="utf-8") + "\n![](images/image-1.png)\n", encoding="utf-8")

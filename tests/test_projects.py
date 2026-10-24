@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import config, library, projects, workdir
-from md4paper.workdir import WorkDir
+from narani import config, library, projects, workdir
+from narani.workdir import WorkDir
 
 
 def _wd(tmp_path: Path, name: str = "2017_Attention_Vaswani", *,
@@ -424,7 +424,7 @@ def test_a_project_without_a_folder_adds_no_copy(tmp_path):
 
 def test_each_copy_follows_its_own_folders_format(tmp_path, monkeypatch):
     """이름은 주 프로젝트 규칙 하나, 형식·BibTeX는 사본이 놓이는 폴더의 프로젝트 설정 — 볼트마다 앱이 다르다."""
-    from md4paper import bibtex
+    from narani import bibtex
 
     entry = "@article{Vaswani2017,\n  title = {Attention Is All You Need},\n  year = {2017}\n}\n"
     monkeypatch.setattr(bibtex, "entry_for", lambda wd: ("Vaswani2017", entry))
@@ -521,7 +521,7 @@ def test_leaving_every_project_goes_back_to_the_shared_place(tmp_path):
 
 def test_filters_and_counts_go_by_membership(tmp_path, monkeypatch):
     """여러 프로젝트에 속한 논문은 그 어느 프로젝트에도 잡히고, 편수도 프로젝트마다 센다."""
-    from md4paper import cli, enrich
+    from narani import cli, enrich
 
     ws = tmp_path / "ws"
     monkeypatch.setattr(config, "resolve_workspace", lambda: ws)
@@ -621,7 +621,7 @@ def test_a_deleted_project_setting_does_not_leak_to_papers(tmp_path):
 def test_cli_collection_is_the_name_and_project_still_works():
     from click.testing import CliRunner
 
-    from md4paper.cli import cli
+    from narani.cli import cli
 
     pid = projects.create("서베이")["id"]
     runner = CliRunner()
@@ -642,4 +642,4 @@ def test_cli_collection_is_the_name_and_project_still_works():
 
     missing = runner.invoke(cli, ["collection", "use", "없는것"])
     assert missing.exit_code != 0
-    assert "맞는 컬렉션이 없습니다 — 목록: md4paper collection" in missing.output
+    assert "맞는 컬렉션이 없습니다 — 목록: narani collection" in missing.output

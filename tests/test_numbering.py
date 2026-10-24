@@ -1,7 +1,7 @@
 """numbering.py 단위 테스트 — 핵심 IP라 광범위하게 커버한다."""
 
-from md4paper.ir import Scheme
-from md4paper.structure import numbering
+from narani.ir import Scheme
+from narani.structure import numbering
 
 
 def test_dotted_arabic():

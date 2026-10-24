@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 from docling_core.types.doc import BoundingBox, CoordOrigin, TableCell, TableData
 
-from md4paper.extract import tables
-from md4paper.extract.inline_math import Glyph
+from narani.extract import tables
+from narani.extract.inline_math import Glyph
 
 H = 800.0  # 쪽 높이
 SIZE, W = 9.0, 4.5  # 글자 크기·폭

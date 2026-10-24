@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline, relayout
-from md4paper.ir import Flavor, Manifest, ManifestSection
-from md4paper.llm.base import FakeProvider
-from md4paper.ui.controller import UIController
-from md4paper.workdir import WorkDir
+from narani import pipeline, relayout
+from narani.ir import Flavor, Manifest, ManifestSection
+from narani.llm.base import FakeProvider
+from narani.ui.controller import UIController
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 _ATX = re.compile(r"^#{1,6}\s+\S")

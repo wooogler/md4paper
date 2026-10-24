@@ -11,9 +11,9 @@ import pytest
 
 pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
 
-from md4paper.phone import bundle, sync, web  # noqa: E402
-from md4paper.phone.store import LocalStore  # noqa: E402
-from md4paper.workdir import WorkDir  # noqa: E402
+from narani.phone import bundle, sync, web  # noqa: E402
+from narani.phone.store import LocalStore  # noqa: E402
+from narani.workdir import WorkDir  # noqa: E402
 
 EN = """# Bespoke Bots
 

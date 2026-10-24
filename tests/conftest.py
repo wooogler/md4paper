@@ -1,4 +1,4 @@
-"""테스트 격리 — 사용자의 실제 ~/.config/md4paper 설정에 영향받지 않도록.
+"""테스트 격리 — 사용자의 실제 ~/.config/narani 설정에 영향받지 않도록.
 
 config.CONFIG_DIR은 임포트 시점에 env를 읽으므로, 테스트 모듈보다 먼저 로드되는
 conftest에서 env를 지정해야 한다.
@@ -7,7 +7,7 @@ conftest에서 env를 지정해야 한다.
 import os
 import tempfile
 
-os.environ["MD4PAPER_CONFIG_DIR"] = tempfile.mkdtemp(prefix="md4paper-test-config-")
+os.environ["NARANI_CONFIG_DIR"] = tempfile.mkdtemp(prefix="narani-test-config-")
 
 import pytest  # noqa: E402 — env 설정 후 임포트해야 함
 
@@ -30,7 +30,7 @@ def _clean_heading_prefs():
 
     (controller.save()가 선택을 학습하기 때문에, 안 비우면 다음 테스트의 레벨이 바뀐다.)
     """
-    from md4paper import prefs
+    from narani import prefs
 
     if prefs.PREFS_PATH.exists():
         prefs.PREFS_PATH.unlink()
@@ -46,7 +46,7 @@ def _clean_projects():
     (한 테스트가 만든 프로젝트가 남아 있으면 다음 테스트의 저장 위치 해석이 그 프로젝트
     폴더로 새어 나간다 — library.dir_for가 프로젝트를 먼저 보기 때문.)
     """
-    from md4paper import projects
+    from narani import projects
 
     if projects.PROJECTS_PATH.exists():
         projects.PROJECTS_PATH.unlink()
@@ -61,7 +61,7 @@ def _clean_config():
 
     (홈 Global 설정을 config에 저장하면 build()가 그 값을 시드해 다른 테스트의 기본값이 바뀐다.)
     """
-    from md4paper import config
+    from narani import config
 
     if config.CONFIG_PATH.exists():
         config.CONFIG_PATH.unlink()
@@ -73,7 +73,7 @@ def _clean_config():
 @pytest.fixture(autouse=True)
 def _reset_bibsource_cooldown():
     """레이트리밋에 걸린 출처 기억은 프로세스 전역이라 테스트 사이에 새어 나간다 — 매번 되살린다."""
-    from md4paper import bibsource
+    from narani import bibsource
 
     bibsource.reset_sources()
     yield
@@ -83,7 +83,7 @@ def _reset_bibsource_cooldown():
 @pytest.fixture(autouse=True)
 def _clean_tabs_and_jobs():
     """열린 탭(open_tabs.json)·백그라운드 작업 레지스트리는 전역이라 테스트마다 비운다."""
-    from md4paper.ui import jobs, tabstore
+    from narani.ui import jobs, tabstore
 
     if tabstore.TABS_PATH.exists():
         tabstore.TABS_PATH.unlink()

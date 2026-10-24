@@ -22,12 +22,12 @@ from agent_support import Registry, make_wd, scripted_model, tool_returns  # noq
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from md4paper import library, notes, projects  # noqa: E402
-from md4paper.ui import annotations  # noqa: E402
-from md4paper.ui.agent import retrieval, routes, sessions  # noqa: E402
-from md4paper.ui.agent.agent import make_agent, memory_text  # noqa: E402
-from md4paper.ui.agent.context import ScreenContext  # noqa: E402
-from md4paper.ui.agent.tools import (  # noqa: E402
+from narani import library, notes, projects  # noqa: E402
+from narani.ui import annotations  # noqa: E402
+from narani.ui.agent import retrieval, routes, sessions  # noqa: E402
+from narani.ui.agent.agent import make_agent, memory_text  # noqa: E402
+from narani.ui.agent.context import ScreenContext  # noqa: E402
+from narani.ui.agent.tools import (  # noqa: E402
     Deps,
     add_highlight,
     cell_text,
@@ -387,7 +387,7 @@ def test_descriptions_and_tools_require_approval(tmp_path):
     ctx = ScreenContext.model_validate(_ctx(tok))
 
     async def go():  # noqa: ANN202
-        from md4paper.ui.agent.agent import run_turn
+        from narani.ui.agent.agent import run_turn
 
         deps = Deps(wd_for=reg.wd_for, current_token=tok, ctx=ctx, register_token=reg.register)
         return [e async for e in run_turn(agent, sessions.create(), "안녕", deps)]

@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import config, langs, pipeline
-from md4paper.ir import GlossaryEntry, GlossaryList
-from md4paper.llm import FakeProvider
-from md4paper.translate import engine, glossary
-from md4paper.translate.style import style_instruction
-from md4paper.workdir import WorkDir
+from narani import config, langs, pipeline
+from narani.ir import GlossaryEntry, GlossaryList
+from narani.llm import FakeProvider
+from narani.translate import engine, glossary
+from narani.translate.style import style_instruction
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 JA_GLOSSARY = GlossaryList(entries=[
@@ -187,7 +187,7 @@ def test_switching_language_keeps_old_files_and_cache(paper):
 
 def test_korean_input_hash_format_is_unchanged(paper):
     """옛 기록에서 모델을 되찾는 `recover_translate`가 `문체:모델` 해시를 쓴다 — 한국어는 그 꼴 그대로."""
-    from md4paper.workdir import hash_text
+    from narani.workdir import hash_text
 
     _seen, fake = _recording()
     pipeline.run_translate(paper, fake)
@@ -197,7 +197,7 @@ def test_korean_input_hash_format_is_unchanged(paper):
 # --- 컬렉션 용어집 ------------------------------------------------------------
 
 def test_collection_glossary_is_per_language(tmp_path, monkeypatch, paper):
-    from md4paper import projects, workdir
+    from narani import projects, workdir
 
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path / "cfg")
     pid = projects.create("Coll")["id"]
@@ -220,7 +220,7 @@ def test_collection_glossary_is_per_language(tmp_path, monkeypatch, paper):
 
 def test_figure_translation_refuses_joined_scripts(paper):
     """이어 쓰는 문자(아랍·데바나가리·태국 …)는 Pillow 기본 배치로 깨지므로 막는다 — 일·중·라틴은 된다."""
-    from md4paper import figure_translate
+    from narani import figure_translate
 
     assert all(figure_translate.supported(c) for c in ("ko", "ja", "zh-Hans", "es", "fr", "ru"))
     paper.set_lang("ar")
@@ -231,7 +231,7 @@ def test_figure_translation_refuses_joined_scripts(paper):
 
 
 def test_translated_figure_names_carry_the_language():
-    from md4paper import figure_translate as ft
+    from narani import figure_translate as ft
 
     assert ft.ko_name("figure-3.png") == "figure-3.ko.png"
     assert ft.ko_name("figure-3.jpg", "zh-Hans") == "figure-3.zh-Hans.png"
@@ -242,7 +242,7 @@ def test_translated_figure_names_carry_the_language():
 
 
 def test_figure_label_prompt_names_the_language():
-    from md4paper import figure_translate as ft
+    from narani import figure_translate as ft
 
     assert ft._system("ko") == ft._SYSTEM
     ja = ft._system("ja")
@@ -250,7 +250,7 @@ def test_figure_label_prompt_names_the_language():
 
 
 def test_caption_lookup_strips_any_language_suffix():
-    from md4paper.structure import captions
+    from narani.structure import captions
 
     import re as _re
     src = (Path(captions.__file__).read_text(encoding="utf-8"))
@@ -261,7 +261,7 @@ def test_caption_lookup_strips_any_language_suffix():
 # --- 검색·문장 나누기 -------------------------------------------------------------
 
 def test_search_tokenizer_handles_japanese_chinese_and_spanish():
-    from md4paper.ui.agent.retrieval import tokenize
+    from narani.ui.agent.retrieval import tokenize
 
     assert "調査" in tokenize("問卷調査を行った") and "調査" in tokenize("調査")
     assert "参与" in tokenize("参与者共有20人")
@@ -271,7 +271,7 @@ def test_search_tokenizer_handles_japanese_chinese_and_spanish():
 
 
 def test_term_example_sentences_split_after_cjk_full_stops():
-    from md4paper.ui.term_examples import sentences
+    from narani.ui.term_examples import sentences
 
     assert sentences("図3に示す。表2は結果だ。") == ["図3に示す。", "表2は結果だ。"]
     assert sentences("如图3所示。表2！ 好") == ["如图3所示。", "表2！", "好"]
@@ -283,7 +283,7 @@ def test_term_example_sentences_split_after_cjk_full_stops():
 def test_cli_language_command_sets_global_language():
     from click.testing import CliRunner
 
-    from md4paper.cli import cli
+    from narani.cli import cli
 
     r = CliRunner().invoke(cli, ["language", "zh-hans", "--style", "通俗"])
     assert r.exit_code == 0, r.output
@@ -316,7 +316,7 @@ def test_style_and_language_options_for_screens():
 
 
 def test_export_layout_puts_translations_in_language_folder(tmp_path):
-    from md4paper import projects
+    from narani import projects
 
     assert projects.layout(tmp_path)["ko"] == tmp_path / "ko"
     config.set_section_value("translate", "target_lang", "ja")
@@ -324,7 +324,7 @@ def test_export_layout_puts_translations_in_language_folder(tmp_path):
 
 
 def test_home_rows_carry_paper_language(paper):
-    from md4paper.workdir import recent_workdirs
+    from narani.workdir import recent_workdirs
 
     paper.set_lang("es")
     row = next(r for r in recent_workdirs(paper.root.parent, limit=10) if r["root"] == paper.root)
@@ -332,15 +332,15 @@ def test_home_rows_carry_paper_language(paper):
 
 
 def test_toc_toggle_names_the_translation_language():
-    from md4paper.ui.app import _toc_lang_options
+    from narani.ui.app import _toc_lang_options
 
     assert _toc_lang_options("ko") == {"en": "영어", "ko": "한국어", "both": "병기"}
     assert _toc_lang_options("ja")["ko"] == "日本語"
 
 
 def test_batch_plan_skips_figures_only_for_unsupported_scripts(paper, monkeypatch):
-    from md4paper import figure_translate
-    from md4paper.ui import translate_job
+    from narani import figure_translate
+    from narani.ui import translate_job
 
     monkeypatch.setattr(figure_translate, "todo", lambda wd: ["figure-1.png"])
     assert translate_job.plan([paper.root], model_for=lambda wd: "openai/gpt-6-luna")["figures"] == 1

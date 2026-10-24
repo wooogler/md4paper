@@ -2,7 +2,7 @@
 
 import pytest
 
-from md4paper.extract.docling_backend import (
+from narani.extract.docling_backend import (
     _drop_line_numbers,
     _join_broken_paragraphs,
     _split_author_block,
@@ -17,7 +17,7 @@ LINE_H = 10.0
 
 
 def _g(text, col, top, bottom, label="text", page=1, full=False, page_end=None, col_end=None):
-    from md4paper.extract.reading_order import ItemGeom
+    from narani.extract.reading_order import ItemGeom
 
     return ItemGeom(text=text, label=label, page_start=page, col_start=col, top=top,
                     page_end=page if page_end is None else page_end,
@@ -26,7 +26,7 @@ def _g(text, col, top, bottom, label="text", page=1, full=False, page_end=None, 
 
 
 def _geom(items, n_cols=2, pages=(1,)):
-    from md4paper.extract.reading_order import ExportGeometry, PageGeom
+    from narani.extract.reading_order import ExportGeometry, PageGeom
 
     return ExportGeometry(items=list(items), pages={
         p: PageGeom(n_cols=n_cols, band_top=BAND[0], band_bottom=BAND[1], line_h=LINE_H)
@@ -102,7 +102,7 @@ def test_join_broken_paragraphs_refuses_mid_column_pair():
 
 def test_join_broken_paragraphs_refuses_when_prev_stops_mid_column():
     """단 중간에서 끝난 문단은 다음 단으로 이어질 수 없다 — 단의 끝까지 내려가 있어야 한다."""
-    from md4paper.extract.reading_order import ExportGeometry, PageGeom
+    from narani.extract.reading_order import ExportGeometry, PageGeom
 
     md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
     geom = ExportGeometry(
@@ -114,7 +114,7 @@ def test_join_broken_paragraphs_refuses_when_prev_stops_mid_column():
 
 def test_join_broken_paragraphs_ignores_footnotes_when_measuring_the_column_end():
     """단의 끝은 각주를 빼고 잰다 — 첫 페이지 아래 각주 뭉치가 초록 재결합을 막지 않게."""
-    from md4paper.extract.reading_order import ExportGeometry, PageGeom
+    from narani.extract.reading_order import ExportGeometry, PageGeom
 
     md = f"{ABSTRACT_TAIL}\n\n{ABSTRACT_CONT}\n"
     geom = ExportGeometry(
@@ -237,7 +237,7 @@ def test_split_author_block_ignores_body_emails():
 
 
 def test_place_captions_pairs_by_page_order():
-    from md4paper.extract.docling_backend import _place_captions
+    from narani.extract.docling_backend import _place_captions
 
     # Docling이 캡션을 이미지보다 위/딴 곳에 흩어 놓은 상황 (같은 페이지, 순서로 짝지음)
     md = (
@@ -260,7 +260,7 @@ def test_place_captions_pairs_by_page_order():
 
 def test_place_captions_injects_orphan_caption_by_page():
     # 이미지 없는 그룹 그림의 캡션(md에 없음)을 같은 페이지 이미지 뒤에 주입 → 유실 방지
-    from md4paper.extract.docling_backend import _place_captions
+    from narani.extract.docling_backend import _place_captions
 
     md = "Body text on page.\n\n![Image](img-05.png)\n\nMore body.\n"
     captions = [("Figure 2: Prompts for LLMs", 3)]  # md에 없는 캡션
@@ -275,7 +275,7 @@ def test_place_captions_injects_orphan_caption_by_page():
 def test_place_captions_moves_escaped_respaced_caption_once():
     # md 줄은 손질을 거친 글자(Docling 이스케이프 &amp;·\_, 띄어쓰기 복원), 캡션 원문은 날글자다 —
     # 대조가 어긋나 원위치가 안 지워지면 그림 앞뒤로 두 번 찍혔다(AdaLens 'hot\_degree', ParallelPilot '&amp;').
-    from md4paper.extract.docling_backend import _place_captions
+    from narani.extract.docling_backend import _place_captions
 
     md = ("Fig. 3. The hot\\_degree of Plan &amp; Isolate.\n\n![Image](img-01.png)\n\n"
           "Fig. 4. Questionnaire with open type action.\n\n![Image](img-02.png)\n")
@@ -292,7 +292,7 @@ def test_place_captions_moves_escaped_respaced_caption_once():
 
 def test_place_captions_leaves_caption_when_page_has_no_image():
     # 페이지에 이미지가 없으면 못 붙임 → 원문 그대로 (건드리지 않음)
-    from md4paper.extract.docling_backend import _place_captions
+    from narani.extract.docling_backend import _place_captions
 
     md = "![Image](img-01.png)\n\nsome text\n"
     assert _place_captions(md, [], {}) == md
@@ -302,7 +302,7 @@ def test_body_labels_includes_caption():
     pytest.importorskip("docling_core", reason="docling 미설치")
     from docling_core.types.doc import DocItemLabel
 
-    from md4paper.extract.docling_backend import _body_labels
+    from narani.extract.docling_backend import _body_labels
 
     labels = _body_labels()
     assert DocItemLabel.CAPTION in labels  # 캡션이 export에 포함돼야 그림/표 설명이 안 빠진다
@@ -310,7 +310,7 @@ def test_body_labels_includes_caption():
 
 # --- run-in 헤더 감지 (추출기가 뭉갠 소제목) ---
 def test_runin_detects_list_flattened_and_long_numbered_titles():
-    from md4paper.structure import runin
+    from narani.structure import runin
 
     # Docling이 리스트 항목으로 뭉갠 run-in
     assert runin.detect("- 4.2.1 The Prompt Instruction Panel . The left side is the control center.")
@@ -324,7 +324,7 @@ def test_runin_detects_list_flattened_and_long_numbered_titles():
 
 def test_runin_detects_colon_form_without_number_or_emphasis():
     """굵게 표시를 잃은 콜론형 소제목: 'Prompt Instruction Editor: 본문…'."""
-    from md4paper.structure import runin
+    from narani.structure import runin
 
     got = runin.detect(
         "Prompt Instruction Editor: At the top is a text editor where users write instructions."
@@ -337,7 +337,7 @@ def test_runin_detects_colon_form_without_number_or_emphasis():
 
 def test_runin_colon_form_ignores_ordinary_sentences():
     """콜론이 있어도 앞이 타이틀케이스 구가 아니거나 뒤가 짧으면 제목이 아니다."""
-    from md4paper.structure import runin
+    from narani.structure import runin
 
     assert runin.detect(
         "We use the following setup: the model was trained on eight GPUs for three days."
@@ -367,7 +367,7 @@ def test_runin_colon_form_ignores_ordinary_sentences():
 
 def test_runin_detects_period_terminated_plain_titles():
     """추출기가 굵게를 떼어낸 마침표 종결 run-in — 'Categorization.', 'Step 1: ….', 'Simulated Personas (Oracles).'."""
-    from md4paper.structure import runin
+    from narani.structure import runin
 
     got = runin.detect("Categorization. We defined a taxonomy of 24 categorical values spanning four dimensions.")
     assert got is not None and got[1] == "Categorization"
@@ -380,7 +380,7 @@ def test_runin_detects_period_terminated_plain_titles():
 
 
 def test_runin_period_form_ignores_ordinary_sentences_and_captions():
-    from md4paper.structure import runin
+    from narani.structure import runin
 
     # 소문자 내용 단어가 있으면 일반 문장 → 감지 안 함
     assert runin.detect(
@@ -395,7 +395,7 @@ def test_runin_period_form_ignores_ordinary_sentences_and_captions():
 
 
 def test_runin_detects_bold_emphasis():
-    from md4paper.structure import runin
+    from narani.structure import runin
 
     # 볼드(**Title.**)도 이탤릭처럼 감지
     got = runin.detect("**Length.** Prompt instructions were varied across conditions in this controlled study.")
@@ -407,7 +407,7 @@ def test_runin_detects_bold_emphasis():
 
 # --- 본문에 흘러든 'Corresponding author' 연락처 footer 제거 ---
 def test_strip_contact_footer_removes_block_and_enables_rejoin():
-    from md4paper.extract.docling_backend import _join_broken_paragraphs, _strip_contact_footer
+    from narani.extract.docling_backend import _join_broken_paragraphs, _strip_contact_footer
 
     md = (
         "AI systems for synchronous classroom use should be legible, bounded, and supervisable in ways "
@@ -438,7 +438,7 @@ def test_strip_contact_footer_removes_block_and_enables_rejoin():
 
 
 def test_strip_contact_footer_keeps_following_body_paragraph():
-    from md4paper.extract.docling_backend import _strip_contact_footer
+    from narani.extract.docling_backend import _strip_contact_footer
 
     # 헤더 다음이 연락처가 아니라 본문 문단이면 헤더만 지운다 (오제거 방지)
     md = (
@@ -452,7 +452,7 @@ def test_strip_contact_footer_keeps_following_body_paragraph():
 
 
 def test_strip_contact_footer_noop_without_trigger():
-    from md4paper.extract.docling_backend import _strip_contact_footer
+    from narani.extract.docling_backend import _strip_contact_footer
 
     md = "## Intro\n\nBody one is here.\n\nBody two follows normally.\n"
     assert _strip_contact_footer(md) == md
@@ -460,7 +460,7 @@ def test_strip_contact_footer_noop_without_trigger():
 
 # --- 그림 안 텍스트(차트 제목·축 이름)가 헤더로 오분류된 것 제거 ---
 def test_drop_figure_text_removes_chart_titles_adjacent_to_image():
-    from md4paper.extract.docling_backend import _drop_figure_text
+    from narani.extract.docling_backend import _drop_figure_text
 
     md = (
         "## 6.4 General comfort regarding system prompts\n\n"
@@ -485,7 +485,7 @@ def test_drop_figure_text_removes_chart_titles_adjacent_to_image():
 
 
 def test_drop_figure_text_keeps_numbered_and_body_headers():
-    from md4paper.extract.docling_backend import _drop_figure_text
+    from narani.extract.docling_backend import _drop_figure_text
 
     # 번호형 헤더가 그림 바로 위에 있어도 진짜 섹션이므로 보존
     md = "## 5 Results\n\n![Image](img-01.png)\n\nFigure 1: Overview.\n"
@@ -496,7 +496,7 @@ def test_drop_figure_text_keeps_numbered_and_body_headers():
 
 
 def test_drop_figure_text_keeps_column_header_next_to_table_caption():
-    from md4paper.extract.docling_backend import _drop_figure_text
+    from narani.extract.docling_backend import _drop_figure_text
 
     # 표로 잡히지 못한 표의 열 머리가 헤더로 나온 것 — 표는 래스터가 아니라 이 글자가 유일한 사본이다
     md = "Table 1: Side-by-side comparison.\n\n## Baseline\n\nInitial Idea 1: Current RAG QA systems.\n"
@@ -505,7 +505,7 @@ def test_drop_figure_text_keeps_column_header_next_to_table_caption():
 
 # --- 각주: 본문 마커를 위첨자 링크로, 내용은 목록 + 툴팁 맵 ---
 def test_apply_footnotes_links_markers_and_collects():
-    from md4paper.extract.docling_backend import _apply_footnotes
+    from narani.extract.docling_backend import _apply_footnotes
 
     md = (
         "System prompts are 'confidential and permanent.' 1\n\n"
@@ -532,7 +532,7 @@ def test_apply_footnotes_links_markers_and_collects():
 
 
 def test_apply_footnotes_no_number_kept_in_list_only():
-    from md4paper.extract.docling_backend import _apply_footnotes
+    from narani.extract.docling_backend import _apply_footnotes
 
     out, tips = _apply_footnotes("Body text with no marker.\n", ["Just a note without a leading number"])
     assert "## Footnotes" in out and "Just a note without a leading number" in out
@@ -542,7 +542,7 @@ def test_apply_footnotes_no_number_kept_in_list_only():
 
 # --- 헤더로 오분류된 그림·표 캡션을 캡션 문단으로 되돌리기 ---
 def test_unheader_captions_demotes_table_and_figure_headers():
-    from md4paper.extract.docling_backend import _unheader_captions
+    from narani.extract.docling_backend import _unheader_captions
 
     md = (
         "## Table 10: Participants' Age: Distribution of Survey Participants (N = 109)\n\n"
@@ -561,7 +561,7 @@ def test_unheader_captions_demotes_table_and_figure_headers():
 
 
 def test_delist_headers_demotes_bullet_prefixed_headers():
-    from md4paper.extract.docling_backend import _delist_headers
+    from narani.extract.docling_backend import _delist_headers
 
     # 같은 불릿 목록인데 일부만 헤더로 승격된 경우(· = U+00B7) → 모두 리스트 항목으로 통일
     md = (
@@ -579,7 +579,7 @@ def test_delist_headers_demotes_bullet_prefixed_headers():
 
 
 def test_unheader_captions_keeps_real_sections():
-    from md4paper.extract.docling_backend import _unheader_captions
+    from narani.extract.docling_backend import _unheader_captions
 
     # 진짜 섹션 제목은 'Table N/Figure N'으로 시작하지 않으므로 건드리지 않는다
     md = "## 5 Results\n\n## Tables and Figures\n\n## Figure-Ground Segmentation\n\nBody.\n"
@@ -597,8 +597,8 @@ def _pair(text: str) -> str:
 
 def test_mojibake_repaired_from_pdf_text_layer(tmp_path, monkeypatch):
     """docling이 깨뜨린 줄을 PDF 텍스트 레이어의 원문으로 되살린다 (글자가 빠져 있어도 정렬)."""
-    from md4paper import pdfio
-    from md4paper.extract import text_clean
+    from narani import pdfio
+    from narani.extract import text_clean
 
     real = "Looking Into the Black Box: Prospects and Limits in the Search for Mental Models"
     lossy = "Looki Int t Bla Box Prospec a Limit t Searc f Menta Model"  # 추출이 흘린 글자들
@@ -614,8 +614,8 @@ def test_mojibake_repaired_from_pdf_text_layer(tmp_path, monkeypatch):
 
 def test_mojibake_repair_skips_when_pdf_has_no_match(tmp_path, monkeypatch):
     """PDF에서 확정되지 않으면 건드리지 않고, 남은 깨진 글자를 보고한다 (⚠ 경고용)."""
-    from md4paper import pdfio
-    from md4paper.extract import text_clean
+    from narani import pdfio
+    from narani.extract import text_clean
 
     monkeypatch.setattr(pdfio, "full_text", lambda p: "completely unrelated document text")
     md = f"## {_pair('Looki Int t Bla Box Prospec a Limit')}\n"
@@ -626,8 +626,8 @@ def test_mojibake_repair_skips_when_pdf_has_no_match(tmp_path, monkeypatch):
 
 def test_mojibake_repair_leaves_real_cjk_alone(tmp_path, monkeypatch):
     """진짜 한자·한글 논문은 대상이 아니다 (두 바이트가 ASCII인 글자만 후보)."""
-    from md4paper import pdfio
-    from md4paper.extract import text_clean
+    from narani import pdfio
+    from narani.extract import text_clean
 
     called = []
     monkeypatch.setattr(pdfio, "full_text", lambda p: called.append(p) or "")
@@ -794,7 +794,7 @@ def test_join_broken_paragraphs_joins_in_a_single_column_paper():
 
 def test_join_key_survives_entity_escaping():
     """export가 '<'를 '&lt;'로 바꿔도 아이템과 같은 지문이 나와야 정렬이 유지된다."""
-    from md4paper.extract.docling_backend import _join_key
+    from narani.extract.docling_backend import _join_key
 
     assert _join_key("p &lt; 0.001") == _join_key("p < 0.001")
 
@@ -805,7 +805,7 @@ def test_apply_footnotes_skips_digits_inside_a_number():
     제목("Analysis of 11,579 … Sessions")과 초록("across 1,300 repositories")에 위첨자 각주
     링크가 박히던 자리. 번호를 잘못 써 버리면 그 각주의 **진짜** 자리는 영영 링크되지 않는다.
     """
-    from md4paper.extract.docling_backend import _apply_footnotes
+    from narani.extract.docling_backend import _apply_footnotes
 
     md = (
         "## Analysis of 11,579 Real-World Sessions\n\n"
@@ -825,7 +825,7 @@ def test_apply_footnotes_skips_digits_inside_a_number():
 
 def test_apply_footnotes_skips_section_numbers_and_labels():
     """헤딩의 절 번호와 '(Finding 3)' 같은 자체 번호 라벨은 각주가 아니다."""
-    from md4paper.extract.docling_backend import _apply_footnotes
+    from narani.extract.docling_backend import _apply_footnotes
 
     md = "## 3 Introduction\n\nWe saw this (Finding 3) and later cited it. 3\n"
     out, _ = _apply_footnotes(md, ["3 https://example.com/c"])
@@ -841,7 +841,7 @@ def test_apply_footnotes_follows_superscript_evidence_not_text_guessing():
     "(1.43; 25.01%; 13 turns)"의 13을 각주로 잡아, 진짜 자리인 "Search API 7"과 "GitHub 13"은
     영영 링크되지 않았다. 증거 기반이면 앞 단어를 열쇠로 그 자리를 찍는다.
     """
-    from md4paper.extract.docling_backend import _apply_footnotes
+    from narani.extract.docling_backend import _apply_footnotes
 
     md = (
         "We built a taxonomy comprising 7 main categories. We queried the GitHub Code Search API 7 "
@@ -871,7 +871,7 @@ def test_apply_footnotes_follows_superscript_evidence_not_text_guessing():
 
 
 def test_apply_footnotes_without_evidence_falls_back_to_text_heuristic():
-    from md4paper.extract.docling_backend import _apply_footnotes
+    from narani.extract.docling_backend import _apply_footnotes
 
     out, _ = _apply_footnotes("See Cursor 2 today.\n", ["2 https://cursor.com/"], marks=[])
     assert 'Cursor <sup class="md-fn"><a href="#fn-2">2</a></sup>' in out
@@ -883,7 +883,7 @@ def test_apply_footnotes_rescues_definition_leaked_into_body():
     링크 텍스트는 줄 끝에서 끊긴 URL 조각 두 문단이고 링크 대상만 온전하다. 위첨자 증거가 그 번호를
     가리킬 때만 걷는다(문단 첫머리 숫자의 우연한 일치와 구분).
     """
-    from md4paper.extract.docling_backend import _apply_footnotes
+    from narani.extract.docling_backend import _apply_footnotes
 
     full = "https://techcrunch.com/2025/03/06/a-quarter-of-startups-have-ai-codebases/"
     md = (
@@ -913,7 +913,7 @@ class _Page:
 
 def test_running_footer_in_deep_acm_margin_is_dropped_and_unmerged():
     """ACM 투고 원고의 푸터는 아래에서 16% — 세 쪽 넘게 되풀이되면 지우고, 문단에 낀 것도 뗀다."""
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
     merged = _Item("Rankings and selections Manuscript submitted to ACM naturally provide pairs.",
@@ -930,7 +930,7 @@ def test_running_footer_in_deep_acm_margin_is_dropped_and_unmerged():
 
 def test_outer_band_line_on_two_pages_is_kept():
     """바깥 띠(10~20%)의 줄이 두 쪽에만 나오면 본문일 수 있다 — 지우지 않는다."""
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     lines = [_Item("This sentence closes the page body.", p, 110.0, 400.0, 131.0) for p in (1, 2)]
     doc = _Doc(lines)
@@ -948,7 +948,7 @@ def _at(table, row, col, top, bottom):
 
 def test_running_footer_swallowed_into_table_is_dropped():
     """쪽 아래까지 걸친 표의 마지막 행에 들어간 푸터 — 다른 쪽 푸터와 같은 높이일 때만 지운다."""
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
     table = _Table(4, [[("Mental demand", 114.0, 240.0), ("How mentally demanding?", 253.0, 500.0)],
@@ -963,7 +963,7 @@ def test_running_footer_swallowed_into_table_is_dropped():
 
 def test_running_footer_text_elsewhere_in_table_is_kept():
     """같은 문구라도 푸터 높이가 아닌 표 셀(본문 속 인용 등)은 그대로 둔다."""
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
     table = _Table(4, [[("Venue", 114.0, 240.0)], [("Manuscript submitted to ACM", 114.0, 240.0)]])
@@ -976,7 +976,7 @@ def test_running_footer_text_elsewhere_in_table_is_kept():
 
 def test_running_footer_labelled_as_list_item_is_dropped():
     """Docling이 푸터를 목록 항목으로 잘못 분류한 쪽 — 같은 높이면 지우고, 진짜 목록 항목은 둔다."""
-    from md4paper.extract.docling_backend import _drop_running_heads
+    from narani.extract.docling_backend import _drop_running_heads
 
     foot = [_Item("Manuscript submitted to ACM", p, 110.0, 230.0, 131.0) for p in (1, 2, 3)]
     listed = _Item("Manuscript submitted to ACM", 4, 110.0, 230.0, 131.0, label="list_item")

@@ -1,4 +1,4 @@
-# md4paper 개발 계획
+# narani 개발 계획
 
 논문 PDF → (1) 헤더가 올바르게 정렬된 마크다운 + (2) 한국어 번역 마크다운을 만드는 CLI 도구.
 
@@ -12,7 +12,7 @@
 > ✅ 리뷰 완결 (insert_after: 놓친 헤더 추가) ·
 > ✅ M5 v1 (로컬 웹 UI: 섹션 트리 리뷰·설정 패널·마크다운+수식 프리뷰·PDF 대조) ·
 > ✅ M5 v2 (용어집 검토 UI: 자동 생성 → 편집 테이블 → 저장 → 번역 실행; 한국어 프리뷰) ·
-> ✅ UI 파일 업로드 (`md4paper ui` 워크디렉토리 없이 → 업로드 홈에서 PDF/.md 드롭 → 변환 → 리뷰). pytest 79개 통과. 다음: M6(batch·enrich·Docling).
+> ✅ UI 파일 업로드 (`narani ui` 워크디렉토리 없이 → 업로드 홈에서 PDF/.md 드롭 → 변환 → 리뷰). pytest 79개 통과. 다음: M6(batch·enrich·Docling).
 > 구현 메모: 계획서는 marker JSON 1차 소스였으나 실제 구현은 **raw.md를 척추로 삼아 헤더 재레벨링**(degrade 경로 통합).
 > LLM 어댑터·번역은 fake 프로바이더로 키·비용 없이 테스트(실제 API 표면은 설치 SDK로 실증 확정).
 
@@ -53,7 +53,7 @@ paper.md4/                      # PDF 옆에 생성 (--out으로 변경 가능)
     └── sections.map.json       # 섹션 id → 출력 라인 범위 + 내용 해시 (렌더러↔번역기 계약)
 ```
 
-> API 키·기본 프로바이더·기본 모델은 작업 디렉토리가 아니라 전역 `~/.config/md4paper/config.toml`(권한 0600)에 둔다.
+> API 키·기본 프로바이더·기본 모델은 작업 디렉토리가 아니라 전역 `~/.config/narani/config.toml`(권한 0600)에 둔다.
 > `paper.md4/`에는 키를 절대 쓰지 않는다(작업 디렉토리는 공유·삭제 대상). Stage 5~6이 참조하는 문서 컨텍스트(제목/초록/용어집)만 작업 디렉토리에 남는다.
 
 ### Stage 1 — extract (marker 래핑)
@@ -105,7 +105,7 @@ sections:
 - **그림**: 캡션을 페어링(marker의 `<span id>` 앵커 제거)해 그림에 흡수하고, 이미지 파일을 등장 순서 기반 `fig-NN`/`tab-NN`으로 **안정적 리네임**(재실행해도 diff 안정). marker의 베어 파일명 참조를 `images/fig-NN`으로 고쳐 **깨진 링크를 수정**한다.
 - **뷰어별 이미지 플레이버**(`flavor` 설정, 뷰어마다 임베딩 문법이 다름): `standard`(`![라벨](images/fig-01.jpeg)`+이탤릭 캡션) · `obsidian`(`![[images/fig-01.jpeg]]` 위키링크 임베드) · `notion`(전체 캡션을 alt에 — Notion import가 alt를 캡션으로 취급) · `html`(`<figure><img><figcaption>` — 크기 조절 가능). config 기본값 → manifest 오버라이드 → 웹 UI에서 변경.
 
-### Stage 5 — cite ✅ (`md4paper cite WORKDIR [--style keep|authoryear|short] [--no-links]`)
+### Stage 5 — cite ✅ (`narani cite WORKDIR [--style keep|authoryear|short] [--no-links]`)
 `paper.en.md`를 읽어 References 섹션을 찾고, 파싱·본문 링크·참고문헌 재렌더 후 다시 en.md에 쓴다. 스타일/링크는 **manifest가 권위 소스**(config가 기본값 시드, CLI가 오버라이드, 리뷰/UI로 편집).
 1. **파싱**: References 텍스트를 잘라 구조화 출력 1회(`llm.parse()` — 프로바이더 무관, 스키마 `{label, authors[], year, title, short_name, venue, doi?, arxiv_id?, raw}`). **반(反)환각 검증**: `raw`가 References 본문의 실제 부분 문자열이고 year·1저자 성이 raw에 있어야 통과; 기각 항목은 `references.json`에 함께 기록.
 2. **링크(결정론적)**: 보호 구간(인라인 코드·`$…$`·`$$…$$`·펜스 코드)을 제외하고 `[\d(,–- \d)*]` 매칭; 범위 전개; **모든 인덱스가 [1, N] 안일 때만** 치환(수학 `[0,1]`·`[10]`(N<10) 오탐 차단); `(` 뒤따름(마크다운 링크)·`!`/`^` 선행 기각. 참고문헌 영역은 치환 제외.
@@ -115,17 +115,17 @@ sections:
 - Degrade: References 미검출·파싱 실패·의심이면 해당 마커·문서를 그대로 둔다.
 - **테스트**: fake 프로바이더로 키·비용 없이 e2e 검증(수학/코드 보존, 3스타일, 앵커·링크, 반환각 기각).
 
-### Stage 6 — translate ✅ (`md4paper translate WORKDIR [--provider ...] [--model ...] [--style ...] [--yes]`)
+### Stage 6 — translate ✅ (`narani translate WORKDIR [--provider ...] [--model ...] [--style ...] [--yes]`)
 `out/paper.en.md`(cite 후면 최종 citation 형태 반영) → `out/paper.ko.md`. 문체/프로바이더/모델은 manifest·config·CLI로 선택. **테스트**: fake 프로바이더로 키·비용 없이 e2e(구조 보존, 컨텍스트·용어집 생성, 캐시 재사용·무효화, 용어집 수정 반영, 검증실패→영어통과). 실제 18청크 논문에서 헤더 구조 완전 보존 확인.
 
 0. **문서 컨텍스트 추출 (Abstract 기반 contextual 번역의 핵심)**: manifest에서 제목과 **Abstract 섹션**을 찾아 `translate/context.md`로 저장. 초록은 논문 전체의 주제·기여·핵심 용어를 압축한 유일한 절이므로, **모든 섹션 번역의 시스템 프롬프트에 문서 컨텍스트로 주입**한다. 효과: (a) 다의어 전문용어를 이 논문의 문맥에 맞게 일관 번역(예: "transformer"가 전기 부품이 아니라 신경망 아키텍처), (b) 섹션을 독립적으로 병렬 번역해도 논문 전체 톤·용어가 흔들리지 않음, (c) 초록에서 뽑은 핵심 용어가 용어집 시드가 됨. 초록이 없으면 첫 1~2개 본문 섹션 요약으로 대체(1회 LLM 호출) 후 같은 슬롯에 주입.
 1. **청킹**: 헤더 경계 분할 + 작은 섹션 병합(펜스/표/수식 내부는 헤더가 없어 자연히 안 쪼개짐). **플레이스홀더는 펜스 코드·`$$`수식·이미지·마크다운 링크(인용 링크 포함)·raw URL**(`⟦MD4_n⟧`); 인라인 수식 `$…$`·인라인 코드는 인라인 유지(한국어 조사) 후 검증.
-2. **용어집 (별도 생성/편집 아티팩트)**: 제목+초록으로 1회 structured-output → `glossary.yaml` `{term, korean, policy}`. **`md4paper glossary`로 따로 생성**하거나 `translate`가 없으면 자동 생성 후 `$EDITOR` 검토(`--yes`로 생략). 웹 UI(M5)는 "자동 생성 → 표시 → 번역어 수정 → 번역"을 이 파일 위에 얹는다. 번역은 파일의 최신 내용을 소비.
+2. **용어집 (별도 생성/편집 아티팩트)**: 제목+초록으로 1회 structured-output → `glossary.yaml` `{term, korean, policy}`. **`narani glossary`로 따로 생성**하거나 `translate`가 없으면 자동 생성 후 `$EDITOR` 검토(`--yes`로 생략). 웹 UI(M5)는 "자동 생성 → 표시 → 번역어 수정 → 번역"을 이 파일 위에 얹는다. 번역은 파일의 최신 내용을 소비.
 3. **번역**: 섹션별 호출(`llm.complete()`; 기본 모델은 §4, 프로바이더별 노브는 어댑터가 처리). **고정 시스템 프롬프트 = 스타일 규칙(선택된 한국어 문체 + 첫 등장 병기 + citation 마커 원문 유지 + 표 셀 `|` 이스케이프) + 용어집 + 제목/초록(문서 컨텍스트)**. 한국어 문체는 `korean_style` 설정으로 프롬프트 조각이 갈아끼워진다(§8, 웹 UI 주요 설정). 이 프리픽스는 전 섹션 공통이라 캐싱 대상: OpenAI(≥1024토큰 자동)·Gemini(암묵 캐싱 기본)는 자동 히트, Anthropic은 `cache_control: ephemeral` 명시. **동기 호출이 기본**, `--batch`는 opt-in(세 프로바이더 모두 50% 할인, 최악 24h — 대량 백로그용).
-4. **검증(결정론적, load-bearing)**: 복원 후 원문과 비교 — 헤더 레벨/개수, 이미지·링크 수, 인라인 코드·수식(`$`) 수, 표 파이프(`|`) 수, 플레이스홀더 잔존. 실패 → 위반 인용해 1회 재시도 → 또 실패 → 영어 원문 + `<!-- md4paper: untranslated -->` 주석으로 계속(구조는 확실히 보존).
+4. **검증(결정론적, load-bearing)**: 복원 후 원문과 비교 — 헤더 레벨/개수, 이미지·링크 수, 인라인 코드·수식(`$`) 수, 표 파이프(`|`) 수, 플레이스홀더 잔존. 실패 → 위반 인용해 1회 재시도 → 또 실패 → 영어 원문 + `<!-- narani: untranslated -->` 주석으로 계속(구조는 확실히 보존).
 5. **조립 + 캐시**: 플레이스홀더 복원, 순서대로 스티칭 → `paper.ko.md`. 청크 내용해시 캐시(`cache.json`, 키에 시스템 프롬프트=문체+용어집+컨텍스트 + 모델 → 무엇이든 바뀌면 재번역). 비용(동기, 논문당 대략): **gpt-5.6-luna ~$0.04(기본, 2026-07-30 인하 반영)** / gpt-5.6-terra·gemini-3.1-pro-preview ~$0.4 / claude-sonnet-5 ~$0.5; `--batch`는 M6.
 
-### Stage 7 — 로컬 웹 UI ✅ (`md4paper ui [WORKDIR] [--upload-dir DIR] [--port N] [--no-show]`)
+### Stage 7 — 로컬 웹 UI ✅ (`narani ui [WORKDIR] [--upload-dir DIR] [--port N] [--no-show]`)
 > **파일 업로드**: WORKDIR 없이 실행하면 업로드 홈(`/home`)에서 시작 — PDF/.md를 드롭하면 백그라운드로 convert(`run.io_bound`) 후 `/review`로 이동. WORKDIR을 주면 기존 작업 디렉토리를 바로 연다. 업로드 파일·결과는 `--upload-dir`(기본 cwd)에 `<이름>.md4/`로 저장.
 
 CLI가 만든 아티팩트를 **같은 파일 위에서** 편집하는 로컬 프론트엔드. 항상 떠 있는 서버가 아니라 `ui.run(show=True, reload=False)`로 브라우저를 띄우고, 닫으면 끝. 장기적으로 기능을 계속 얹을 자리다.
@@ -138,19 +138,19 @@ CLI가 만든 아티팩트를 **같은 파일 위에서** 편집하는 로컬 �
 ## 3. CLI
 
 ```
-md4paper doctor                       # 환경 점검: uv/Python>=3.10, marker import, llama.cpp(balanced 시), 설정된 프로바이더 키
-md4paper keys set <anthropic|openai|gemini>   # ~/.config/md4paper/config.toml (0600)에 키 저장; env 변수가 우선
-md4paper keys list                    # 설정된 프로바이더/키 존재 여부 표시(값은 마스킹)
-md4paper convert PAPER.pdf [--out DIR] [--mode fast|balanced] [--force-ocr] [--flavor standard|obsidian|notion|html] [--review] [--manifest FILE]   # Stage 1-4
-md4paper review WORKDIR               # manifest 재오픈($EDITOR) + 재조립
-md4paper ui WORKDIR                   # 로컬 웹 UI (NiceGUI) — 섹션 트리 리뷰/프리뷰/PDF 대조
-md4paper cite WORKDIR [--style keep|authoryear|short] [--no-links] [--provider ...] [--model ...]   # 미지정 시 manifest 값
-md4paper glossary WORKDIR [--provider ...] [--model ...]        # 번역 전 용어집 자동 생성(검토·수정용)
-md4paper translate WORKDIR [--provider ...] [--model ...] [--style 문체] [--yes]   # 용어집 생성→편집→번역
-md4paper run PAPER.pdf [flags]        # convert → cite → translate, 리뷰 정지 1회
-md4paper workspace [PATH]             # 작업 폴더(원본·.md4) 조회/설정
-md4paper library [--en|--ko|--pdf DIR] [--off en|ko|pdf|all] [--export]  # 결과 md·PDF가 쌓일 폴더 (§11)
-md4paper naming [TEMPLATE] [--apply] [--reset]   # 파일 이름 규칙({year}_{title}_{author}) 조회/설정/일괄 정리 (§11)
+narani doctor                       # 환경 점검: uv/Python>=3.10, marker import, llama.cpp(balanced 시), 설정된 프로바이더 키
+narani keys set <anthropic|openai|gemini>   # ~/.config/narani/config.toml (0600)에 키 저장; env 변수가 우선
+narani keys list                    # 설정된 프로바이더/키 존재 여부 표시(값은 마스킹)
+narani convert PAPER.pdf [--out DIR] [--mode fast|balanced] [--force-ocr] [--flavor standard|obsidian|notion|html] [--review] [--manifest FILE]   # Stage 1-4
+narani review WORKDIR               # manifest 재오픈($EDITOR) + 재조립
+narani ui WORKDIR                   # 로컬 웹 UI (NiceGUI) — 섹션 트리 리뷰/프리뷰/PDF 대조
+narani cite WORKDIR [--style keep|authoryear|short] [--no-links] [--provider ...] [--model ...]   # 미지정 시 manifest 값
+narani glossary WORKDIR [--provider ...] [--model ...]        # 번역 전 용어집 자동 생성(검토·수정용)
+narani translate WORKDIR [--provider ...] [--model ...] [--style 문체] [--yes]   # 용어집 생성→편집→번역
+narani run PAPER.pdf [flags]        # convert → cite → translate, 리뷰 정지 1회
+narani workspace [PATH]             # 작업 폴더(원본·.md4) 조회/설정
+narani library [--en|--ko|--pdf DIR] [--off en|ko|pdf|all] [--export]  # 결과 md·PDF가 쌓일 폴더 (§11)
+narani naming [TEMPLATE] [--apply] [--reset]   # 파일 이름 규칙({year}_{title}_{author}) 조회/설정/일괄 정리 (§11)
 ```
 
 프로바이더/모델 해석 순서: CLI 플래그(`--provider`/`--model`) → `config.toml`의 기본값 → **내장 기본(openai / `gpt-6-luna`)**. 키 조회 순서: env 변수(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `config.toml`. Gemini는 `GOOGLE_API_KEY` 우선순위 함정을 피하려 키를 클라이언트에 **명시적으로** 전달.
@@ -167,7 +167,7 @@ md4paper naming [TEMPLATE] [--apply] [--reset]   # 파일 이름 규칙({year}_{
 | markdown-it-py | 파서 기반 청킹·구조 diff 검증 (정규식 청킹은 펜스 블록을 깨뜨린 전례 다수) |
 | **LLM: 손수 만든 ~150줄 어댑터** over `anthropic` + `openai`(v2, Responses API) + `google-genai`(통합 SDK) | 프로바이더 3개 × 연산 2개(`complete`/`parse`)뿐이라 얇은 Protocol이 정답. 세 SDK 모두 pydantic 모델을 직접 받아 파싱 인스턴스 반환(`messages.parse` / `responses.parse` / `response_schema`), 프로바이더별 노브(캐시·thinking)도 그대로 노출. **LiteLLM 제외**(무거운 의존성 + 2026-03 PyPI 공급망 사고), pydantic-ai는 폴백 후보 |
 | 기본 모델 (사용자 선택) | **기본 openai `gpt-6-luna`($0.1/$0.5, 2026-09 GPT-6 세대로 교체 — 최저가 티어, 사용자 선호)**; 대안 openai `gpt-6-sol`($2/$10)·`gpt-6-astra`($10/$50) · anthropic `claude-haiku-4-5`($1/$5)·`claude-sonnet-5`($3/$15, 2026-08-31까지 인트로 $2/$10)·`claude-opus-5`(고품질, $5/$25) · gemini `gemini-3.5-flash-lite`($0.3/$2.5)·`gemini-3.6-flash`($1.5/$7.5)·`gemini-3.1-pro-preview`($2/$12). EN→KO는 2026 벤치에서 우열이 뚜렷치 않아 사용자 선택으로 둠 |
-| 키 관리 | env 변수 우선(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `~/.config/md4paper/config.toml`(0600, `md4paper keys set`). simonw/llm·aider 관행을 따르고 OS keyring은 제외(의존성·헤드리스 마찰). Gemini는 키를 클라이언트에 명시 전달(`GOOGLE_API_KEY` 우선순위 함정 회피) |
+| 키 관리 | env 변수 우선(`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY`) → `~/.config/narani/config.toml`(0600, `narani keys set`). simonw/llm·aider 관행을 따르고 OS keyring은 제외(의존성·헤드리스 마찰). Gemini는 키를 클라이언트에 명시 전달(`GOOGLE_API_KEY` 우선순위 함정 회피) |
 | **NiceGUI ≥3.14 (MIT)** | 로컬 웹 UI. FastAPI+Vue/Quasar가 wheel에 번들 → **Node·빌드 스텝 0**, `uv add nicegui`가 패키징 전부. 마크다운+KaTeX 내장, 웹소켓으로 `watchfiles` 파일 감시 간단, FastAPI라서 향후 JSON 엔드포인트 확장 자유. 필요 시 FastAPI+SPA로 탈출로 존재(밑이 FastAPI라 백엔드 코드 보존) |
 | pymupdf | 웹 UI의 PDF 페이지→PNG 렌더(원본 대조), extract 단계의 born-digital 스니핑 겸용 |
 | httpx + JSON 파일 캐시 | Crossref/Semantic Scholar enrichment (선택) |
@@ -178,12 +178,12 @@ md4paper naming [TEMPLATE] [--apply] [--reset]   # 파일 이름 규칙({year}_{
 ## 5. 모듈 구조
 
 ```
-md4paper/
+narani/
 ├── cli.py                    # click 커맨드 그룹; 플래그만, 로직 없음
 ├── doctor.py                 # 환경 점검
 ├── workdir.py                # 디렉토리 레이아웃, status.json 해시 북키핑, 재개/무효화
 ├── ir.py                     # pydantic 모델 전부 (파일 스키마의 단일 진실원)
-├── config.py                 # ~/.config/md4paper/config.toml 로드, 키/프로바이더/모델 해석 순서
+├── config.py                 # ~/.config/narani/config.toml 로드, 키/프로바이더/모델 해석 순서
 ├── library.py                # 결과 마크다운을 쌓을 전역 폴더(영어·한국어 따로) — 복사·이미지 격리 (§11)
 ├── relayout.py               # 레이아웃 자동 수정 — raw.md를 청크로 나눠 LLM 교정 → 구조 재구축 (§12)
 ├── llm/
@@ -209,12 +209,12 @@ md4paper/
 
 ## 6. 마일스톤 (각각 독립적으로 출시 가능)
 
-- **M0 (1~3일)** — `md4paper doctor` + `md4paper convert` 엔드투엔드: uv 스캐폴드; **marker 2.0.0을 실제 arXiv PDF 3편으로 스모크 테스트**(fast/--disable_ocr; Apple Silicon에서 깨지면 1.10.2 핀); extract 단계; `numbering.py` 재레벨링; 최소 렌더. → **이 시점에 이미 raw marker보다 나은 마크다운.** LLM·API 키 불필요.
+- **M0 (1~3일)** — `narani doctor` + `narani convert` 엔드투엔드: uv 스캐폴드; **marker 2.0.0을 실제 arXiv PDF 3편으로 스모크 테스트**(fast/--disable_ocr; Apple Silicon에서 깨지면 1.10.2 핀); extract 단계; `numbering.py` 재레벨링; 최소 렌더. → **이 시점에 이미 raw marker보다 나은 마크다운.** LLM·API 키 불필요.
 - **M1 (1~2주차)** — 결과물 #1 완성: 캡션 페어링 + `fig-NN` 자산 리네임, 무번호 섹션 테이블 강화, raw.md degrade 경로, born-digital 스니핑, 골든 코퍼스 + pytest, status.json 재개 로직.
 - **M2 (2주차)** — 인터랙티브 리뷰: manifest 방출(컨텍스트 스니펫·insert_after 포함), click.edit 라운드트립, errors-as-comments, `--yes`/`--manifest` 재생, 승인 해시.
-- **M3 (완료)** — LLM 어댑터 + citation: `llm/` 3사 어댑터(complete/parse, 비용 추적, fake) + `config.py`(키/프로바이더 해석) + `md4paper keys`; 그 위에서 citation(References 구조화+반환각 검증, 결정론적 링크/치환 **keep·authoryear·short**, References **DOI/arXiv 하이퍼링크**+단축명, links.json 감사). 실제 SDK 표면 실증, fake로 e2e 테스트. 어댑터가 M4 토대.
+- **M3 (완료)** — LLM 어댑터 + citation: `llm/` 3사 어댑터(complete/parse, 비용 추적, fake) + `config.py`(키/프로바이더 해석) + `narani keys`; 그 위에서 citation(References 구조화+반환각 검증, 결정론적 링크/치환 **keep·authoryear·short**, References **DOI/arXiv 하이퍼링크**+단축명, links.json 감사). 실제 SDK 표면 실증, fake로 e2e 테스트. 어댑터가 M4 토대.
 - **M4 (완료)** — 번역(결과물 #2): 문서 컨텍스트(제목/초록) 추출·주입 + 청커 + 플레이스홀더 보호, 용어집 별도 생성·편집(`glossary` 명령), 청크별 번역(프로바이더 선택) + 캐시된 시스템 프롬프트, 결정론적 구조 검증 + 재시도 사다리 + 영어 통과 degrade, 내용해시 캐시. fake로 e2e 테스트, 실제 논문 구조 보존 검증.
-- **M5 v1 (완료)** — 로컬 웹 UI: NiceGUI(`ui/controller.py`+`ui/app.py`) + `md4paper ui`; 섹션 리스트 리뷰(레벨·skip·merge·insert), 문서 설정 패널(문체·인용·플레이버·라벨·링크), 마크다운+수식(latex2mathml) 프리뷰, pymupdf PDF 페이지 대조, 저장+재조립. 컨트롤러 단위테스트 + 실서버 렌더 통합테스트. 에디터 라운드트립과 대등한 두 번째 리뷰 경로.
+- **M5 v1 (완료)** — 로컬 웹 UI: NiceGUI(`ui/controller.py`+`ui/app.py`) + `narani ui`; 섹션 리스트 리뷰(레벨·skip·merge·insert), 문서 설정 패널(문체·인용·플레이버·라벨·링크), 마크다운+수식(latex2mathml) 프리뷰, pymupdf PDF 페이지 대조, 저장+재조립. 컨트롤러 단위테스트 + 실서버 렌더 통합테스트. 에디터 라운드트립과 대등한 두 번째 리뷰 경로.
 - **M6 (6주차~)** — 강화·옵션·UI 확장: `--batch`, `--enrich`, `--mode balanced`(llama.cpp) 문서화, Docling 어댑터, README 라이선스 고지; 웹 UI v2(용어집 편집·번역 diff 뷰)·v3(파이프라인 실행 트리거·비용 표시). 항목별 독립적으로 드랍 가능.
 
 ## 7. 주요 리스크
@@ -285,7 +285,7 @@ md4paper/
 
 ### UX 설계
 ```
-        md4paper
+        narani
   논문 PDF를 마크다운+한국어로
 
 ┌─ (키 없을 때만) AI 키 미설정 배너 — 참고문헌·번역 기능 꺼짐 · [설정] ─┐
@@ -352,14 +352,14 @@ md4paper/
    로컬 앱이라 **서버 프로세스 = 사용자 컴퓨터**이므로 OS 대화상자를 서버에서 띄운다:
    macOS `osascript`(choose folder) · Windows PowerShell `FolderBrowserDialog` · Linux `zenity`/`kdialog`.
    `run.io_bound`로 호출(이벤트 루프 차단 방지), 300초 타임아웃, 취소·미지원은 None. 헤드리스·SSH에서는 `available()`이 False가 되고
-   **경로 직접 입력 칸이 항상 함께** 있다(`MD4PAPER_NO_NATIVE_DIALOG`로 강제 비활성 — 테스트용).
+   **경로 직접 입력 칸이 항상 함께** 있다(`NARANI_NO_NATIVE_DIALOG`로 강제 비활성 — 테스트용).
 6. **재복사 억제** — 이미지는 크기·mtime이 같으면 건너뛴다(설정을 만질 때마다 수백 KB를 다시 쓰지 않도록).
    참조되지 않은 이미지는 애초에 복사하지 않고, 이미 있는 파일도 지우지 않는다(다른 언어 사본이 참조 중일 수 있음).
 
 ### 파일
 - `library.py`(신규): `dir_for`/`configured`/`auto_enabled`/`same_folder`/`file_name`/`export`/`export_paper`/`auto_export`/`export_many`.
 - `config.py`: `[library]` 해석(`resolve_library_dir`/`set_library_dir`/`resolve_library_auto`), `set_section_value(value=None)`으로 키 삭제.
-- `ui/folder_dialog.py`(신규), `ui/app.py`(`build_location_settings` 패널·작업 폴더 동적화·자동 저장 훅·`폴더로 저장` 버튼), `cli.py`(`md4paper library`).
+- `ui/folder_dialog.py`(신규), `ui/app.py`(`build_location_settings` 패널·작업 폴더 동적화·자동 저장 훅·`폴더로 저장` 버튼), `cli.py`(`narani library`).
 - `cite/apply.py`: `ref_urls(wd)` 공개(라이브러리·컨트롤러가 공유 — Notion 인용 링크용).
 - 테스트: `test_library.py`(폴더 분리·이미지 격리·형식 적용·덮어쓰기·같은 폴더 접미사·auto 스위치·실패 무시), `test_folder_dialog.py`(AppleScript 이스케이프·취소·타임아웃·경로 정규화), `test_home_queue.py`(변환 완료 시 자동 저장), `test_ui_server.py`(패널 렌더).
 
@@ -378,7 +378,7 @@ md4paper/
    md와 같은 이름이라 노트 앱에서 나란히 찾아진다.
 3. **일괄 정리** `paper_meta.apply_naming(ws)` — 기존 논문 전체(숨김 포함)를 현재 규칙으로: rename_workdir(폴더·.md4·PDF·meta source)
    → 저장 위치 재내보내기 → 옛 기준명 사본 청소(`library.remove_stem`: <stem>*.md·images/<stem>/·<stem>.pdf만).
-   서지 없으면 건너뜀. 멱등(재실행 시 unchanged). UI '기존 논문·PDF 이름 정리' 버튼 + `md4paper naming --apply`.
+   서지 없으면 건너뜀. 멱등(재실행 시 unchanged). UI '기존 논문·PDF 이름 정리' 버튼 + `narani naming --apply`.
 
 ### 이름 뒤 '(2)' 버그 — 변환 안 된 업로드 잔여물이 이름을 점유 (수정 완료)
 증상: 겹치는 논문이 없는데도 폴더·저장 위치 파일이 `2024_Clio_Tamkin (2).md`처럼 됨(실사용 51편 중 8편).
@@ -514,8 +514,8 @@ PDF 추출은 단어는 살리지만 **구조를 잃는다**. 실제 사례: `##
 ## 13. 데스크톱 앱 — 아이콘으로 여는 네이티브 창 (구현 완료)
 
 ### 목표
-터미널에서 `uv run md4paper ui`를 치는 대신 **아이콘을 눌러** 연다. 브라우저 탭이 아니라 독립 앱 창으로 뜨고,
-Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인다. 서버 구조(127.0.0.1 바인딩, 로컬 전용)는 그대로다.
+터미널에서 `uv run narani ui`를 치는 대신 **아이콘을 눌러** 연다. 브라우저 탭이 아니라 독립 앱 창으로 뜨고,
+Dock·Launchpad·Spotlight에서 narani라는 이름과 아이콘으로 보인다. 서버 구조(127.0.0.1 바인딩, 로컬 전용)는 그대로다.
 
 ### 설계
 1. **NiceGUI native 모드(pywebview)** — `ui.run(native=True, window_size=...)`. 웹뷰는 spawn된 별도 프로세스에서 돌고,
@@ -524,8 +524,8 @@ Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인
    셸 스크립트가 번들 바깥의 파이썬을 실행하면 실행 중에는 'Python'이라는 이름의 앱이 된다. 그래서 번들 안에
    `Contents/MacOS/python`(→ venv의 python), `Contents/pyvenv.cfg`, `Contents/lib`를 심볼릭 링크로 걸어 **번들 자체를
    가상환경 모양**으로 만든다. 그러면 `sys.prefix`가 `Contents`가 되어 site-packages가 그대로 잡히고, 프로세스가
-   이 앱으로 인식된다. 실측: `lsappinfo`에 `"md4paper" bundleID=io.github.wooogler.md4paper type=Foreground`,
-   웹뷰 보조 프로세스도 `md4paper Web Content`로 뜬다. 가상환경이 아니면(시스템 파이썬) 절대 경로 실행으로 물러선다.
+   이 앱으로 인식된다. 실측: `lsappinfo`에 `"narani" bundleID=io.github.wooogler.narani type=Foreground`,
+   웹뷰 보조 프로세스도 `narani Web Content`로 뜬다. 가상환경이 아니면(시스템 파이썬) 절대 경로 실행으로 물러선다.
 3. **다운로드는 서버가 직접 쓴다** — `ui.download`는 blob URL + `<a download>` 클릭인데, 웹뷰 백엔드가 이걸 어떻게
    처리할지는 설정에 달려 있어 **아무 일도 안 일어날 수** 있다(WKWebView는 `ALLOW_DOWNLOADS`가 꺼져 있으면 무시,
    `target=_blank`는 외부 브라우저로 샐 수 있다). 로컬 앱이라 서버 = 사용자 컴퓨터이므로, 네이티브 모드에서는
@@ -534,7 +534,7 @@ Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인
    폴백은 다운로드 폴더에 쓰고 파일 탐색기로 그 자리를 연다.
 4. **폴더 선택도 창 프록시로** — osascript 대화상자는 별도 프로세스라 앱 창 **뒤에** 숨을 수 있다. 네이티브 모드에선
    `create_file_dialog(FOLDER)`를 쓰고, 실패하면 기존 OS 대화상자로 물러선다(브라우저 모드는 그대로 osascript).
-5. **`__main__.py`에 `__main__` 가드** — 런처는 `python -m md4paper ui --native`로 실행한다. spawn은 자식에서 진입
+5. **`__main__.py`에 `__main__` 가드** — 런처는 `python -m narani ui --native`로 실행한다. spawn은 자식에서 진입
    모듈을 다시 실행하므로, 가드가 없으면 자식이 CLI를 처음부터 돌려 앱이 무한히 겹쳐 뜬다.
 6. **아이콘은 커밋된 PNG 하나** — 그리기가 시스템 한글 폰트에 의존하므로 사용자 컴퓨터에서 그리지 않는다.
    설치 때 `.icns`(iconutil, 없으면 Pillow)·`.ico`(Pillow)로 변환한다. 브라우저 모드의 파비콘도 같은 파일이다.
@@ -554,15 +554,15 @@ Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인
 ### 리스크·결정
 - **extra가 조용히 빠진다** — `uv sync --extra ui`만 하면 pywebview가 제거된다. 런처 셸 래퍼가 실패를 감지해
   로그 위치와 복구 명령을 알림창으로 띄운다(Finder 실행은 표준 출력이 어디에도 안 남는다).
-- **경로를 박아 넣는다** — 저장소를 옮기거나 venv를 갈아엎으면 다시 `md4paper app`을 실행해야 한다. uv로 매번
+- **경로를 박아 넣는다** — 저장소를 옮기거나 venv를 갈아엎으면 다시 `narani app`을 실행해야 한다. uv로 매번
   self-heal 하는 방법도 있으나(`uv run --extra ...`), 그러면 프로세스 신원(2)을 포기해야 해서 택하지 않았다.
 - **아이콘 실행은 셸 환경변수를 물려받지 않는다** — env로만 API 키를 두던 사용자는 앱에서 키가 안 보인다.
-  `md4paper app`이 그 상황을 감지해 경고하고, README에도 적었다.
+  `narani app`이 그 상황을 감지해 경고하고, README에도 적었다.
 - 저장 대화상자 자체(NSSavePanel)는 자동 테스트로 눌러 볼 수 없다 — 메서드 큐 왕복(`get_size`·`get_current_url`)까지
   실측으로 확인하고, 우리 쪽 분기는 가짜 창으로 단위 테스트했다.
 
 ### 배포 — 설치 파일 대신 '사용자 컴퓨터에서 조립'
-`install.sh`/`install.ps1`이 ① uv 설치 ② `uv tool install "md4paper[ui,native] @ git+..."` ③ `md4paper app`을 잇는다.
+`install.sh`/`install.ps1`이 ① uv 설치 ② `uv tool install "narani[ui,native] @ git+..."` ③ `narani app`을 잇는다.
 사용자는 터미널에 **한 줄**을 붙여넣고, 아이콘을 받는다. 같은 줄을 다시 실행하면 업데이트다(`--force`가 git을 다시 읽는다).
 
 - **왜 .dmg/.exe를 만들지 않나** — 의존성이 torch·opencv·docling까지 약 1.3GB다. PyInstaller/py2app로 묶으면
@@ -571,14 +571,14 @@ Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인
   "지원을 약속하지 않는" 개인 도구에 그만한 상시 비용을 얹을 이유가 없다.
 - **로컬 조립의 이득** — 앱 번들이 사용자 컴퓨터에서 만들어지므로 quarantine 속성이 없다 → **서명·공증 없이도
   경고 없이 열린다**. 아키텍처(arm64/x86_64)도 uv가 알아서 맞춘다. 받는 용량은 필요한 휠뿐이다.
-- **`uv tool install`이 만드는 환경도 그대로 쓸 수 있다** — `~/.local/share/uv/tools/md4paper`가 정상 venv라
-  §13-2의 번들 미러링이 클론 없이도 성립한다(실측: 캐시가 있으면 설치 4.6초, `lsappinfo`에 md4paper로 등록).
+- **`uv tool install`이 만드는 환경도 그대로 쓸 수 있다** — `~/.local/share/uv/tools/narani`가 정상 venv라
+  §13-2의 번들 미러링이 클론 없이도 성립한다(실측: 캐시가 있으면 설치 4.6초, `lsappinfo`에 narani로 등록).
   심볼릭 링크가 `bin/python`·`lib`·`pyvenv.cfg` 세 개라 tool 업그레이드로 내부가 갈려도 경로가 유지된다.
 - **남는 한계** — 터미널 한 줄은 여전히 필요하다. 그것마저 없애려면 서명·공증을 감수하고 py2app을 해야 한다.
 - **못 띄우는 환경 대비** — `cli._native_available()`이 pywebview·웹뷰 백엔드를 미리 확인하고, 안 되면
   경고를 남기고 **브라우저로 연다**. 배포된 컴퓨터에서 아이콘이 '눌러도 무반응'이 되는 게 최악이라서.
 - **설치 방식이 바뀌면 작업 폴더가 따라 움직였다** — 기본값이 실행 위치에 달려 있어(클론:
-  `<저장소>/output`, 설치본: `~/md4paper/output`), 클론으로 변환해 둔 사람이 한 줄 설치로 갈아타면
+  `<저장소>/output`, 설치본: `~/narani/output`), 클론으로 변환해 둔 사람이 한 줄 설치로 갈아타면
   목록이 빈 폴더를 가리켜 '논문이 사라진' 것처럼 보인다(실제로 겪었다). UI가 처음 뜰 때
   `config.pin_workspace()`로 그때의 기본값을 config에 적어 고정하고, 목록이 비면 지금 보고 있는
   폴더 경로와 바꾸는 길을 함께 보여준다. 배포 경로를 둘로 만든 이상 이건 흔한 사고가 된다.
@@ -626,7 +626,7 @@ Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인
 ### 파일
 - `projects.py`(신규): `layout`/`ensure_layout`/`all_projects`/`get`/`exists`/`normalize`/`name_of`/`create`/
   `rename`/`delete`/`root_of`/`set_root`/`dir_for`/`has_dirs`/`active`/`set_active`/`assign_target`/`options`.
-  저장은 `~/.config/md4paper/projects.json`(원자적 쓰기) — config.toml에 안 넣은 이유는 우리 최소 TOML
+  저장은 `~/.config/narani/projects.json`(원자적 쓰기) — config.toml에 안 넣은 이유는 우리 최소 TOML
   직렬화기가 테이블 배열을 못 쓰기 때문이다.
 - `bibtex.py`(신규): `cite_key`/`entry_kind`/`fields_from_meta`/`render`/`parse`/`verify`/`entry_for`/
   `sync`/`remove`/`keys_in`. 의존성 `bibtexparser>=1.4` 추가.
@@ -639,7 +639,7 @@ Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인
 - `ui/app.py`: `build_project_settings` 패널(만들기·이름·폴더 하나·삭제), 목록의 프로젝트 필터·구역 묶기·
   카드 프로젝트 칩(옮기기)·다중선택 일괄 이동, 큐 항목에 소속을 실어 변환 완료 시 배정,
   저장 위치 패널의 '폴더 하나로 정리'·BibTeX 스위치.
-- `cli.py`: `md4paper project`(list/add/rm/dir/use/assign/export), `library --root/--bibtex`, `md4paper bib`.
+- `cli.py`: `narani project`(list/add/rm/dir/use/assign/export), `library --root/--bibtex`, `narani bib`.
 - 테스트: `test_projects.py`(CRUD·layout·폴백·배정·reassign·삭제 정리), `test_bibtex.py`(항목 종류·이스케이프·
   덧붙이기/제자리 교체·남의 항목 보존·검증 실패 되돌리기).
 
@@ -655,7 +655,7 @@ Dock·Launchpad·Spotlight에서 md4paper라는 이름과 아이콘으로 보인
 - **.bib이 사용자 파일과 겹칠 때** — 이미 쓰던 `references.bib`이 있으면 우리 항목만 덧붙는다(8). 우리 키와
   같은 키를 손으로 넣어 뒀다면 그 항목은 갈아치워진다 — 키가 기준명이라 사실상 같은 논문일 때만 벌어진다.
 - **서지 정보가 없으면 항목을 안 만든다** — 지어낸 저자·연도가 참고문헌 목록에 섞이는 것보다 빈 게 낫다.
-  `md4paper enrich --all`로 채운 뒤 `md4paper bib`로 다시 모으면 된다.
+  `narani enrich --all`로 채운 뒤 `narani bib`로 다시 모으면 된다.
 
 ### 서지 원본 `bibsource.py` — 논문 API에서 **정확한 BibTeX를 받아온다** (구현 완료)
 
@@ -721,7 +721,7 @@ Elsevier)과 Davis(1989 MIS Quarterly)는 **0건**. 링크가 아쉬운 쪽이 �
 BibTeX 받기 / 참고문헌 DOI 채우기). 사용자에게는 전부 "서지 정보를 온라인에서 보강한다" 하나이고
 셋 다 같은 API를 같은 순서로 두드리므로 `enrich.boost_workdir` 하나로 묶었다 — 나눠 돌리면
 레이트리밋에 세 번 부딪힐 뿐이다. UI 버튼도 **'서지 정보 보강' 하나**로 줄이고,
-`md4paper bib`는 **네트워크를 쓰지 않는 조립 전용**으로 되돌렸다.
+`narani bib`는 **네트워크를 쓰지 않는 조립 전용**으로 되돌렸다.
 
 실측(TextGrad 109건): 링크 14 → **95개**(12%→87%), 45초. 두 번째 실행은 마크다운이 그대로다.
 Risko(S2가 0건 준 논문, 101건): 3 → 39개, 한 건씩 찾는 길로만. 한도(`--max-lookups`)를 넘긴
@@ -739,7 +739,7 @@ Risko(S2가 0건 준 논문, 101건): 3 → 39개, 한 건씩 찾는 길로만. 
 - `enrich.py`: `usable_title(min_words=)` — 두 단어짜리 진짜 제목("Cognitive Offloading")이
   조회조차 안 되던 것을 `bibsource`만 2로 낮춰 쓴다(교차 확인이 있으므로).
 - `workdir.py`: `bib_source_json`(`<root>/bib_source.json`).
-- `cli.py`: `md4paper enrich`가 세 단계를 다 한다(`--max-lookups`). `md4paper bib`는 오프라인 조립 전용.
+- `cli.py`: `narani enrich`가 세 단계를 다 한다(`--max-lookups`). `narani bib`는 오프라인 조립 전용.
 - `ui/app.py`: '서지 정보 보강' 버튼 하나가 세 단계를 다 한다(따로 만들었던 BibTeX 버튼은 없앴다).
 - 테스트: `test_bibsource.py`(게이트·사다리·출판 기록 우선·재수록본·철회·캐시), `test_cite_resolve.py`(한 번에/한 건씩·빈 칸만 채움·한도 보고·목록 중복 방지).
 
@@ -843,7 +843,7 @@ True가 된다. UI는 진행 막대 + '중지' 버튼, CLI는 `click.progressbar
   `resolve_library_bibtex`/`resolve_library_auto`가 `project` 인자를 받는다. `EXPORT_TARGETS` 공개.
 - `enrich.py`: `project_roots`/`ALL`, `enrich_many(should_stop=, on_progress=)`에 `total`·`stopped`.
 - `library.py`·`paper_meta.py`: 논문의 프로젝트를 resolve에 넘긴다.
-- `cli.py`: `md4paper project set <프로젝트> [KEY] [VALUE] [--unset]`, `md4paper enrich --project`.
+- `cli.py`: `narani project set <프로젝트> [KEY] [VALUE] [--unset]`, `narani enrich --project`.
 - `ui/app.py`: 프로젝트 행마다 '이 프로젝트만 다르게' 접이식, 보강 진행 막대 + 중지 버튼.
 - 테스트: `test_projects.py`(전역 따름·덮어쓰기·False와 안 정함 구별·해제·잘못된 규칙 폴백·
   삭제된 프로젝트), `test_bibsource.py`(범위 셋·논문 경계 중지).

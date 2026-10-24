@@ -13,7 +13,7 @@ from pathlib import Path
 from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
-from md4paper.workdir import WorkDir
+from narani.workdir import WorkDir
 
 EN = """# Bespoke Bots
 
@@ -81,7 +81,7 @@ class Registry:
             self.register(wd)
 
     def register(self, wd: WorkDir) -> str:
-        from md4paper.ui.agent.tools import token_of
+        from narani.ui.agent.tools import token_of
 
         tok = token_of(wd.root)
         self.by_token[tok] = wd

@@ -1,8 +1,8 @@
 """앞부분(front matter) 정규화 — LLM 라벨+재조립(FakeProvider) + 규칙 폴백 + 검증."""
 
-from md4paper.extract import front_matter as fm
-from md4paper.ir import FrontMatterLayout
-from md4paper.llm import FakeProvider
+from narani.extract import front_matter as fm
+from narani.ir import FrontMatterLayout
+from narani.llm import FakeProvider
 
 # 다열 저자 그리드가 흩어지고 boilerplate가 낀 전형적 ACM 첫 페이지
 SCATTERED = (
@@ -288,7 +288,7 @@ def test_normalize_uses_llm_when_valid_else_heuristic():
 
 # --- 구조화 저자(authors_detail): 근거 통과 시 일관 형식, 실패 시 원본 블록 폴백 ---
 def test_structured_authors_render_uniformly_when_grounded():
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     layout = FrontMatterLayout(
         title=0, authors=[1, 2, 3, 4, 12], sections=[5, 6], body_start=13,
@@ -312,7 +312,7 @@ def test_structured_authors_render_uniformly_when_grounded():
 
 
 def test_structured_authors_rejected_when_email_not_in_source():
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     # 원문에 없는 이메일(환각) → 검증 실패 → 기존 블록 재조립으로 폴백
     layout = FrontMatterLayout(
@@ -325,7 +325,7 @@ def test_structured_authors_rejected_when_email_not_in_source():
 
 
 def test_grounded_authors_unit():
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     src = "Anna Neumann\n\nanna.neumann1@uni-due.de Research Centre Trust, UA Ruhr University, Germany"
     ok = fm._grounded_authors(
@@ -341,7 +341,7 @@ def test_grounded_authors_unit():
 
 
 def test_render_authors_detail_format_and_parts():
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     e = [AuthorEntry(name="A B", emails=["a@x.edu", "a2@x.edu"], affiliations=["Uni X, City", "Uni Y"])]
     txt = fm._render_authors_detail(e)  # parts None → 둘 다
@@ -400,7 +400,7 @@ def test_author_marks_are_stripped_deterministically():
 
 
 def test_structured_author_names_lose_markers():
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     src = "Sang Won Lee ∗\n\nVirginia Tech\n\nsangwonlee@vt.edu"
     entries = [AuthorEntry(name="Sang Won Lee ∗", emails=["sangwonlee@vt.edu"],
@@ -422,7 +422,7 @@ def test_author_note_anchor_is_stripped_from_output():
 # --- 저자 순서: 원문 등장 순서가 이긴다 ------------------------------------
 def test_grounded_authors_restore_source_order():
     """LLM이 다열 그리드를 열 우선으로 내놔도 원문(읽기 순서) 위치로 다시 세운다."""
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     src = ("Ann Kim ann@x.edu\n\nBob Lee bob@x.edu\n\n"
            "Cara Park cara@x.edu\n\nDan Choi dan@x.edu")
@@ -437,7 +437,7 @@ def test_grounded_authors_restore_source_order():
 
 
 def test_grounded_authors_keep_order_when_already_ascending():
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     src = "Ann Kim ann@x.edu\n\nBob Lee bob@x.edu"
     entries = [AuthorEntry(name="Ann Kim", emails=[], affiliations=[]),
@@ -540,7 +540,7 @@ def test_grounded_authors_keep_llm_order_when_source_order_untrusted():
 
     그때 원문 순서로 되세우면 틀린 순서를 고치는 게 아니라 맞은 답을 망가뜨린다.
     """
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     src = ("Ann Kim ann@x.edu\n\nCara Park cara@x.edu\n\n"   # 열 우선로 뒤엉킨 채 추출된 블록
            "Bob Lee bob@x.edu\n\nDan Choi dan@x.edu")
@@ -658,7 +658,7 @@ def test_author_tail_end_is_noop_on_a_clean_body():
 
 def test_citation_line_fixes_column_major_author_order():
     """열 우선으로 읽힌 그리드의 저자 순서는 인용 상용구 한 줄이 바로잡는다."""
-    from md4paper.ir import AuthorEntry
+    from narani.ir import AuthorEntry
 
     entries = [AuthorEntry(name=n) for n in ("Tang", "Xu", "McMillan", "Chen")]
     cite = ["Tang, Chen, Xu, and McMillan. 2026. Programming by Chat. In ASE '26."]

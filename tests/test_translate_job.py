@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline
-from md4paper.ir import GlossaryEntry
-from md4paper.llm import FakeProvider
-from md4paper.ui import controller, jobs, translate_job
-from md4paper.ui.controller import UIController
-from md4paper.workdir import WorkDir
+from narani import pipeline
+from narani.ir import GlossaryEntry
+from narani.llm import FakeProvider
+from narani.ui import controller, jobs, translate_job
+from narani.ui.controller import UIController
+from narani.workdir import WorkDir
 
 CORPUS = Path(__file__).parent / "corpus"
 
@@ -98,7 +98,7 @@ def test_viewer_uses_shared_translate_job():
     """뷰어 '번역 실행'도 같은 작업 함수·같은 문을 지난다 (작업 함수를 옮겼지 복사하지 않았다)."""
     import inspect
 
-    from md4paper.ui import app
+    from narani.ui import app
 
     src = inspect.getsource(app.build)
     body = src.split("def _start_translate(", 1)[1].split("def attach_translate(", 1)[0]

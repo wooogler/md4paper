@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import pipeline
-from md4paper.ui import jobs, tabstore
-from md4paper.workdir import (
+from narani import pipeline
+from narani.ui import jobs, tabstore
+from narani.workdir import (
     WorkDir,
     is_pinned,
     left_panel,
@@ -229,7 +229,7 @@ class FakeProc:
 @pytest.fixture
 def win_mod(monkeypatch):
     """window 모듈 — 프로세스 목록을 비우고 Popen을 가로챈 상태로."""
-    from md4paper.ui import window
+    from narani.ui import window
 
     window._CHILDREN.clear()
     spawned: list[list[str]] = []
@@ -249,7 +249,7 @@ def test_open_new_spawns_our_own_module(win_mod):
     proc = window.open_new("http://127.0.0.1:9999/review?wd=/tmp/a.md4", "제목")
 
     assert proc is not None
-    assert spawned == [[sys.executable, "-m", "md4paper.ui.window",
+    assert spawned == [[sys.executable, "-m", "narani.ui.window",
                         "http://127.0.0.1:9999/review?wd=/tmp/a.md4", "제목"]]
     assert window.any_open() is True
     assert window.died(proc) is None
@@ -303,7 +303,7 @@ def test_extra_windows_switch_download_to_the_downloads_folder(tmp_path, monkeyp
     pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
     from nicegui import ui
 
-    from md4paper.ui import desktop
+    from narani.ui import desktop
 
     class Win:
         def __init__(self) -> None:
@@ -334,7 +334,7 @@ def test_folder_dialog_stays_on_main_window_without_os_dialog(monkeypatch):
     (엉뚱한 창에 뜨는 것보다 '고를 방법이 아예 없음'이 더 나쁘다.)
     """
     pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
-    from md4paper.ui import desktop, folder_dialog
+    from narani.ui import desktop, folder_dialog
 
     class Win:
         def __init__(self) -> None:
@@ -359,7 +359,7 @@ def test_folder_dialog_stays_on_main_window_without_os_dialog(monkeypatch):
 def test_desktop_asks_the_window_module_about_extra_windows(win_mod):
     """desktop은 window 모듈에 물어본다 (순환 import 없이 지연 import로)."""
     window, _ = win_mod
-    from md4paper.ui import desktop
+    from narani.ui import desktop
 
     assert desktop.extra_windows_open() is False
     window.open_new("http://127.0.0.1:9999/review?wd=/tmp/a.md4")
@@ -370,7 +370,7 @@ def test_desktop_asks_the_window_module_about_extra_windows(win_mod):
 
 def test_find_bar_script_is_complete():
     """찾기 바 스크립트가 온전한지 — 파이썬 문자열 안의 JS라 이스케이프가 깨지기 쉽다."""
-    from md4paper.ui import find_bar
+    from narani.ui import find_bar
 
     assert find_bar.HTML.count("<script>") == find_bar.HTML.count("</script>") == 1
     assert 'id="md4-find"' in find_bar.HTML
@@ -383,7 +383,7 @@ def test_find_bar_script_is_complete():
 
 def test_scroll_memory_script_carries_the_paper_key():
     """읽던 자리 스크립트는 논문 열쇠와 셀렉터 목록을 JSON으로 받아 간다."""
-    from md4paper.ui import scroll_memory
+    from narani.ui import scroll_memory
 
     js = scroll_memory.init_js("abc'\"123")
     assert json.dumps("abc'\"123") in js          # 따옴표가 섞여도 스크립트가 깨지지 않는다
@@ -397,7 +397,7 @@ def test_scroll_memory_script_carries_the_paper_key():
 
 def test_scroll_memory_persists_papers_but_not_home():
     """논문 화면은 localStorage에도 적어 앱을 다시 켜도 남고, 홈 목록은 창 안에서만 기억한다."""
-    from md4paper.ui import scroll_memory
+    from narani.ui import scroll_memory
 
     js = scroll_memory.init_js("abc123")
     assert "localStorage.setItem" in js and "md4:last:" in js
@@ -411,8 +411,8 @@ def test_scroll_memory_persists_papers_but_not_home():
 
 def test_viewer_panels_are_remembered_globally():
     """원문/번역/PDF 패널 구성은 전역 설정에 남아 다음에 여는 논문(재시작 뒤에도)이 그대로 연다."""
-    from md4paper import config
-    from md4paper.ui import app
+    from narani import config
+    from narani.ui import app
 
     assert app.load_panels() == {"en": True, "ko": True, "pdf": False}   # 처음엔 기본값
     app.save_panels({"en": False, "ko": True, "pdf": True, "split": 58})

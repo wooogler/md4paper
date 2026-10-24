@@ -4,11 +4,11 @@ import json
 
 import pytest
 
-from md4paper import formula_fix, formulas, pipeline
-from md4paper.formulas import FormulaRead
-from md4paper.llm import FakeProvider
-from md4paper.ui.controller import UIController
-from md4paper.workdir import WorkDir
+from narani import formula_fix, formulas, pipeline
+from narani.formulas import FormulaRead
+from narani.llm import FakeProvider
+from narani.ui.controller import UIController
+from narani.workdir import WorkDir
 
 R1 = {"id": "formula-01", "file": "formula-01.png", "page": 3, "orig": "a + b",
       "number": "1", "latex": r"a + b", "kind": "display"}
@@ -87,7 +87,7 @@ def test_replace_once_refuses_ambiguity():
 
 
 def test_rekey_cache_moves_translation():
-    from md4paper.workdir import hash_text
+    from narani.workdir import hash_text
 
     doc = "# T\n\nIntro $x$ and $x$.\n\n$$a$$\n"
     src = doc[5:]
@@ -103,8 +103,8 @@ def test_rekey_cache_moves_translation():
 def test_collect_records_bbox(monkeypatch, tmp_path):
     from types import SimpleNamespace as NS
 
-    from md4paper import pdfio
-    from md4paper.extract import formulas as ex
+    from narani import pdfio
+    from narani.extract import formulas as ex
 
     box = NS(l=100.0, r=200.0, t=700.0, b=680.0, coord_origin="BOTTOMLEFT")
     item = NS(label="formula", text="", orig="a + b (1)", prov=[NS(page_no=2, bbox=box)])
@@ -222,7 +222,7 @@ def test_apply_keeps_manual_edit(ctrl):
 
 
 def _translate(ctrl, check=r"$$a + b \tag{1}$$"):
-    from md4paper.ir import GlossaryList
+    from narani.ir import GlossaryList
 
     fake = FakeProvider(complete_fn=lambda s, u: u, parse_fn=lambda s, u, sc: GlossaryList(entries=[]),
                         model="fake-tr")
@@ -275,7 +275,7 @@ def test_record_inline_line_is_not_tagged_twice():
 
 
 def test_guess_page_from_surrounding_words(monkeypatch, tmp_path):
-    from md4paper import pdfio
+    from narani import pdfio
 
     wd = WorkDir(tmp_path / "p.md4")
     monkeypatch.setattr(formula_fix, "source_pdf", lambda w: "x.pdf")
@@ -290,7 +290,7 @@ def test_guess_bbox_finds_old_crop_on_page(monkeypatch, tmp_path):
     cv2 = pytest.importorskip("cv2")
     import numpy as np
 
-    from md4paper import pdfio
+    from narani import pdfio
 
     page = np.full((300, 240), 255, np.uint8)  # 배율 1.5의 쪽 (160×200pt)
     cv2.putText(page, "E=mc2", (60, 150), cv2.FONT_HERSHEY_SIMPLEX, 1.0, 0, 2)
@@ -379,9 +379,9 @@ def test_apply_with_region_saves_new_crop(ictrl):
 
 def test_rekey_cache_uses_glossary_unit_hash():
     """용어가 나오는 유닛은 번역 캐시가 용어집 줄을 섞은 해시로 둔다 — gloss를 주면 그 해시로 옮긴다."""
-    from md4paper.ir import GlossaryEntry, GlossaryList
-    from md4paper.translate.apply import unit_hash
-    from md4paper.workdir import hash_text
+    from narani.ir import GlossaryEntry, GlossaryList
+    from narani.translate.apply import unit_hash
+    from narani.workdir import hash_text
 
     gl = GlossaryList(entries=[GlossaryEntry(term="encoder", korean="인코더", policy="translate")])
     doc = "# T\n\nThe encoder $$a$$\n"

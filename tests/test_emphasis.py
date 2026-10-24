@@ -2,8 +2,8 @@
 
 import pytest
 
-from md4paper.extract import emphasis as em
-from md4paper.extract.inline_math import font_style
+from narani.extract import emphasis as em
+from narani.extract.inline_math import font_style
 
 BO, IT = em.BOLD, em.ITALIC
 
@@ -118,7 +118,7 @@ def test_line_with_existing_asterisks_or_unknown_place_is_left_alone():
 
 
 def test_runin_detects_emphasized_heads_and_keeps_body_emphasis():
-    from md4paper.structure.runin import detect
+    from narani.structure.runin import detect
 
     assert detect("*3.2.1 Task Design.* Prior work on agents") == ("3.2.1", "Task Design", "Prior work on agents", True)
     assert detect("*Generation and state*. Generative stages use Claude")[1] == "Generation and state"
@@ -138,7 +138,7 @@ def test_runin_detects_emphasized_heads_and_keeps_body_emphasis():
 
 
 def test_narrative_citation_with_italic_et_al_is_linked():
-    from md4paper.cite.link import _NARRATIVE_CITE
+    from narani.cite.link import _NARRATIVE_CITE
 
     assert _NARRATIVE_CITE.search("as shown by Wei *et al.* (2021), prompts").group(0) == "Wei *et al.* (2021)"
 

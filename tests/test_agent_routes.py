@@ -16,9 +16,9 @@ from agent_support import Registry, make_wd, scripted_model, tool_returns  # noq
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from md4paper import config  # noqa: E402
-from md4paper.ui.agent import retrieval, routes, sessions  # noqa: E402
-from md4paper.ui.agent.agent import make_agent  # noqa: E402
+from narani import config  # noqa: E402
+from narani.ui.agent import retrieval, routes, sessions  # noqa: E402
+from narani.ui.agent.agent import make_agent  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -178,7 +178,7 @@ def _listed_token(msgs: list) -> str:
 
 def test_restart_reregisters_tokens_from_session(tmp_path):
     """서버 재시작(빈 등록부) 뒤에도 앞 턴에서 받은 token으로 승인 재개·읽기가 된다."""
-    from md4paper import notes
+    from narani import notes
 
     wd = make_wd(tmp_path / "ws")
     steps = [[("list_papers", {})],

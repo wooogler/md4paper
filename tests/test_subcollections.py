@@ -6,8 +6,8 @@
 
 import json
 
-from md4paper import library, projects, workdir
-from md4paper.workdir import WorkDir
+from narani import library, projects, workdir
+from narani.workdir import WorkDir
 
 
 def _wd(tmp_path, name, pids):

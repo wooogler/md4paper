@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from md4paper import config, i18n
-from md4paper.i18n import t
+from narani import config, i18n
+from narani.i18n import t
 
 
 def test_korean_screen_returns_source_text_unchanged():
@@ -58,10 +58,10 @@ def test_problems_flag_placeholder_mismatch(tmp_path, monkeypatch):
 
 
 def test_collect_and_sync_find_python_and_js_strings(tmp_path, monkeypatch):
-    pkg = tmp_path / "md4paper"
+    pkg = tmp_path / "narani"
     (pkg / "ui").mkdir(parents=True)
     (pkg / "ui" / "a.py").write_text(
-        'from md4paper.i18n import t\n'
+        'from narani.i18n import t\n'
         'x = t("저장했습니다")\n'
         'y = t("{n}편 번역", n=2)\n'
         'z = i18n.t(\'닫기\')\n'
@@ -69,7 +69,7 @@ def test_collect_and_sync_find_python_and_js_strings(tmp_path, monkeypatch):
         'JS = """<script>el.title = md4T(\'다시 시도\');</script>"""\n', encoding="utf-8")
     found = i18n.collect(pkg)
     assert set(found) == {"저장했습니다", "{n}편 번역", "닫기", "다시 시도"}
-    assert found["저장했습니다"] == ["md4paper/ui/a.py:2"]
+    assert found["저장했습니다"] == ["narani/ui/a.py:2"]
     monkeypatch.setattr(i18n, "LOCALES", tmp_path / "locales")
     (tmp_path / "locales").mkdir()
     (tmp_path / "locales" / "en.json").write_text(json.dumps({"닫기": "Close", "옛 문구": "Old"}), encoding="utf-8")
@@ -97,21 +97,21 @@ def test_html_marks_are_translated_escaped_and_collected(tmp_path):
     code = '<button title="⦃닫기 (Esc)⦄">⦃닫기⦄</button>'
     assert i18n.html(code) == '<button title="닫기 (Esc)">닫기</button>'
     config.set_section_value("ui", "language", "en")
-    import md4paper.i18n as m
+    import narani.i18n as m
     orig = m.catalog
     m.catalog = lambda lang=None: {"닫기 (Esc)": 'Close "Esc"', "닫기": "Close"}
     try:
         assert i18n.html(code) == '<button title="Close &quot;Esc&quot;">Close</button>'
     finally:
         m.catalog = orig
-    pkg = tmp_path / "md4paper"
+    pkg = tmp_path / "narani"
     pkg.mkdir()
     (pkg / "a.py").write_text('X = """<b>⦃굵게⦄</b>"""\n', encoding="utf-8")
-    assert i18n.collect(pkg) == {"굵게": ["md4paper/a.py:1"]}
+    assert i18n.collect(pkg) == {"굵게": ["narani/a.py:1"]}
 
 
 def test_collect_joins_implicitly_concatenated_literals(tmp_path):
-    pkg = tmp_path / "md4paper"
+    pkg = tmp_path / "narani"
     pkg.mkdir()
     (pkg / "a.py").write_text('x = t("첫 줄 "\n      "둘째 줄", n=1)\ny = N_("상수")\n', encoding="utf-8")
     assert set(i18n.collect(pkg)) == {"첫 줄 둘째 줄", "상수"}
@@ -121,7 +121,7 @@ def test_fill_drops_translations_with_wrong_placeholders(tmp_path, monkeypatch):
     """tools/i18n_catalog.py fill — 가짜 LLM으로: 자리표시가 틀린 번역은 버리고 빈 채로 둔다, 영어 참고를 함께 보낸다."""
     import importlib.util
 
-    from md4paper.llm import FakeProvider
+    from narani.llm import FakeProvider
 
     spec = importlib.util.spec_from_file_location("i18n_catalog", Path(__file__).parents[1] / "tools" / "i18n_catalog.py")
     tool = importlib.util.module_from_spec(spec)

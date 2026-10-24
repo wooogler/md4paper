@@ -2,9 +2,9 @@
 
 import re
 
-from md4paper.cite.parse import _split_entries, parse_references
-from md4paper.ir import ReferenceList, RefEntry
-from md4paper.llm import FakeProvider
+from narani.cite.parse import _split_entries, parse_references
+from narani.ir import ReferenceList, RefEntry
+from narani.llm import FakeProvider
 
 _ENTRY = re.compile(r"\[(\d+)\]\s+(Author \d+)\. (Title \d+)\. (Venue \d+), (\d{4})\.")
 

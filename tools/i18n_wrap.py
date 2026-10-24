@@ -1,8 +1,8 @@
-"""UI 문구를 `t()`로 감싸는 도우미 (§md4paper/i18n.py) — 파일 하나씩 옮길 때 기계적인 부분만.
+"""UI 문구를 `t()`로 감싸는 도우미 (§narani/i18n.py) — 파일 하나씩 옮길 때 기계적인 부분만.
 
-    uv run python tools/i18n_wrap.py src/md4paper/ui/home.py            # 감싸고 남은 것 목록
-    uv run python tools/i18n_wrap.py src/md4paper/ui/home.py --dry      # 바꿀 곳만 보기
-    uv run python tools/i18n_wrap.py src/md4paper/ui/app.py --lines 2700-3100 --funcs cap,section_title
+    uv run python tools/i18n_wrap.py src/narani/ui/home.py            # 감싸고 남은 것 목록
+    uv run python tools/i18n_wrap.py src/narani/ui/home.py --dry      # 바꿀 곳만 보기
+    uv run python tools/i18n_wrap.py src/narani/ui/app.py --lines 2700-3100 --funcs cap,section_title
 
 감싸는 것: 한글이 든 문자열(f-string 포함)이 화면에 나가는 자리에 있을 때 —
 - `ui.<label|button|notify|…>(…)`의 위치 인자, `.tooltip(…)`·`.set_text(…)`
@@ -234,15 +234,15 @@ def main(argv: list[str] | None = None) -> int:
         for s, e, new, n in clean:
             print(f"{n.lineno}: {new[:120]}")
     else:
-        if clean and not re.search(r"^from md4paper\.i18n import .*\bt\b", out, flags=re.M):
-            m = re.search(r"^from md4paper(\.\S+)? import .*$", out, flags=re.M)
+        if clean and not re.search(r"^from narani\.i18n import .*\bt\b", out, flags=re.M):
+            m = re.search(r"^from narani(\.\S+)? import .*$", out, flags=re.M)
             if m:
-                out = out[:m.start()] + "from md4paper.i18n import t\n" + out[m.start():]
-            else:  # md4paper import가 없으면 맨 위 import 묶음 뒤에 (from __future__보다 앞이면 안 된다)
+                out = out[:m.start()] + "from narani.i18n import t\n" + out[m.start():]
+            else:  # narani import가 없으면 맨 위 import 묶음 뒤에 (from __future__보다 앞이면 안 된다)
                 body = ast.parse(out).body
                 last = max((n.end_lineno for n in body if isinstance(n, (ast.Import, ast.ImportFrom))), default=0)
                 lines_out = out.splitlines(keepends=True)
-                out = "".join(lines_out[:last]) + "\nfrom md4paper.i18n import t\n" + "".join(lines_out[last:])
+                out = "".join(lines_out[:last]) + "\nfrom narani.i18n import t\n" + "".join(lines_out[last:])
         compile(out, str(a.file), "exec")
         a.file.write_text(out, encoding="utf-8")
     print(f"감쌈 {len(clean)}개" + (f" · 사람이 볼 f-string {len(skipped)}개" if skipped else ""))

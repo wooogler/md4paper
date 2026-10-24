@@ -31,18 +31,18 @@ from pydantic_ai.messages import (  # noqa: E402
 )
 from pydantic_ai.tools import ToolDenied  # noqa: E402
 
-from md4paper import config  # noqa: E402
-from md4paper.ui.agent import agent as agent_mod  # noqa: E402
-from md4paper.ui.agent import retrieval, routes, sessions  # noqa: E402
-from md4paper.ui.agent.agent import (  # noqa: E402
+from narani import config  # noqa: E402
+from narani.ui.agent import agent as agent_mod  # noqa: E402
+from narani.ui.agent import retrieval, routes, sessions  # noqa: E402
+from narani.ui.agent.agent import (  # noqa: E402
     DEFAULT_LIMITS,
     OLD_RESULT_NOTE,
     make_agent,
     run_turn,
     window_messages,
 )
-from md4paper.ui.agent.context import ScreenContext  # noqa: E402
-from md4paper.ui.agent.tools import Deps  # noqa: E402
+from narani.ui.agent.context import ScreenContext  # noqa: E402
+from narani.ui.agent.tools import Deps  # noqa: E402
 
 BIG = "B" * 2000     # 줄이기 기준(1500자)을 넘는 tool 결과
 

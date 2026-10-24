@@ -1,8 +1,8 @@
 """그림 페어링·리네임·뷰어별 플레이버 렌더 테스트."""
 
-from md4paper.assemble import figures
-from md4paper.ir import Flavor
-from md4paper.structure import captions
+from narani.assemble import figures
+from narani.ir import Flavor
+from narani.structure import captions
 
 # marker 실물과 유사: 이미지 뒤에 <span> 앵커가 붙은 캡션
 SAMPLE = [

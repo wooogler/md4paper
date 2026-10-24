@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from md4paper import pdfio
+from narani import pdfio
 
 
 @pytest.fixture

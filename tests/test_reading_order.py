@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from md4paper.extract.reading_order import repair_reading_order
+from narani.extract.reading_order import repair_reading_order
 
 pytest.importorskip("docling_core")
 
@@ -224,7 +224,7 @@ def test_row_major_grid_is_untouched():
 # --- 안전장치 -------------------------------------------------------------
 def test_multiset_mismatch_reverts_the_page(monkeypatch):
     """되돌린 뒤 글자가 달라지면 그 쪽을 통째로 원복한다."""
-    from md4paper.extract import reading_order as ro
+    from narani.extract import reading_order as ro
 
     d = _flipped_page()
     before = [r.cref for r in d.body.children]
@@ -266,7 +266,7 @@ def test_unrepaired_violation_is_reported_as_suspect(monkeypatch):
     front_matter의 '본문 뒤 블록 끌어올리기' 복구는 오직 이 목록을 보고 켜진다 —
     되돌린 쪽은 이미 정경 순서라 끌어올릴 것이 없기 때문이다.
     """
-    from md4paper.extract import reading_order as ro
+    from narani.extract import reading_order as ro
 
     d = _flipped_page()
     calls = iter(range(99))
@@ -292,7 +292,7 @@ def test_clean_paper_has_no_suspect_pages():
 
 # --- export 순서 기하 (문단 재결합 근거) ------------------------------------
 def test_export_geometry_reports_columns_and_full_width():
-    from md4paper.extract.reading_order import export_geometry
+    from narani.extract.reading_order import export_geometry
 
     d = _doc()
     _add(d, "TITLE OF THE PAPER", [(1, (60.0, 84.0, 550.0, 110.0), (0, 18))],
@@ -308,7 +308,7 @@ def test_export_geometry_reports_columns_and_full_width():
 
 def test_export_geometry_tracks_both_ends_of_a_column_spanning_item():
     """좌→우 단에 걸친 아이템은 시작(왼쪽)과 끝(오른쪽)을 따로 기록한다."""
-    from md4paper.extract.reading_order import export_geometry
+    from narani.extract.reading_order import export_geometry
 
     d = _doc()
     _add(d, "TITLE OF THE PAPER", [(1, (60.0, 84.0, 550.0, 110.0), (0, 18))],
@@ -322,7 +322,7 @@ def test_export_geometry_tracks_both_ends_of_a_column_spanning_item():
 
 def test_single_column_items_are_not_full_width():
     """1단 조판에서는 '전폭'이 뜻을 잃는다 — 전부 전폭으로 보면 문단 재결합이 통째로 막힌다."""
-    from md4paper.extract.reading_order import export_geometry
+    from narani.extract.reading_order import export_geometry
 
     d = _doc()
     _add(d, "TITLE OF THE PAPER", [(1, (60.0, 84.0, 550.0, 110.0), (0, 18))],

@@ -11,12 +11,12 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from md4paper import config, projects, workdir
-from md4paper.cli import cli
-from md4paper.ir import GlossaryEntry, GlossaryList
-from md4paper.translate import glossary
-from md4paper.ui import agent_panel, collection_glossary_dialog as cgd
-from md4paper.workdir import WorkDir
+from narani import config, projects, workdir
+from narani.cli import cli
+from narani.ir import GlossaryEntry, GlossaryList
+from narani.translate import glossary
+from narani.ui import agent_panel, collection_glossary_dialog as cgd
+from narani.workdir import WorkDir
 
 
 @pytest.fixture(autouse=True)
@@ -87,7 +87,7 @@ def test_load_overview_and_impact_summary(tmp_path):
 
 
 def test_dialog_entry_points_exist():
-    from md4paper.ui import batch_translate_dialog, home
+    from narani.ui import batch_translate_dialog, home
 
     assert callable(cgd.open_collection_glossary) and callable(batch_translate_dialog.open_batch_translate)
     src = inspect.getsource(home.build_home)
@@ -100,7 +100,7 @@ def test_dialog_entry_points_exist():
 
 def test_viewer_keeps_collection_rows_out_of_paper_glossary():
     """컬렉션 행은 읽기 전용 구역에만 — gloss_entries(= glossary.yaml로 통째로 저장)에 섞이면 첫 blur에 새어 든다."""
-    from md4paper.ui import app
+    from narani.ui import app
 
     src = inspect.getsource(app.build)
     assert 'coll_view: dict = {"pid": ctrl.collection_id(), "entries": ctrl.collection_glossary()}' in src

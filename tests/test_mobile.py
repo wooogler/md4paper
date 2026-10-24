@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("nicegui", reason="웹 UI 의존성(ui extra) 미설치")
 
-from md4paper.ui import mobile, sentpair  # noqa: E402
-from md4paper.workdir import WorkDir  # noqa: E402
+from narani.ui import mobile, sentpair  # noqa: E402
+from narani.workdir import WorkDir  # noqa: E402
 
 EN = """# Bespoke Bots
 
@@ -110,7 +110,7 @@ def test_cite_and_footnote_data_for_tap_sheet(tmp_path):
 
 def test_script_embeds_shared_sentence_pairing():
     """문장 짝 규칙은 뷰어와 같은 코드 — 두 화면이 갈라지지 않게 같은 문자열을 끼운다."""
-    from md4paper.ui.app import _ANNO_HTML
+    from narani.ui.app import _ANNO_HTML
 
     assert sentpair.JS in mobile._JS
     assert sentpair.JS in _ANNO_HTML
@@ -143,7 +143,7 @@ def test_large_image_is_shrunk(tmp_path):
 def test_cli_mobile_accepts_paper_folder(tmp_path):
     from click.testing import CliRunner
 
-    from md4paper.cli import cli
+    from narani.cli import cli
 
     a = _wd(tmp_path / "A", "a")  # tmp/A/a.md4 — 논문 폴더(tmp/A)를 넘겨도 찾는다
     b = _wd(tmp_path, "b", ko=None)

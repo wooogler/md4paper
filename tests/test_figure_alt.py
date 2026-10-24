@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from md4paper import figure_alt
-from md4paper.figure_alt import Alt, Fig, clean, pair
-from md4paper.workdir import WorkDir
+from narani import figure_alt
+from narani.figure_alt import Alt, Fig, clean, pair
+from narani.workdir import WorkDir
 
 pdfium = pytest.importorskip("pypdfium2")
 
@@ -214,7 +214,7 @@ def test_needs_locate_only_once_with_leftovers():
 
 
 def test_agent_rows_carry_figure_descriptions():
-    from md4paper.ui.agent import retrieval
+    from narani.ui.agent import retrieval
 
     chunks = retrieval.build_chunks("# A\n\n![Figure 1](images/figure-1.png)\n\nBody text.\n")
     retrieval.attach_figures(chunks, {"figure-1.png": "Two bar charts\nside by side."})
@@ -224,7 +224,7 @@ def test_agent_rows_carry_figure_descriptions():
 
 
 def test_fig_alts_js_escapes_script_end():
-    from md4paper.ui.app import fig_alts_js
+    from narani.ui.app import fig_alts_js
 
     js = fig_alts_js({"figure-1.png": "a </script> b"})
     assert "</script>" not in js and js.startswith("window.__mdFigAlts = ")

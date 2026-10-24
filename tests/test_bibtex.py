@@ -7,8 +7,8 @@
 import json
 from pathlib import Path
 
-from md4paper import bibtex, config, library, projects
-from md4paper.workdir import WorkDir
+from narani import bibtex, config, library, projects
+from narani.workdir import WorkDir
 
 _META = {"title": "Attention Is All You Need", "authors": ["Ashish Vaswani"], "year": 2017,
          "venue": "Advances in Neural Information Processing Systems"}

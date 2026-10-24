@@ -1,7 +1,7 @@
 """공백 복원 — Docling이 붙여 버린 줄을 원본 PDF 텍스트 레이어의 띄어쓰기로 되돌린다."""
 
-from md4paper.extract import spacing
-from md4paper.extract.spacing import Reference, respace_token, restore_spaces
+from narani.extract import spacing
+from narani.extract.spacing import Reference, respace_token, restore_spaces
 
 PAGE = (
     "2 Background and Related Work\r\n"

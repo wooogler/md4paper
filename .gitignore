@@ -8,7 +8,7 @@ __pycache__/
 
 # uv — uv.lock은 커밋한다(애플리케이션이므로 재현 가능한 설치를 위해 버전 관리 대상)
 
-# md4paper 작업 디렉토리 (PDF 옆에 생성)
+# narani 작업 디렉토리 (PDF 옆에 생성)
 *.md4/
 
 # 업로드 파일·변환 결과 (기본 작업 폴더)
@@ -20,6 +20,6 @@ config.toml
 # OS
 .DS_Store
 
-# 메모 편집기 번들 작업 폴더 (결과물만 src/md4paper/ui/assets/crepe/에 커밋)
+# 메모 편집기 번들 작업 폴더 (결과물만 src/narani/ui/assets/crepe/에 커밋)
 tools/bundle_crepe/node_modules/
 tools/bundle_crepe/package-lock.json

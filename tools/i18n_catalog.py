@@ -1,4 +1,4 @@
-"""화면 언어 카탈로그 관리 (§md4paper/i18n.py).
+"""화면 언어 카탈로그 관리 (§narani/i18n.py).
 
     uv run python tools/i18n_catalog.py sync en          # 코드의 t()/md4T() 문구를 en.json에 빈 항목으로 더한다
     uv run python tools/i18n_catalog.py sync en --prune  # 코드에서 사라진 항목도 지운다
@@ -15,7 +15,7 @@ import argparse
 import json
 import sys
 
-from md4paper import i18n
+from narani import i18n
 
 
 # 같은 낱말이 화면마다 다르게 옮겨지지 않게 — 자주 나오는 말의 번역어를 못 박는다 (영어 카탈로그와 같은 뜻)
@@ -38,7 +38,7 @@ def _fill(lang: str, batch: int = 40, model: str | None = None) -> int:
     """
     from pydantic import BaseModel
 
-    from md4paper import config, langs
+    from narani import config, langs
 
     class _Item(BaseModel):
         ko: str
@@ -58,12 +58,12 @@ def _fill(lang: str, batch: int = 40, model: str | None = None) -> int:
     prov = config.build_provider(None, model)
     name = langs.get(lang).english
     system = (
-        f"You translate the user-interface strings of md4paper, a desktop app for reading academic papers "
+        f"You translate the user-interface strings of Narani, a desktop app for reading academic papers "
         f"(PDF → Markdown, side-by-side translation, glossaries, notes, an AI agent), from Korean into {name}.\n"
         "Each item has the Korean source `ko` and, when available, an English translation `en` for reference. "
         f"Translate the Korean meaning into natural, concise {name} UI text (buttons short, tooltips plain).\n"
         "Rules: keep placeholders such as {n}, {name}, {cost:.4f} exactly (same names, same format spec); "
-        "keep product and file names (md4paper, GitHub, OpenAI, Obsidian, Notion, BibTeX, DOI, arXiv, LaTeX, PDF, "
+        "keep product and file names (Narani, GitHub, OpenAI, Obsidian, Notion, BibTeX, DOI, arXiv, LaTeX, PDF, "
         "references.bib, sections.yaml, notes/.trash/) and keyboard keys (Esc, Enter, Shift+Enter, ⌘/Ctrl+C) as is; "
         "keep leading/trailing spaces and punctuation like ' · ' or ' — ' at the same ends; keep Markdown ** and ` marks.\n"
         f"Use these terms consistently: {_TERMS.get(lang, '')}.\n"

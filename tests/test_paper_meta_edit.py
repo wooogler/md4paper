@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from md4paper import bibsource, bibtex, config, enrich, paper_meta, preview, projects
-from md4paper.ir import PaperMeta, StoredPaperMeta
-from md4paper.workdir import WorkDir, set_projects
+from narani import bibsource, bibtex, config, enrich, paper_meta, preview, projects
+from narani.ir import PaperMeta, StoredPaperMeta
+from narani.workdir import WorkDir, set_projects
 
 OLD = 1_000_000_000  # 폴더 수정시각을 과거로 박아 두고 변하지 않는지 본다
 
@@ -154,7 +154,7 @@ def test_enrich_skips_user_fields(tmp_path, monkeypatch):
 
 
 def test_boost_skips_user_fields_and_record_follows_user(tmp_path, monkeypatch):
-    from md4paper.cite import resolve as cite_resolve
+    from narani.cite import resolve as cite_resolve
 
     monkeypatch.setattr(enrich, "lookup", lambda *a, **k: {
         "title": "My Title", "year": 1999, "venue": "Online Venue", "doi": "", "source": "openalex"})
@@ -284,7 +284,7 @@ def test_rename_to_naming_moves_folder_and_cleans_old_copies(tmp_path):
     wd.meta_json.write_text(json.dumps({"source": str(pdf)}), encoding="utf-8")
     config.set_library_dir("en", str(tmp_path / "EN"))
     config.set_library_dir("pdf", str(tmp_path / "PDF"))
-    from md4paper import library
+    from narani import library
 
     library.export_paper(wd)
     assert (tmp_path / "EN" / "2412.01234v2.md").exists()

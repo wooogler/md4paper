@@ -1,6 +1,6 @@
-"""앱 아이콘(PNG) 생성기 — 결과물은 src/md4paper/ui/assets/icon.png로 커밋해 둔다.
+"""앱 아이콘(PNG) 생성기 — 결과물은 src/narani/ui/assets/icon.png로 커밋해 둔다.
 
-런처를 설치할 때(`md4paper app`) 이 PNG를 OS별 형식(.icns/.ico)으로 변환한다. 아이콘을 쓰는
+런처를 설치할 때(`narani app`) 이 PNG를 OS별 형식(.icns/.ico)으로 변환한다. 아이콘을 쓰는
 시점에 그리지 않고 미리 만들어 두는 이유는, 그리기가 시스템 폰트(한글 글리프)에 의존하기
 때문이다 — 사용자 컴퓨터마다 결과가 달라지면 안 된다.
 
@@ -20,7 +20,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 SIZE = 1024
 SS = 4  # 슈퍼샘플링 배율 — 크게 그린 뒤 줄여서 곡선 계단 현상을 없앤다
-OUT = Path(__file__).resolve().parents[1] / "src" / "md4paper" / "ui" / "assets" / "icon.png"
+OUT = Path(__file__).resolve().parents[1] / "src" / "narani" / "ui" / "assets" / "icon.png"
 
 TOP = (76, 154, 245)  # 배경 그라데이션 위 (#4C9AF5)
 BOTTOM = (27, 95, 203)  # 배경 그라데이션 아래 (#1B5FCB)
@@ -92,8 +92,8 @@ def main() -> int:
     icon.save(OUT)
     tmp = Path(tempfile.gettempdir())  # 작은 크기에서 뭉개지지 않는지 눈으로 확인하는 용도
     for px in (128, 64, 32):
-        icon.resize((px, px), Image.LANCZOS).save(tmp / f"md4paper-icon-{px}.png")
-    print(f"미리보기: {tmp}/md4paper-icon-{{128,64,32}}.png")
+        icon.resize((px, px), Image.LANCZOS).save(tmp / f"narani-icon-{px}.png")
+    print(f"미리보기: {tmp}/narani-icon-{{128,64,32}}.png")
     print(f"{OUT} ({icon.size[0]}px)")
     return 0
 
